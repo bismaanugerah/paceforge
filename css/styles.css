@@ -52,7 +52,31 @@ body {
   color: #fff;
   padding: 36px 0 44px;
 }
-.header-inner { text-align: center; }
+.header-inner { text-align: center; position: relative; }
+
+.auth-box {
+  position: absolute;
+  top: 0;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.auth-box .btn-link { color: #fff; opacity: 0.75; }
+.auth-box .btn-link:hover { opacity: 1; }
+.user-info { display: flex; align-items: center; gap: 10px; }
+.user-email { font-size: 0.85rem; opacity: 0.85; }
+.sync-status {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  font-style: italic;
+  opacity: 0.75;
+}
+.sync-status.is-error { color: #ff9c90; opacity: 1; font-style: normal; }
+
+@media (max-width: 640px) {
+  .auth-box { position: static; justify-content: center; margin-bottom: 14px; }
+}
 .brand {
   display: inline-flex;
   flex-direction: column;
@@ -65,6 +89,17 @@ body {
   font-size: 2.05rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+}
+.dummy-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #ffd98a;
+  background: rgba(255, 183, 3, 0.16);
+  border: 1px solid rgba(255, 183, 3, 0.4);
+  border-radius: 999px;
+  padding: 3px 10px;
 }
 .tagline {
   margin: 2px 0 0;
@@ -94,6 +129,19 @@ main.container { margin-top: -28px; padding-bottom: 60px; }
 }
 .section-desc { color: var(--color-text-muted); margin-top: -6px; line-height: 1.6; }
 
+/* ---------- Login gate ---------- */
+.gate-card { text-align: center; padding: 48px 28px; }
+.gate-card h1 { margin-top: 0; }
+.gate-card .section-desc { max-width: 440px; margin-left: auto; margin-right: auto; }
+.gate-actions { max-width: 320px; margin: 20px auto 0; }
+.dummy-note {
+  max-width: 480px;
+  margin: 16px auto 0;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
 /* ---------- Form ---------- */
 fieldset {
   border: none;
@@ -116,7 +164,7 @@ legend {
 .field-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 16px;
 }
 .field { flex: 1 1 220px; margin-bottom: 14px; display: flex; flex-direction: column; }
@@ -128,6 +176,13 @@ label {
   font-size: 0.88rem;
   letter-spacing: -0.005em;
   margin-bottom: 6px;
+}
+
+/* Reserve 2 lines of label height inside multi-column rows so short
+   one-line labels don't leave their input sitting higher than the
+   inputs next to a field with a longer, wrapped label. */
+.field-row .field > label {
+  min-height: 3.1em;
 }
 
 input[type="text"],
@@ -320,6 +375,7 @@ input[type="radio"]:focus-visible {
 .btn-large { width: 100%; padding: 15px 20px; font-size: 1.05rem; margin-top: 10px; }
 .btn-secondary { background: var(--color-accent-light); color: var(--color-accent); }
 .btn-ghost { background: transparent; color: var(--color-text-muted); border: 1px solid var(--color-border); }
+.btn-small { padding: 7px 14px; font-size: 0.82rem; }
 .btn:disabled { opacity: 0.6; cursor: wait; }
 
 /* ---------- AI enhancement ---------- */

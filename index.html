@@ -14,6 +14,13 @@
 
 <header class="site-header">
   <div class="container header-inner">
+    <div class="auth-box no-print" id="authBox">
+      <button data-action="login" class="btn btn-secondary btn-small">Login dengan Google</button>
+      <div id="userInfo" class="user-info" hidden>
+        <span id="userEmail" class="user-email"></span>
+        <button data-action="logout" class="btn-link">Logout</button>
+      </div>
+    </div>
     <div class="brand">
       <svg class="brand-logo" viewBox="0 -0.5 25.5 24.5" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PaceForge logo">
         <defs>
@@ -31,15 +38,27 @@
         </g>
       </svg>
       <span class="brand-name">PaceForge</span>
+      <span id="dummyBadge" class="dummy-badge" hidden>MODE DUMMY</span>
     </div>
     <p class="tagline">Tempa training plan lari-mu sendiri, sesuai jadwal dan targetmu.</p>
+    <p id="syncStatus" class="sync-status no-print" hidden></p>
   </div>
 </header>
 
 <main class="container">
 
+  <!-- ===================== GATE SECTION (login required) ===================== -->
+  <section id="gateSection" class="card gate-card">
+    <h1>Masuk untuk mulai</h1>
+    <p class="section-desc">Login dulu supaya training plan yang kamu buat tersimpan ke akunmu dan tidak hilang — bisa dibuka lagi dari device lain.</p>
+    <div class="gate-actions">
+      <button data-action="login" class="btn btn-primary btn-large">Login dengan Google</button>
+    </div>
+    <p id="dummyModeNote" class="dummy-note" hidden>🔧 Mode dummy: Supabase belum disambungkan. Tombol di atas mensimulasikan login (data tersimpan lokal di browser ini saja) supaya alur login-nya bisa dicoba dulu — belum akun Google sungguhan. Lihat README untuk sambungkan Supabase &amp; Google OAuth asli.</p>
+  </section>
+
   <!-- ===================== FORM SECTION ===================== -->
-  <section id="formSection" class="card form-card">
+  <section id="formSection" class="card form-card" hidden>
     <h1>Buat Training Plan Lari</h1>
     <p class="section-desc">Isi setting di bawah ini, PaceForge akan menyusun jadwal latihan mingguan lengkap dengan jarak dan pace untuk tiap sesi.</p>
 
@@ -86,12 +105,13 @@
         <legend>2. Kondisi Saat Ini</legend>
         <div class="field-row">
           <div class="field">
-            <label for="fitnessLevel">Level kebugaran</label>
+            <label for="fitnessLevel">Level kebugaran (pengalaman lari)</label>
             <select id="fitnessLevel" name="fitnessLevel" required>
-              <option value="beginner">Pemula (baru mulai lari rutin)</option>
-              <option value="intermediate" selected>Menengah (sudah rutin lari beberapa bulan)</option>
-              <option value="advanced">Lanjutan (sudah pernah ikut race / lari rutin lama)</option>
+              <option value="beginner">Pemula — belum pernah / baru bisa lari 5K tanpa henti</option>
+              <option value="intermediate" selected>Menengah — terbiasa lari 5-10K tanpa henti, rutin beberapa bulan terakhir</option>
+              <option value="advanced">Lanjutan — terbiasa lari 10K+ secara rutin, atau pernah ikut race sebelumnya</option>
             </select>
+            <p class="field-hint">Hanya dipakai sebagai perkiraan pace kalau kamu tidak isi target waktu finish atau waktu race terakhir di bawah.</p>
           </div>
           <div class="field">
             <label for="currentWeeklyKm">Rata-rata jarak lari per minggu saat ini (km)</label>
@@ -103,6 +123,16 @@
           </div>
         </div>
         <p class="field-hint">Dipakai supaya kenaikan jarak lari jauh di plan tidak melompat terlalu drastis dari kemampuanmu sekarang.</p>
+
+        <div class="field checkbox-field">
+          <label class="checkbox-option">
+            <input type="checkbox" id="conservativeMode" name="conservativeMode">
+            <span>
+              <span class="checkbox-option-title">Latihan lebih konservatif (ada cedera/nyeri yang perlu dijaga)</span>
+              <span class="checkbox-option-desc">Kalau dicentang, kenaikan volume mingguan, porsi speedwork, dan kenaikan jarak long run di plan ini sengaja diturunkan supaya lebih aman. Jelaskan detail cederanya di "Catatan Tambahan" di bawah biar catatan pelatih AI juga lebih spesifik.</span>
+            </span>
+          </label>
+        </div>
       </fieldset>
 
       <!-- Availability -->
@@ -127,11 +157,61 @@
           </div>
           <p class="field-hint" id="dayCountHint"></p>
         </div>
+
+        <div class="field" id="longRunDayField">
+          <label for="longRunDay">Hari untuk long run</label>
+          <select id="longRunDay" name="longRunDay"></select>
+          <p class="field-hint">Otomatis diisi dari hari latihan yang kamu pilih di atas — pilih mana yang paling pas buat lari jarak jauh (biasanya akhir pekan).</p>
+        </div>
+      </fieldset>
+
+      <!-- Recent race / time-trial result -->
+      <fieldset>
+        <legend>4. Waktu Race Terakhir (opsional)</legend>
+        <div class="field checkbox-field">
+          <label class="checkbox-option">
+            <input type="checkbox" id="hasRecentRace" name="hasRecentRace">
+            <span>
+              <span class="checkbox-option-title">Saya punya waktu race/time-trial terakhir</span>
+              <span class="checkbox-option-desc">Dipakai untuk memperkirakan pace &amp; waktu finish race targetmu (rumus Riegel), kalau kamu belum isi target waktu finish spesifik di bawah. Pilih race/lari terdekat jaraknya ke race targetmu — bukan harus 5K — supaya perkiraannya lebih akurat.</span>
+            </span>
+          </label>
+        </div>
+        <div class="field-row" id="recentRaceFields" hidden>
+          <div class="field">
+            <label for="recentRaceDistance">Jarak race tersebut</label>
+            <select id="recentRaceDistance" name="recentRaceDistance">
+              <option value="5">5K</option>
+              <option value="10">10K</option>
+              <option value="15">15K</option>
+              <option value="21.1">Half Marathon (21.1K)</option>
+              <option value="42.2">Full Marathon (42.2K)</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+          <div class="field field-small" id="recentRaceCustomField" hidden>
+            <label for="recentRaceCustomKm">Jarak custom (km)</label>
+            <input type="number" id="recentRaceCustomKm" min="1" max="200" step="0.1" placeholder="mis. 18">
+          </div>
+          <div class="field field-small">
+            <label for="recentRaceHours">Jam</label>
+            <input type="number" id="recentRaceHours" min="0" max="10" step="1" value="0">
+          </div>
+          <div class="field field-small">
+            <label for="recentRaceMinutes">Menit</label>
+            <input type="number" id="recentRaceMinutes" min="0" max="59" step="1" value="30">
+          </div>
+          <div class="field field-small">
+            <label for="recentRaceSeconds">Detik</label>
+            <input type="number" id="recentRaceSeconds" min="0" max="59" step="1" value="0">
+          </div>
+        </div>
+        <p class="field-hint" id="recentRaceHint">Kalau diisi dan kamu tidak set target waktu finish di bawah, PaceForge akan memperkirakan waktu finish &amp; pace latihanmu dari hasil race ini (pakai rumus prediksi race time Riegel).</p>
       </fieldset>
 
       <!-- Goal pace -->
       <fieldset>
-        <legend>4. Target Waktu Finish (opsional)</legend>
+        <legend>5. Target Waktu Finish (opsional)</legend>
         <div class="field checkbox-field">
           <label class="checkbox-option">
             <input type="checkbox" id="hasTargetTime" name="hasTargetTime">
@@ -155,17 +235,17 @@
             <input type="number" id="targetSeconds" min="0" max="59" step="1" value="0">
           </div>
         </div>
-        <p class="field-hint">Kalau tidak diisi, pace latihan akan diperkirakan otomatis berdasarkan level kebugaranmu.</p>
+        <p class="field-hint">Kalau tidak diisi, pace latihan akan dihitung dari estimasi waktu 5K di atas (kalau diisi), atau diperkirakan otomatis berdasarkan level kebugaranmu.</p>
       </fieldset>
 
       <!-- Extra context for AI coaching notes -->
       <fieldset>
-        <legend>5. Catatan Tambahan (opsional)</legend>
+        <legend>6. Catatan Tambahan (opsional)</legend>
         <div class="field">
           <label for="userNotes">Ada hal khusus yang perlu dipertimbangkan?</label>
           <textarea id="userNotes" name="userNotes" rows="3" placeholder="mis. lutut kadang nyeri saat long run, minggu depan jadwal kerja padat, lebih suka lari pagi, dll."></textarea>
         </div>
-        <p class="field-hint">Kalau diisi, catatan ini dipakai saat kamu klik "✨ Sempurnakan dengan AI" di halaman hasil untuk memberi catatan pelatih yang lebih personal. Jarak &amp; pace di jadwal tetap dari perhitungan rule-based di atas — AI tidak mengubah angkanya, hanya menambah catatan.</p>
+        <p class="field-hint">Kalau diisi, catatan ini otomatis dipakai AI untuk memberi catatan pelatih yang lebih personal di halaman hasil begitu plan-nya jadi. Jarak &amp; pace di jadwal tetap dari perhitungan rule-based di atas — AI tidak mengubah angkanya, hanya menambah catatan. Kalau kamu centang "latihan lebih konservatif" di bagian 2, ceritakan detail cedera/nyerinya di sini.</p>
       </fieldset>
 
       <div id="formError" class="form-error" role="alert" hidden></div>
@@ -212,6 +292,10 @@
   </div>
 </footer>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/auth.js"></script>
 <script src="js/planGenerator.js"></script>
 <script src="js/app.js"></script>
 </body>
