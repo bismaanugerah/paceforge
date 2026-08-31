@@ -13,7 +13,11 @@
  *   longestRecentRunKm: number,  (longest single run in the last ~3 months)
  *   daysPerWeek: number (3-6),
  *   preferredDays: number[]  (0=Sun ... 6=Sat, matches Date#getDay())
+ *   longRunDay: number | null  (0=Sun ... 6=Sat, must be one of preferredDays)
  *   targetTimeSec: number | null   (goal finish time in seconds, or null)
+ *   recentRaceTimeSec: number | null   (a recent race/time-trial result, or null)
+ *   recentRaceDistanceKm: number | null   (distance that result was run over)
+ *   conservativeMode: boolean   (dial back volume growth & speedwork for injury/pain)
  * }
  */
 
@@ -87,6 +91,24 @@ const PaceForgeGenerator = (() => {
     return date.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   }
 
+  // Total-duration formatter (h:mm:ss, or m:ss under an hour) — used for
+  // race/finish times, as opposed to formatPace() which is per-km pace.
+  function formatDuration(totalSec) {
+    const s = Math.max(0, Math.round(totalSec));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const rem = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
+    return `${m}:${String(rem).padStart(2, '0')}`;
+  }
+
+  // Riegel's race-time-prediction formula: predicts a finish time at
+  // `toKm` from a known finish time at `fromKm`. The 1.06 exponent is the
+  // standard endurance-fatigue factor used across most race predictors.
+  function predictRaceTime(timeSec, fromKm, toKm) {
+    return timeSec * Math.pow(toKm / fromKm, 1.06);
+  }
+
   function longRunShareForDays(daysPerWeek) {
     if (daysPerWeek <= 4) return 0.35;
     if (daysPerWeek === 5) return 0.28;
@@ -138,8 +160,8 @@ const PaceForgeGenerator = (() => {
   function generatePlan(settings) {
     const {
       raceDistanceKm, raceLabel, raceKey, raceDate,
-      fitnessLevel, currentWeeklyKm, longestRecentRunKm, daysPerWeek, preferredDays,
-      targetTimeSec,
+      fitnessLevel, currentWeeklyKm, longestRecentRunKm, daysPerWeek, preferredDays, longRunDay,
+      targetTimeSec, recentRaceTimeSec, recentRaceDistanceKm, conservativeMode,
     } = settings;
 
     const today = startOfDay(new Date());
@@ -154,6 +176,9 @@ const PaceForgeGenerator = (() => {
     let buildWeeks = Math.max(planWeeks - taperWeeks, 1);
 
     const warnings = [];
+    if (conservativeMode) {
+      warnings.push('Mode latihan konservatif aktif — kenaikan volume mingguan, porsi speedwork, dan kenaikan jarak long run di plan ini sengaja diturunkan untuk menjaga cedera/nyeri yang kamu tandai. Kalau nyeri berlanjut, konsultasikan ke dokter/fisioterapis olahraga.');
+    }
     if (weeksAvailable < profile.recWeeks) {
       warnings.push(`Waktu persiapanmu (${weeksAvailable} minggu) lebih pendek dari rekomendasi umum untuk ${raceLabel} (${profile.recWeeks} minggu). Plan ini dipadatkan — fokus jaga konsistensi dan hindari lompatan volume terlalu besar.`);
     }
@@ -162,10 +187,26 @@ const PaceForgeGenerator = (() => {
       warnings.push(`Kamu punya ${extraWeeks} minggu ekstra sebelum race. Plan detail di bawah mencakup ${planWeeks} minggu terakhir — sebelum itu, jaga jarak lari mingguan sekitar ${currentWeeklyKm} km agar tetap fit.`);
     }
 
-    // Goal pace (sec/km) either from user's target time or a level default.
-    const goalPaceSec = targetTimeSec
-      ? targetTimeSec / raceDistanceKm
-      : DEFAULT_GOAL_PACE_SEC[fitnessLevel];
+    // Goal pace (sec/km), in priority order:
+    //   1. Explicit target finish time, if the user set one.
+    //   2. A finish time predicted from a recent race/time-trial result at any
+    //      distance (Riegel formula) — the closer that distance is to the
+    //      target race, the more accurate the prediction.
+    //   3. A generic default per fitness level.
+    let goalPaceSec;
+    let goalPaceSource;
+    let predictedRaceTimeSec = null;
+    if (targetTimeSec) {
+      goalPaceSec = targetTimeSec / raceDistanceKm;
+      goalPaceSource = 'explicit';
+    } else if (recentRaceTimeSec && recentRaceDistanceKm) {
+      predictedRaceTimeSec = predictRaceTime(recentRaceTimeSec, recentRaceDistanceKm, raceDistanceKm);
+      goalPaceSec = predictedRaceTimeSec / raceDistanceKm;
+      goalPaceSource = 'recentRace';
+    } else {
+      goalPaceSec = DEFAULT_GOAL_PACE_SEC[fitnessLevel];
+      goalPaceSource = 'fitnessLevel';
+    }
 
     const paces = {};
     Object.keys(PACE_MULTIPLIERS).forEach(zone => {
@@ -183,8 +224,10 @@ const PaceForgeGenerator = (() => {
     // higher peak, matching how real plans scale: a flat 1.6x cap regardless of plan
     // length is what previously suppressed marathon peak long runs to ~20km instead
     // of the standard 29-32km range.
-    const WEEKLY_GROWTH_RATE = 1.08;
-    const growthMultiplier = clamp(Math.pow(WEEKLY_GROWTH_RATE, buildWeeks), 1.15, 3.2);
+    // In conservative mode (injury/pain flagged by the user) volume is grown
+    // more slowly and capped lower, on top of the ramp/jump guardrails below.
+    const WEEKLY_GROWTH_RATE = conservativeMode ? 1.05 : 1.08;
+    const growthMultiplier = clamp(Math.pow(WEEKLY_GROWTH_RATE, buildWeeks), 1.15, conservativeMode ? 2.2 : 3.2);
     const longRunShare = longRunShareForDays(daysPerWeek);
     let peakWeeklyKm = Math.max(currentWeeklyKm * growthMultiplier, currentWeeklyKm); // never plan below current base
 
@@ -208,8 +251,8 @@ const PaceForgeGenerator = (() => {
     // is bigger). The ramp base only ever grows (tracks the highest long run
     // scheduled so far) so a cutback week doesn't reset the allowance.
     let longRunRampBase = Math.max(longestRecentRunKm || 0, 2);
-    const MAX_LONG_RUN_JUMP_RATIO = 0.2;
-    const MIN_LONG_RUN_JUMP_KM = 1.5;
+    const MAX_LONG_RUN_JUMP_RATIO = conservativeMode ? 0.15 : 0.2;
+    const MIN_LONG_RUN_JUMP_KM = conservativeMode ? 1 : 1.5;
 
     // Taper factors applied to peakWeeklyKm, last entry = race week.
     const TAPER_FACTORS = { 1: [0.55], 2: [0.75, 0.5], 3: [0.75, 0.6, 0.4] };
@@ -267,6 +310,24 @@ const PaceForgeGenerator = (() => {
       // Map ordered template slots onto the chronologically-sorted preferred days.
       const slotDays = sortedPreferredDays.slice(0, daysPerWeek);
       const nonLongSlots = template.filter(t => t !== 'longRun' && t !== 'race');
+
+      // Which type lands on which day-of-week. Race week keeps its existing
+      // index-based mapping (race always on the last slot). Build/taper weeks
+      // instead pin the long run to the user's chosen long-run day — falling
+      // back to the last chronological slot if that day somehow isn't
+      // selected this week — and fill the remaining slots with the rest of
+      // the template, in order, on the other selected days.
+      const typeByDow = {};
+      if (isRaceWeek) {
+        slotDays.forEach((dow, idx) => { typeByDow[dow] = template[idx]; });
+      } else {
+        const longRunDow = slotDays.includes(longRunDay) ? longRunDay : slotDays[slotDays.length - 1];
+        const restTemplate = template.filter(t => t !== 'longRun');
+        let ri = 0;
+        slotDays.forEach(dow => {
+          typeByDow[dow] = dow === longRunDow ? 'longRun' : restTemplate[ri++];
+        });
+      }
       let longRunKmThisWeek = isRaceWeek ? 0 : Math.min(weekKm * longRunShare, peakLongRunKm);
       if (!isRaceWeek) {
         const maxSafeLongRun = longRunRampBase + Math.max(longRunRampBase * MAX_LONG_RUN_JUMP_RATIO, MIN_LONG_RUN_JUMP_KM);
@@ -278,10 +339,10 @@ const PaceForgeGenerator = (() => {
         actualPeakLongRunKm = Math.max(actualPeakLongRunKm, longRunKmThisWeek);
       }
       const remainingKm = weekKm - longRunKmThisWeek;
-      const speedShare = 0.20;
+      const speedShare = conservativeMode ? 0.12 : 0.20;
 
-      slotDays.forEach((dow, idx) => {
-        const type = template[idx];
+      slotDays.forEach((dow) => {
+        const type = typeByDow[dow];
         const dayObj = days.find(x => x.dow === dow);
         if (!dayObj) return;
 
@@ -342,6 +403,10 @@ const PaceForgeGenerator = (() => {
         peakWeeklyKm: Math.round(peakWeeklyKm * 10) / 10,
         peakLongRunKm: Math.round(actualPeakLongRunKm * 10) / 10,
         goalPaceSec, paces,
+        goalPaceSource,
+        recentRaceTimeSec: recentRaceTimeSec || null,
+        recentRaceDistanceKm: recentRaceDistanceKm || null,
+        predictedRaceTimeSec,
         planStart: firstMonday,
         weeksAvailable,
       },
@@ -358,5 +423,5 @@ const PaceForgeGenerator = (() => {
     return slots;
   }
 
-  return { generatePlan, formatPace, formatDate, TYPE_LABELS, DAY_NAMES };
+  return { generatePlan, formatPace, formatDate, formatDuration, predictRaceTime, TYPE_LABELS, DAY_NAMES };
 })();

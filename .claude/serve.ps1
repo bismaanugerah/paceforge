@@ -44,7 +44,7 @@ mempertimbangkan catatan tambahan pelari (cedera/jadwal/preferensi) jika ada.
 Balas HANYA JSON valid (tanpa code fence, tanpa teks lain), format PERSIS:
 {"intro": "maks 2 kalimat ringkasan strategi", "weeklyNotes": [{"week": N, "note": "maks 12 kata"}], "raceDayTips": "maks 3 kalimat: pacing, nutrisi, mental"}
 
-Hemat kata: weeklyNotes JANGAN mencakup semua minggu — HANYA minggu yang
+Hemat kata: weeklyNotes JANGAN mencakup semua minggu, HANYA minggu yang
 penting/beda (minggu pertama, tiap transisi fase, cutback, minggu puncak,
 tiap minggu taper, race week). Minggu rutin yang mirip minggu sebelumnya:
 lewati saja, jangan dipaksa dikomentari.
