@@ -508,6 +508,8 @@ input[type="radio"]:focus-visible {
 .pace-zone-table thead th { color: var(--color-text-muted); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
 .pace-zone-table tbody tr:not(:last-child) { border-bottom: 1px solid var(--color-border); }
 .pace-zone-table td:last-child { font-variant-numeric: tabular-nums; }
+.pace-zone-table .zone-name { display: flex; align-items: center; gap: 8px; }
+.pace-zone-table .zone-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .pace-zone-note { font-size: 0.78rem; color: var(--color-text-muted); margin: 10px 0 0; }
 
 /* Week blocks */
@@ -574,31 +576,6 @@ input[type="radio"]:focus-visible {
   letter-spacing: -0.005em;
   color: #fff;
 }
-
-/* Effort/exertion legend (low/moderate/high) shown above the plan, explains
-   the colors used in the workout-structure bars below. */
-.effort-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  margin: 0 0 6px;
-  padding: 12px 14px;
-  background: var(--color-bg);
-  border-radius: 10px;
-  font-size: 0.82rem;
-  color: var(--color-text-muted);
-}
-.effort-legend .effort-item { display: flex; align-items: center; gap: 6px; }
-.effort-legend .effort-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-}
-.effort-legend .exertion-low { background: var(--exertion-low); }
-.effort-legend .exertion-moderate { background: var(--exertion-moderate); }
-.effort-legend .exertion-high { background: var(--exertion-high); }
 
 /* Workout-structure bar: warm up / work / recovery / cool down, proportional
    to duration — a quick visual read of what an interval or tempo session

@@ -39,6 +39,19 @@
   };
   const EXERTION_HEX = { low: '#74b358', moderate: '#e0b93a', high: '#de5b4c' };
 
+  // Maps each VDOT pace zone (js/vdot.js's ZONE_ORDER) onto the closest
+  // matching session type, so the Zona Pace table's row dots reuse the same
+  // colors already meaning that intensity everywhere else in the plan
+  // (session-type badges, PDF) instead of introducing a separate palette
+  // just for this table.
+  const ZONE_TYPE_COLOR_KEY = {
+    easy: 'easy',
+    marathon: 'longRun',
+    threshold: 'tempo',
+    interval: 'interval',
+    repetition: 'repetition',
+  };
+
   // Section "5. Target Waktu Finish" is hidden in index.html for now (the
   // pace-target ramp needs it paired with a current-fitness baseline that
   // isn't wired up yet — see the comment there). Gate reading it here on
@@ -826,9 +839,10 @@
             ${ZONE_ORDER.map(key => {
               const [lo, hi] = ZONE_PCT_RANGES[key];
               const { fastSec, slowSec } = zones[key];
+              const color = TYPE_COLORS[ZONE_TYPE_COLOR_KEY[key]] || TYPE_COLORS.easy;
               return `
                 <tr>
-                  <td>${ZONE_LABELS[key]}</td>
+                  <td><span class="zone-name"><span class="zone-dot" style="background:${color}"></span>${ZONE_LABELS[key]}</span></td>
                   <td>${Math.round(lo * 100)}–${Math.round(hi * 100)}%</td>
                   <td><strong>${formatPaceRange(fastSec, slowSec)}</strong></td>
                 </tr>
@@ -1054,11 +1068,16 @@
           doc.text(pdfSafeText(zoneSourceLabel), margin, y + 12);
           y += 18;
 
+          // Zone name cells get a left inset (see columnStyles below) so
+          // didDrawCell can paint a small color dot into that gap — same
+          // color key (ZONE_TYPE_COLOR_KEY) used by the on-screen table's
+          // dots, keeping the two visually consistent.
+          const zoneRowOrder = ZONE_ORDER;
           doc.autoTable({
             startY: y,
             margin: { left: margin, right: margin },
             head: [['Zona', '% VO2max', 'Pace /km']],
-            body: ZONE_ORDER.map(key => {
+            body: zoneRowOrder.map(key => {
               const [lo, hi] = ZONE_PCT_RANGES[key];
               const { fastSec, slowSec } = zones[key];
               return [ZONE_LABELS[key], `${Math.round(lo * 100)}–${Math.round(hi * 100)}%`, formatPaceRange(fastSec, slowSec)];
@@ -1066,7 +1085,14 @@
             theme: 'grid',
             styles: { font: 'helvetica', fontSize: 8.3, cellPadding: 5, textColor: inkColor, lineColor: [225, 228, 236], lineWidth: 0.5 },
             headStyles: { fillColor: [245, 246, 248], textColor: mutedColor, fontStyle: 'bold', fontSize: 7.2 },
-            columnStyles: { 0: { cellWidth: 150 }, 1: { cellWidth: 100 }, 2: { cellWidth: 'auto' } },
+            columnStyles: { 0: { cellWidth: 150, cellPadding: { left: 16, top: 5, right: 5, bottom: 5 } }, 1: { cellWidth: 100 }, 2: { cellWidth: 'auto' } },
+            didDrawCell: (data) => {
+              if (data.section !== 'body' || data.column.index !== 0) return;
+              const key = zoneRowOrder[data.row.index];
+              const color = TYPE_HEX[ZONE_TYPE_COLOR_KEY[key]] || TYPE_HEX.easy;
+              doc.setFillColor(...hexToRgb(color));
+              doc.circle(data.cell.x + 8, data.cell.y + data.cell.height / 2, 3, 'F');
+            },
           });
           y = doc.lastAutoTable.finalY + 8;
 
@@ -1081,14 +1107,6 @@
           y += noteLines.length * 7.3 * 1.35 + 14;
         }
       }
-
-      // --- Exertion-color legend --------------------------------------------
-      y = drawInlineLegend(doc, margin, y, usableWidth, [
-        { color: EXERTION_HEX.low, text: 'Rendah — pace santai' },
-        { color: EXERTION_HEX.moderate, text: 'Sedang — mulai berat' },
-        { color: EXERTION_HEX.high, text: 'Tinggi — maksimal' },
-      ]);
-      y += 16;
 
       // --- Per-week tables --------------------------------------------------
       weeks.forEach((week) => {
@@ -1180,30 +1198,6 @@
       btn.disabled = false;
       btn.textContent = originalLabel;
     }
-  }
-
-  // Draws a row of colored-dot + label items, wrapping onto further rows
-  // when they don't fit `width`, and returns the y position just below the
-  // last row drawn — used for the pace/exertion legends in the PDF.
-  function drawInlineLegend(doc, x0, y0, width, items) {
-    const dotR = 3.2;
-    const gapAfterDot = 7;
-    const gapBetweenItems = 18;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.3);
-    let x = x0;
-    let y = y0;
-    items.forEach(({ color, text }) => {
-      const textWidth = doc.getTextWidth(text);
-      const itemWidth = dotR * 2 + gapAfterDot + textWidth;
-      if (x + itemWidth > x0 + width) { x = x0; y += 15; }
-      doc.setFillColor(...hexToRgb(color));
-      doc.circle(x + dotR, y - 3, dotR, 'F');
-      doc.setTextColor(70, 76, 92);
-      doc.text(text, x + dotR * 2 + gapAfterDot, y);
-      x += itemWidth + gapBetweenItems;
-    });
-    return y + 6;
   }
 
   // Draws the warm up / work / recovery / cool down bar for one structured
