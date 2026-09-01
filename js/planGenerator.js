@@ -60,6 +60,17 @@ const PaceForgeGenerator = (() => {
     advanced: 4 * 60 + 45,
   };
 
+  // Absolute floor for any pace this generator will ever schedule or treat
+  // as a goal, in sec/km — well under the current marathon world record
+  // pace (~2:50/km) and every shorter distance's, so it only ever catches a
+  // genuinely broken input (a bad explicit-target entry, a fat-fingered
+  // recent-race distance/time, a unit mixup) rather than a legitimately
+  // fast target. Without this, a bad input silently produces a physically
+  // impossible goal pace (e.g. sub-1-hour marathon) that the week-to-week
+  // ramp then faithfully — but nonsensically — chases, which is what makes
+  // that ramp look "extreme": the real defect is the target, not the ramp.
+  const MIN_PLAUSIBLE_PACE_SEC_PER_KM = 2 * 60; // 2:00 /km
+
   // Training-zone pace = goalPaceSec * multiplier. Ordered slow -> fast.
   const PACE_MULTIPLIERS = {
     recovery: 1.25,
@@ -318,6 +329,10 @@ const PaceForgeGenerator = (() => {
       goalPaceSec = DEFAULT_GOAL_PACE_SEC[fitnessLevel];
       goalPaceSource = 'fitnessLevel';
     }
+    if (goalPaceSec < MIN_PLAUSIBLE_PACE_SEC_PER_KM) {
+      warnings.push(`Target pace yang terhitung (${formatPace(goalPaceSec)}) secara fisik tidak mungkin dicapai manusia — kemungkinan ada input yang keliru (waktu/jarak target atau race terakhir). Dibatasi otomatis ke ${formatPace(MIN_PLAUSIBLE_PACE_SEC_PER_KM)} supaya plan tetap masuk akal; cek kembali inputmu.`);
+      goalPaceSec = MIN_PLAUSIBLE_PACE_SEC_PER_KM;
+    }
 
     const paces = {};
     Object.keys(PACE_MULTIPLIERS).forEach(zone => {
@@ -352,6 +367,9 @@ const PaceForgeGenerator = (() => {
       currentFitnessPaceSec = Math.max(goalPaceSec, DEFAULT_GOAL_PACE_SEC[fitnessLevel]);
     } else {
       currentFitnessPaceSec = goalPaceSec;
+    }
+    if (currentFitnessPaceSec < MIN_PLAUSIBLE_PACE_SEC_PER_KM) {
+      currentFitnessPaceSec = MIN_PLAUSIBLE_PACE_SEC_PER_KM;
     }
     const currentPaces = {};
     Object.keys(PACE_MULTIPLIERS).forEach(zone => {

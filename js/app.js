@@ -37,6 +37,17 @@
   };
   const EXERTION_HEX = { low: '#74b358', moderate: '#e0b93a', high: '#de5b4c' };
 
+  // Section "5. Target Waktu Finish" is hidden in index.html for now (the
+  // pace-target ramp needs it paired with a current-fitness baseline that
+  // isn't wired up yet — see the comment there). Gate reading it here on
+  // the same flag so a stale hasTargetTime.checked/targetTimeSec left over
+  // from a previously-saved plan (restoreFormFromSettings still populates
+  // those hidden fields for when the feature comes back) can never sneak
+  // an explicit target back into a freshly-generated plan while the field
+  // to see/fix it is invisible. Flip this back to true together with
+  // un-hiding that fieldset.
+  const TARGET_TIME_FEATURE_ENABLED = false;
+
   const form = document.getElementById('planForm');
   const submitBtn = form.querySelector('button[type="submit"]');
   const distanceModeToggle = document.getElementById('distanceModeToggle');
@@ -376,7 +387,7 @@
     }
 
     let targetTimeSec = null;
-    if (hasTargetTime.checked) {
+    if (TARGET_TIME_FEATURE_ENABLED && hasTargetTime.checked) {
       if (getTargetMode() === 'pace') {
         const paceMin = Number(targetPaceMinutesInput.value) || 0;
         const paceSec = Number(targetPaceSecondsInput.value) || 0;
@@ -778,11 +789,11 @@
       ` : ''}
     `;
 
-    // Pace legend
+    // Pace legend — only the "quality" zones (tempo/interval) where hitting
+    // a precise pace actually matters; recovery/easy/long run are
+    // effort-based (see the exertion legend below) so a specific number
+    // here isn't useful and was cluttering the summary.
     const legendZones = [
-      ['recovery', meta.paces.recovery],
-      ['easy', meta.paces.easy],
-      ['longRun', meta.paces.longRun],
       ['tempo', meta.paces.tempo],
       ['interval', meta.paces.interval],
     ];
@@ -933,8 +944,9 @@
       }
 
       // --- Legends (pace zones + exertion colors) -------------------------
+      // Only the "quality" zones (tempo/interval) — see the matching legend
+      // in the on-page summary above for why recovery/easy/long run are left out.
       const paceLegendItems = [
-        ['recovery', meta.paces.recovery], ['easy', meta.paces.easy], ['longRun', meta.paces.longRun],
         ['tempo', meta.paces.tempo], ['interval', meta.paces.interval],
       ];
       y = drawInlineLegend(doc, margin, y, usableWidth,
