@@ -325,6 +325,40 @@ const PaceForgeGenerator = (() => {
     });
     paces.goal = goalPaceSec;
 
+    // Current-fitness pace (sec/km at the goal race distance) — the pace
+    // targets scheduled week-to-week ramp from this toward goalPaceSec
+    // across the build block, instead of every session (week 1 through
+    // taper) sitting at the same goal-derived pace. Priority order:
+    //   1. A recent race/time-trial result, translated to the goal
+    //      distance (Riegel) — the direct "where the runner's fitness is
+    //      right now" signal, same formula used for goalPaceSource
+    //      'recentRace' above. When that's also *how* goalPaceSec itself
+    //      was derived (no separate explicit target), this comes out
+    //      identical to goalPaceSec, so the ramp is naturally flat — there's
+    //      no separate "current" data point in that case, just the one
+    //      estimate.
+    //   2. When the user set an explicit target instead (goal pace is
+    //      aspirational, e.g. a finish-time PR goal), but gave no recent
+    //      race to anchor "current" ability: fall back to the generic
+    //      per-fitness-level pace as a stand-in current-ability estimate,
+    //      clamped so it's never faster than the goal itself (a runner
+    //      can't be ramping "up" to a slower goal).
+    //   3. Otherwise goalPaceSec is already the generic fitness-level
+    //      estimate with nothing more specific to ramp from — flat.
+    let currentFitnessPaceSec;
+    if (recentRaceTimeSec && recentRaceDistanceKm) {
+      currentFitnessPaceSec = predictRaceTime(recentRaceTimeSec, recentRaceDistanceKm, raceDistanceKm) / raceDistanceKm;
+    } else if (goalPaceSource === 'explicit') {
+      currentFitnessPaceSec = Math.max(goalPaceSec, DEFAULT_GOAL_PACE_SEC[fitnessLevel]);
+    } else {
+      currentFitnessPaceSec = goalPaceSec;
+    }
+    const currentPaces = {};
+    Object.keys(PACE_MULTIPLIERS).forEach(zone => {
+      currentPaces[zone] = currentFitnessPaceSec * PACE_MULTIPLIERS[zone];
+    });
+    currentPaces.goal = currentFitnessPaceSec;
+
     // Peak weekly volume & peak long run.
     //
     // Peak weekly volume grows off the runner's *current* base at a safe compounding
@@ -409,8 +443,10 @@ const PaceForgeGenerator = (() => {
       let weekKm;
       let longRunTargetKm; // this week's long run before the ramp-safety clamp further below
       let phase;
+      let paceProgress; // 0 (currentFitnessPaceSec) -> 1 (goalPaceSec); see weekPaces below
       if (!isTaperWeek) {
         const progress = buildWeeks === 1 ? 1 : (w + 1) / buildWeeks;
+        paceProgress = progress;
         let linearKm = currentWeeklyKm + (peakWeeklyKm - currentWeeklyKm) * progress;
         // Long run gets its own direct progress-based ramp toward
         // peakLongRunKm — rather than being derived as weekKm*longRunShare
@@ -432,8 +468,26 @@ const PaceForgeGenerator = (() => {
         // "75% of peak long run" in the first taper week).
         longRunTargetKm = peakLongRunKm * factor;
         phase = isRaceWeek ? 'Race Week' : 'Taper';
+        // Taper is about cutting volume, not intensity/precision — by now
+        // the runner should be able to hold goal pace, so pace targets
+        // don't taper back down with the mileage.
+        paceProgress = 1;
       }
       weekKm = Math.round(weekKm * 10) / 10;
+
+      // This week's zone paces — interpolated between currentPaces (week 1
+      // of the build block) and paces/goalPaceSec (peak/race pace), by
+      // paceProgress above. Ramping this alongside the volume ramp is what
+      // makes early-week quality sessions (interval/tempo/long run) run at
+      // a pace the runner can actually hold right now, tightening toward
+      // race-goal pace as the block progresses — rather than every week's
+      // "Pace Target" column showing the same number from week 1 through
+      // race day.
+      const weekPaces = {};
+      Object.keys(PACE_MULTIPLIERS).forEach(zone => {
+        weekPaces[zone] = currentPaces[zone] + (paces[zone] - currentPaces[zone]) * paceProgress;
+      });
+      weekPaces.goal = currentFitnessPaceSec + (goalPaceSec - currentFitnessPaceSec) * paceProgress;
 
       // Build the list of workout slots for this week.
       const template = isRaceWeek
@@ -502,7 +556,7 @@ const PaceForgeGenerator = (() => {
           const isMSL = isFullMarathonPlan && phase === 'Peak';
           dayObj.type = 'longRun';
           dayObj.km = Math.round(longRunKmThisWeek * 2) / 2;
-          dayObj.paceSecPerKm = isMSL ? paces.goal : paces.longRun;
+          dayObj.paceSecPerKm = isMSL ? weekPaces.goal : weekPaces.longRun;
           dayObj.isMarathonSpecific = isMSL;
           if (dayObj.km > 0) dayObj.structure = buildSimpleStructure(dayObj.km);
           return;
@@ -510,7 +564,7 @@ const PaceForgeGenerator = (() => {
         if (type === 'shakeout') {
           dayObj.type = 'shakeout';
           dayObj.km = Math.max(2, Math.round(currentWeeklyKm * 0.08));
-          dayObj.paceSecPerKm = paces.easy;
+          dayObj.paceSecPerKm = weekPaces.easy;
           if (dayObj.km > 0) dayObj.structure = buildSimpleStructure(dayObj.km);
           return;
         }
@@ -540,7 +594,7 @@ const PaceForgeGenerator = (() => {
         }
         dayObj.type = type;
         dayObj.km = Math.max(0, Math.round(km * 2) / 2);
-        dayObj.paceSecPerKm = paces[type] ?? paces.easy;
+        dayObj.paceSecPerKm = weekPaces[type] ?? weekPaces.easy;
         if (type === 'interval' && dayObj.km > 0) {
           dayObj.structure = buildIntervalStructure(dayObj.km, fitnessLevel, conservativeMode);
         } else if (type === 'tempo' && dayObj.km > 0) {
@@ -575,6 +629,9 @@ const PaceForgeGenerator = (() => {
     }
     if (supportSessionCapped) {
       warnings.push(`Beberapa sesi lari santai/tempo/interval di jadwal ini dibatasi maksimal ${MAX_SUPPORT_SESSION_KM} km — dengan volume mingguanmu yang cukup tinggi, porsi proporsionalnya bisa lebih jauh dari itu, tapi sesi selain long run sebaiknya tidak sejauh itu. Total mingguan jadi sedikit lebih rendah dari target sebagai konsekuensinya — lebih aman begitu daripada memaksakan sesi harian yang kepanjangan.`);
+    }
+    if (Math.abs(currentFitnessPaceSec - goalPaceSec) >= 3) {
+      warnings.push(`Pace target di sesi tempo/interval/long run dimulai lebih santai (${formatPace(currentFitnessPaceSec)}, sesuai kemampuanmu saat ini) lalu naik bertahap tiap minggu menuju goal pace ${formatPace(goalPaceSec)} di puncak training block — bukan langsung dipatok di goal pace dari minggu 1.`);
     }
 
     return {
