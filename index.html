@@ -208,7 +208,12 @@
       </fieldset>
 
       <!-- Goal pace -->
-      <fieldset>
+      <!-- Temporarily hidden: the pace-target ramp needs a current-fitness
+           baseline (recent race) alongside a target time to make sense, and
+           that pairing isn't in place yet — re-enable once it is (drop
+           `hidden` here and renumber the legend + "6. Catatan Tambahan"
+           below back to 5/6). -->
+      <fieldset hidden>
         <legend>5. Target Waktu Finish (opsional)</legend>
         <div class="field checkbox-field">
           <label class="checkbox-option">
@@ -260,7 +265,7 @@
 
       <!-- Extra context for AI coaching notes -->
       <fieldset>
-        <legend>6. Catatan Tambahan (opsional)</legend>
+        <legend>5. Catatan Tambahan (opsional)</legend>
         <div class="field">
           <label for="userNotes">Ada hal khusus yang perlu dipertimbangkan?</label>
           <textarea id="userNotes" name="userNotes" rows="3" placeholder="mis. lutut kadang nyeri saat long run, minggu depan jadwal kerja padat, lebih suka lari pagi, dll."></textarea>
