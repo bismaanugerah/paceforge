@@ -92,12 +92,19 @@ const PaceForgeGenerator = (() => {
   const MIN_PLAUSIBLE_PACE_SEC_PER_KM = 2 * 60; // 2:00 /km
 
   // Training-zone pace = goalPaceSec * multiplier. Ordered slow -> fast.
+  // repetition sits faster than interval, mirroring Daniels' R-pace <
+  // I-pace < T-pace ordering (see js/vdot.js's ZONE_PCT_RANGES, which
+  // orders the same 5 zones by %VO2max) — these multipliers are a much
+  // rougher approximation than the VDOT table's (relative to *this race's*
+  // goal pace rather than %VO2max), but the ordering matters more than the
+  // exact value for how sessions feel relative to each other.
   const PACE_MULTIPLIERS = {
     recovery: 1.25,
     easy: 1.15,
     longRun: 1.10,
     tempo: 0.97,
     interval: 0.90,
+    repetition: 0.83,
   };
 
   function resolveRaceProfile(raceDistanceKm, raceKey) {
@@ -175,9 +182,11 @@ const PaceForgeGenerator = (() => {
       case 3: return { longRunShare: 0.50, slotWeights: [0.30, 0.20] };
       // ['easy', quality, 'easy']
       case 4: return { longRunShare: 0.35, slotWeights: [0.20, 0.20, 0.25] };
-      // ['easy', quality, 'easy', 'tempo']
+      // ['easy', quality, 'easy', quality2] — quality/quality2 are whichever
+      // workout qualityPick() rotates in that week (tempo/interval/
+      // repetition), not literally always tempo — see QUALITY_ROTATION.
       case 5: return { longRunShare: 0.35, slotWeights: [0.15, 0.15, 0.20, 0.15] };
-      // ['easy', quality, 'easy', 'tempo', 'recovery']
+      // ['easy', quality, 'easy', quality2, 'recovery']
       case 6: return { longRunShare: 0.27, slotWeights: [0.18, 0.12, 0.21, 0.12, 0.10] };
       // Fallback for anything outside the 3-6 range the form actually offers.
       default: return { longRunShare: 0.50, slotWeights: [0.50] };
@@ -202,7 +211,8 @@ const PaceForgeGenerator = (() => {
     return 'Peak';
   }
 
-  // How many "quality" (tempo/interval) sessions to schedule per week, by
+  // How many "quality" (tempo/interval/repetition — see QUALITY_TYPES)
+  // sessions to schedule per week, by
   // total running days/week — researched against real coaching guidance
   // rather than picked arbitrarily:
   //   - Jack Daniels' Running Formula: beginners get 1 quality day/week;
@@ -231,17 +241,70 @@ const PaceForgeGenerator = (() => {
   // Shared by workoutTemplate's day-assignment (prioritize these onto
   // weekdays — see below) and applyConservativeAdjustment (shift weight
   // off these onto easy/recovery slots).
-  const QUALITY_TYPES = new Set(['tempo', 'interval']);
+  const QUALITY_TYPES = new Set(['tempo', 'interval', 'repetition']);
+
+  // Which specific workout occupies a week's quality slot(s) — rotates
+  // through popular, well-documented variations on Daniels' T/I/R paces
+  // instead of the same flat tempo/interval shape every week:
+  //   - Interval (I pace): rep length varies — short (~400m), mid (~800m),
+  //     long (~1000-1200m). Varying rep distance week to week is standard
+  //     interval-training practice (e.g. Daniels' Running Formula's own
+  //     workout tables span 200m-1600m reps at I pace).
+  //   - Tempo (T pace): a classic continuous tempo block, or "cruise
+  //     intervals" — repeated ~1-1.6km T-pace segments with a short jog
+  //     recovery between each. Cruise intervals are Daniels' own preferred
+  //     way for most runners to accumulate T-pace volume, since holding
+  //     the pace in chunks is easier to sustain than one long continuous
+  //     block at the same total distance.
+  //   - Repetition (R pace): short (~200m) reps at faster-than-interval
+  //     pace with full recovery between each — builds speed and running
+  //     economy. Daniels recommends occasional R work year-round (not
+  //     only in a dedicated speed phase), so it's mixed into the rotation
+  //     rather than gated to a specific training phase.
+  // Cycles every 6 weeks. A week with 2 quality slots (5-6 days/week
+  // plans) reads its 2nd slot 3 positions ahead of the 1st in this same
+  // array (see qualityPick's slotOffset) — since every entry differs from
+  // the one 3 positions away, the two slots in any given week are always a
+  // different pick, without needing a separate rotation for each slot.
+  const QUALITY_ROTATION = [
+    { type: 'interval', variant: 'mid' },
+    { type: 'tempo', variant: 'continuous' },
+    { type: 'interval', variant: 'short' },
+    { type: 'tempo', variant: 'cruise' },
+    { type: 'interval', variant: 'long' },
+    { type: 'repetition', variant: null },
+  ];
+
+  // Resolves one quality slot's workout for a given week. slotOffset
+  // distinguishes a week's 1st quality slot (0) from its 2nd (half the
+  // rotation's length, see QUALITY_ROTATION above) so the two never land
+  // on the same pick. Conservative mode (injury/pain flagged by the user)
+  // skips repetition specifically — full-recovery, faster-than-interval
+  // reps carry more per-stride risk than steady tempo/interval effort —
+  // falling back to a continuous tempo session in its place instead of
+  // just being removed from the rotation (that fallback keeps every
+  // week's quality-session *count* exactly as qualitySessionsForDays
+  // expects; only the affected slot's own workout changes).
+  function qualityPick(weekIndex, slotOffset, conservativeMode) {
+    const idx = (weekIndex + slotOffset) % QUALITY_ROTATION.length;
+    const pick = QUALITY_ROTATION[idx];
+    if (conservativeMode && pick.type === 'repetition') {
+      return { type: 'tempo', variant: 'continuous' };
+    }
+    return pick;
+  }
 
   /** Ordered workout-type template for a given days-per-week, excluding long run
-   * which is always appended last (and mapped to the last selected day). */
-  function workoutTemplate(daysPerWeek, weekIndexInBuild) {
-    const alternateSpeed = weekIndexInBuild % 2 === 0 ? 'interval' : 'tempo';
+   * which is always appended last (and mapped to the last selected day).
+   * primaryType/secondaryType come from qualityPick(...).type — resolved
+   * once by the caller (generatePlan) and reused both here and when
+   * building that day's actual workout structure, so the two stay in sync. */
+  function workoutTemplate(daysPerWeek, primaryType, secondaryType) {
     switch (daysPerWeek) {
-      case 3: return ['easy', alternateSpeed, 'longRun']; // 1 quality session — see qualitySessionsForDays
-      case 4: return ['easy', alternateSpeed, 'easy', 'longRun']; // 1 quality session
-      case 5: return ['easy', alternateSpeed, 'easy', 'tempo', 'longRun']; // 2 quality sessions (alternateSpeed + tempo)
-      case 6: return ['easy', alternateSpeed, 'easy', 'tempo', 'recovery', 'longRun']; // 2 quality sessions — extra 6th day is recovery, not a 3rd hard day
+      case 3: return ['easy', primaryType, 'longRun']; // 1 quality session — see qualitySessionsForDays
+      case 4: return ['easy', primaryType, 'easy', 'longRun']; // 1 quality session
+      case 5: return ['easy', primaryType, 'easy', secondaryType, 'longRun']; // 2 quality sessions
+      case 6: return ['easy', primaryType, 'easy', secondaryType, 'recovery', 'longRun']; // 2 quality sessions — extra 6th day is recovery, not a 3rd hard day
       default: {
         // The form only offers 3-6 days/week, so this is unreachable today —
         // a safety net if that range ever changes. Built from the same rule
@@ -250,7 +313,7 @@ const PaceForgeGenerator = (() => {
         // theoretical 3-session cap for 7+ days/week onto an untested path).
         const qualityCount = Math.min(qualitySessionsForDays(daysPerWeek), 2);
         const easyCount = Math.max(daysPerWeek - qualityCount - 1, 0);
-        const qualitySlots = qualityCount >= 2 ? [alternateSpeed, 'tempo'] : [alternateSpeed];
+        const qualitySlots = qualityCount >= 2 ? [primaryType, secondaryType] : [primaryType];
         return [...Array(easyCount).fill('easy'), ...qualitySlots, 'longRun'];
       }
     }
@@ -259,7 +322,7 @@ const PaceForgeGenerator = (() => {
   // Conservative mode (injury/pain flagged by the user) dials back
   // speedwork same as it always has, just applied to the new weighted
   // split instead of the old flat speedShare formula: shift ~35% of each
-  // quality (tempo/interval) slot's weight over to the easy/recovery
+  // quality (tempo/interval/repetition) slot's weight over to the easy/recovery
   // slots, in the same order/shape as `types` (which must be the
   // non-long-run template slots, e.g. restTemplate below).
   function applyConservativeAdjustment(types, weights) {
@@ -282,42 +345,93 @@ const PaceForgeGenerator = (() => {
   // expressed in distance (km) — not time — so the bar's segment widths line
   // up with the "Jarak" column already shown for that day: a continuous run
   // (easy/recovery/long run/shakeout) is one solid low-exertion block, while
-  // interval/tempo sessions break down into warm up + work/recovery + cool
-  // down, derived from that day's own computed distance. Purely additive for
-  // the UI's workout-structure bar; day.km and day.paceSecPerKm (used for
-  // weekly totals) are untouched.
-  const REP_DISTANCE_KM = { beginner: 0.4, intermediate: 0.8, advanced: 1.0 };
-  const REP_RECOVERY_KM = { beginner: 0.3, intermediate: 0.4, advanced: 0.4 };
-
+  // interval/cruise-tempo/repetition sessions break down into warm up +
+  // work/recovery reps + cool down, derived from that day's own computed
+  // distance. Purely additive for the UI's workout-structure bar; day.km and
+  // day.paceSecPerKm (used for weekly totals) are untouched.
   function buildSimpleStructure(sessionKm) {
     return { kind: 'simple', km: sessionKm, exertion: 'low' };
   }
 
-  function buildIntervalStructure(sessionKm, fitnessLevel, conservativeMode) {
-    const repKm = REP_DISTANCE_KM[fitnessLevel] || REP_DISTANCE_KM.intermediate;
-    const recoveryKm = REP_RECOVERY_KM[fitnessLevel] || REP_RECOVERY_KM.intermediate;
-    const warmupKm = clamp(sessionKm * 0.2, 1, 2.5);
-    const cooldownKm = clamp(sessionKm * 0.15, 1, 2);
+  // Shared builder behind every "warm up -> N reps (work + recovery) -> cool
+  // down" workout — real intervals, cruise-style tempo, and repetition all
+  // have this exact shape, just with different rep/recovery distances and
+  // effort (see INTERVAL_VARIANT_PROFILES / TEMPO_CRUISE_PROFILE /
+  // REPETITION_PROFILE below). `profile` supplies repKm/recoveryKm/minReps/
+  // maxReps/workExertion plus the warmup/cooldown sizing (as a fraction of
+  // sessionKm, clamped to a sensible absolute range).
+  function buildRepsStructure(sessionKm, profile) {
+    const { repKm, recoveryKm, minReps, maxReps, workExertion, warmupFrac, warmupMin, warmupMax, cooldownFrac, cooldownMin, cooldownMax } = profile;
+    const warmupKm = clamp(sessionKm * warmupFrac, warmupMin, warmupMax);
+    const cooldownKm = clamp(sessionKm * cooldownFrac, cooldownMin, cooldownMax);
     const workoutKm = Math.max(sessionKm - warmupKm - cooldownKm, repKm + recoveryKm);
-    const reps = clamp(Math.round(workoutKm / (repKm + recoveryKm)), 3, 8);
-    const workExertion = conservativeMode ? 'moderate' : (fitnessLevel === 'beginner' ? 'moderate' : 'high');
-    return {
-      kind: 'interval',
-      warmupKm,
-      cooldownKm,
-      reps,
-      workKm: repKm,
-      workExertion,
-      recoveryKm,
-    };
+    const reps = clamp(Math.round(workoutKm / (repKm + recoveryKm)), minReps, maxReps);
+    return { kind: 'interval', warmupKm, cooldownKm, reps, workKm: repKm, workExertion, recoveryKm };
   }
 
-  function buildTempoStructure(sessionKm) {
+  // Interval (I-pace) rep-distance variants — see QUALITY_ROTATION above for
+  // why/when each one gets picked. repKm/recoveryKm approximate common
+  // track-workout distances; minReps/maxReps keep the rep count realistic
+  // for that distance (more short reps fit in a session than long ones).
+  const INTERVAL_VARIANT_PROFILES = {
+    short: { repKm: 0.4, recoveryKm: 0.25, minReps: 5, maxReps: 12 }, // ~400m
+    mid:   { repKm: 0.8, recoveryKm: 0.4,  minReps: 4, maxReps: 8 },  // ~800m
+    long:  { repKm: 1.2, recoveryKm: 0.5,  minReps: 3, maxReps: 6 },  // ~1000-1200m
+  };
+
+  function buildIntervalStructure(sessionKm, fitnessLevel, conservativeMode, variant) {
+    const repProfile = INTERVAL_VARIANT_PROFILES[variant] || INTERVAL_VARIANT_PROFILES.mid;
+    const workExertion = conservativeMode ? 'moderate' : (fitnessLevel === 'beginner' ? 'moderate' : 'high');
+    return buildRepsStructure(sessionKm, {
+      ...repProfile, workExertion,
+      warmupFrac: 0.2, warmupMin: 1, warmupMax: 2.5,
+      cooldownFrac: 0.15, cooldownMin: 1, cooldownMax: 2,
+    });
+  }
+
+  // Cruise intervals: ~1 mile (1.6km) T-pace segments with a short jog
+  // recovery between — Daniels' own preferred way to accumulate T-pace
+  // volume for most runners (see QUALITY_ROTATION above).
+  const TEMPO_CRUISE_PROFILE = { repKm: 1.6, recoveryKm: 0.3, minReps: 2, maxReps: 4 };
+
+  function buildTempoStructure(sessionKm, variant) {
+    if (variant === 'cruise') {
+      return buildRepsStructure(sessionKm, {
+        ...TEMPO_CRUISE_PROFILE, workExertion: 'moderate',
+        warmupFrac: 0.2, warmupMin: 1, warmupMax: 2,
+        cooldownFrac: 0.15, cooldownMin: 1, cooldownMax: 1.5,
+      });
+    }
     const warmupKm = clamp(sessionKm * 0.25, 1, 2);
     const cooldownKm = clamp(sessionKm * 0.2, 1, 1.5);
     const tempoKm = Math.max(sessionKm - warmupKm - cooldownKm, 1);
     return { kind: 'tempo', warmupKm, cooldownKm, tempoKm };
   }
+
+  // Repetition (R-pace): short (~200m) reps with generous, full recovery —
+  // speed/running-economy work, always high-exertion per rep regardless of
+  // fitness level or conservative mode (conservative mode instead skips
+  // repetition entirely — see qualityPick above — rather than watering this
+  // down, since a slow 200m isn't really repetition work any more).
+  const REPETITION_PROFILE = { repKm: 0.2, recoveryKm: 0.3, minReps: 4, maxReps: 10 };
+
+  // Kept deliberately short overall (see MAX_REPETITION_SESSION_KM below) —
+  // real repetition sessions are brief-but-intense, not a distance workout.
+  function buildRepetitionStructure(sessionKm) {
+    return buildRepsStructure(sessionKm, {
+      ...REPETITION_PROFILE, workExertion: 'high',
+      warmupFrac: 0.35, warmupMin: 1, warmupMax: 1.5,
+      cooldownFrac: 0.25, cooldownMin: 0.5, cooldownMax: 1,
+    });
+  }
+
+  // Absolute ceiling for a repetition session specifically — tighter than
+  // MAX_SUPPORT_SESSION_KM (which still applies to every other non-long-run
+  // session type, tempo/interval included): real repetition workouts are
+  // short bursts with lots of standing/jogging recovery, not a distance
+  // session, so letting one scale up like a tempo run would misrepresent
+  // what the workout actually is.
+  const MAX_REPETITION_SESSION_KM = 8;
 
   const TYPE_LABELS = {
     recovery: 'Lari Pemulihan',
@@ -325,6 +439,7 @@ const PaceForgeGenerator = (() => {
     longRun: 'Lari Jarak Jauh',
     tempo: 'Tempo Run',
     interval: 'Interval / Speedwork',
+    repetition: 'Repetition',
     shakeout: 'Lari Ringan (Shakeout)',
     rest: 'Istirahat',
     race: 'RACE DAY! 🏁',
@@ -607,10 +722,18 @@ const PaceForgeGenerator = (() => {
       });
       weekPaces.goal = currentFitnessPaceSec + (goalPaceSec - currentFitnessPaceSec) * paceProgress;
 
+      // Which specific workout (type + variant) fills this week's 1st/2nd
+      // quality slot — resolved once here so workoutTemplate (deciding
+      // *where* each type lands) and the per-day structure builder further
+      // below (deciding *what shape* that type's session takes) always
+      // agree, instead of picking the rotation twice and risking drift.
+      const qualityPrimary = qualityPick(w, 0, conservativeMode);
+      const qualitySecondary = qualityPick(w, 3, conservativeMode);
+
       // Build the list of workout slots for this week.
       const template = isRaceWeek
         ? buildRaceWeekTemplate(daysPerWeek)
-        : workoutTemplate(daysPerWeek, w);
+        : workoutTemplate(daysPerWeek, qualityPrimary.type, qualitySecondary.type);
 
       const days = [];
       for (let d = 0; d < 7; d++) {
@@ -736,20 +859,33 @@ const PaceForgeGenerator = (() => {
         //      match — so clamp against the *actual* long run distance this
         //      week too.
         //   2. Clamp at MAX_SUPPORT_SESSION_KM regardless, as a final
-        //      absolute backstop.
+        //      absolute backstop (tighter for repetition specifically —
+        //      see MAX_REPETITION_SESSION_KM).
+        const sessionCap = type === 'repetition' ? MAX_REPETITION_SESSION_KM : MAX_SUPPORT_SESSION_KM;
         let km = weekKm * (weightByDow[dow] ?? 0);
         if (longRunKmThisWeek > 0) km = Math.min(km, longRunKmThisWeek * 0.95);
-        if (km > MAX_SUPPORT_SESSION_KM) {
-          km = MAX_SUPPORT_SESSION_KM;
+        if (km > sessionCap) {
+          km = sessionCap;
           supportSessionCapped = true;
         }
         dayObj.type = type;
         dayObj.km = Math.max(0, Math.round(km * 2) / 2);
         dayObj.paceSecPerKm = weekPaces[type] ?? weekPaces.easy;
+        // qualityPrimary/qualitySecondary (resolved once above, alongside
+        // this week's template) tell us which variant this specific
+        // interval/tempo day should build as — whichever of the two picks
+        // actually matches this slot's type (they're never both the same
+        // type in one week, see QUALITY_ROTATION's comment above).
         if (type === 'interval' && dayObj.km > 0) {
-          dayObj.structure = buildIntervalStructure(dayObj.km, fitnessLevel, conservativeMode);
+          const variant = (qualityPrimary.type === 'interval' ? qualityPrimary : qualitySecondary).variant;
+          dayObj.workoutVariant = variant;
+          dayObj.structure = buildIntervalStructure(dayObj.km, fitnessLevel, conservativeMode, variant);
         } else if (type === 'tempo' && dayObj.km > 0) {
-          dayObj.structure = buildTempoStructure(dayObj.km);
+          const variant = (qualityPrimary.type === 'tempo' ? qualityPrimary : qualitySecondary).variant;
+          dayObj.workoutVariant = variant;
+          dayObj.structure = buildTempoStructure(dayObj.km, variant);
+        } else if (type === 'repetition' && dayObj.km > 0) {
+          dayObj.structure = buildRepetitionStructure(dayObj.km);
         } else if (dayObj.km > 0) {
           dayObj.structure = buildSimpleStructure(dayObj.km);
         }
@@ -779,7 +915,7 @@ const PaceForgeGenerator = (() => {
       warnings.push(`Long run puncak di jadwal ini (~${Math.round(actualPeakLongRunKm * 10) / 10} km) sengaja ditahan di bawah target ${Math.round(peakLongRunKm)} km, karena lari terjauhmu saat ini baru ${longestRecentRunKm} km — kenaikan jarak long run dinaikkan bertahap per minggu (maks ~20%) supaya aman dari cedera. Kalau waktu persiapanmu masih cukup panjang, ini normal dan long run akan terus naik mendekati race day.`);
     }
     if (supportSessionCapped) {
-      warnings.push(`Beberapa sesi lari santai/tempo/interval di jadwal ini dibatasi maksimal ${MAX_SUPPORT_SESSION_KM} km — dengan volume mingguanmu yang cukup tinggi, porsi proporsionalnya bisa lebih jauh dari itu, tapi sesi selain long run sebaiknya tidak sejauh itu. Total mingguan jadi sedikit lebih rendah dari target sebagai konsekuensinya — lebih aman begitu daripada memaksakan sesi harian yang kepanjangan.`);
+      warnings.push(`Beberapa sesi lari santai/tempo/interval/repetition di jadwal ini dibatasi maksimal ${MAX_SUPPORT_SESSION_KM} km (repetition: ${MAX_REPETITION_SESSION_KM} km) — dengan volume mingguanmu yang cukup tinggi, porsi proporsionalnya bisa lebih jauh dari itu, tapi sesi selain long run sebaiknya tidak sejauh itu. Total mingguan jadi sedikit lebih rendah dari target sebagai konsekuensinya — lebih aman begitu daripada memaksakan sesi harian yang kepanjangan.`);
     }
     if (Math.abs(currentFitnessPaceSec - goalPaceSec) >= 3) {
       warnings.push(`Pace target di sesi tempo/interval/long run dimulai lebih santai (${formatPace(currentFitnessPaceSec)}, sesuai kemampuanmu saat ini) lalu naik bertahap tiap minggu menuju goal pace ${formatPace(goalPaceSec)} di puncak training block — bukan langsung dipatok di goal pace dari minggu 1.`);
@@ -818,6 +954,7 @@ const PaceForgeGenerator = (() => {
     // after applying an AI-suggested distance adjustment (see
     // applyAiAdjustments), and clamp against the same absolute ceiling
     // this file itself enforces, without duplicating either.
-    buildSimpleStructure, buildIntervalStructure, buildTempoStructure, MAX_SUPPORT_SESSION_KM,
+    buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure,
+    MAX_SUPPORT_SESSION_KM, MAX_REPETITION_SESSION_KM,
   };
 })();

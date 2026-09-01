@@ -22,18 +22,19 @@ rule-based: tiap minggu berisi fase, total km, dan daftar sesi lari (hari
 
 Tugasmu:
 1. Tinjau apakah ada sesi individual berjenis "easy", "recovery", "tempo",
-   atau "interval" SAJA (JANGAN PERNAH longRun/race/shakeout) yang jaraknya
-   terasa tidak realistis untuk jenis sesinya (mis. easy run yang
-   kepanjangan dibanding long run minggu itu, atau tempo run yang mustahil
-   dijaga terus-menerus di pace tempo). Kalau nemu, sarankan lewat field
-   "adjustments" (PALING BANYAK 5, tiap saran maksimal sekitar ±20% dari
-   jarak aslinya). Kalau semua sesi sudah masuk akal, "adjustments" cukup
-   array kosong — JANGAN dipaksakan cari-cari masalah yang tidak ada.
+   "interval", atau "repetition" SAJA (JANGAN PERNAH longRun/race/shakeout)
+   yang jaraknya terasa tidak realistis untuk jenis sesinya (mis. easy run
+   yang kepanjangan dibanding long run minggu itu, tempo run yang mustahil
+   dijaga terus-menerus di pace tempo, atau repetition run yang kepanjangan
+   untuk sesi sprint-pendek-recovery-penuh). Kalau nemu, sarankan lewat
+   field "adjustments" (PALING BANYAK 5, tiap saran maksimal sekitar ±20%
+   dari jarak aslinya). Kalau semua sesi sudah masuk akal, "adjustments"
+   cukup array kosong — JANGAN dipaksakan cari-cari masalah yang tidak ada.
 2. Tambahkan catatan pelatih yang personal & actionable, mempertimbangkan
    catatan tambahan pelari (cedera/jadwal/preferensi) jika ada.
 
 Balas HANYA JSON valid (tanpa code fence, tanpa teks lain), format PERSIS:
-{"adjustments": [{"week": N, "dow": 0-6, "type": "easy|recovery|tempo|interval", "suggestedKm": X, "reason": "maks 12 kata"}], "intro": "maks 2 kalimat ringkasan strategi", "weeklyNotes": [{"week": N, "note": "maks 12 kata"}], "raceDayTips": "maks 3 kalimat: pacing, nutrisi, mental"}
+{"adjustments": [{"week": N, "dow": 0-6, "type": "easy|recovery|tempo|interval|repetition", "suggestedKm": X, "reason": "maks 12 kata"}], "intro": "maks 2 kalimat ringkasan strategi", "weeklyNotes": [{"week": N, "note": "maks 12 kata"}], "raceDayTips": "maks 3 kalimat: pacing, nutrisi, mental"}
 
 Hemat kata: weeklyNotes JANGAN mencakup semua minggu, HANYA minggu yang
 penting/beda (minggu pertama, tiap transisi fase, cutback, minggu puncak,

@@ -16,6 +16,7 @@
     longRun: 'var(--type-longrun)',
     tempo: 'var(--type-tempo)',
     interval: 'var(--type-interval)',
+    repetition: 'var(--type-repetition)',
     shakeout: 'var(--type-easy)',
     rest: 'var(--type-rest)',
     race: 'var(--type-race)',
@@ -31,6 +32,7 @@
     longRun: '#3aa98c',
     tempo: '#d9a53a',
     interval: '#d97a4f',
+    repetition: '#d9455a',
     shakeout: '#74b358',
     rest: '#8b93a3',
     race: '#6366f1',
@@ -1237,19 +1239,20 @@
   // still refuses to touch those). MAX_AI_ADJUSTMENTS caps how many
   // sessions a single review can touch, regardless of how many Claude
   // returns.
-  const AI_ADJUSTABLE_TYPES = new Set(['easy', 'recovery', 'tempo', 'interval']);
+  const AI_ADJUSTABLE_TYPES = new Set(['easy', 'recovery', 'tempo', 'interval', 'repetition']);
   const MAX_AI_ADJUSTMENTS = 5;
 
   // Applies Claude's suggested per-day distance adjustments to an
   // already-generated rule-based plan, IN PLACE. Claude's numbers are
   // advisory only — never trusted outright: at most MAX_AI_ADJUSTMENTS
   // sessions, never long run/race/shakeout, and every survivor clamped to
-  // within ~20% of its original rule-based distance and to
-  // PaceForgeGenerator.MAX_SUPPORT_SESSION_KM (the same absolute ceiling
-  // the generator itself enforces) either way.
+  // within ~20% of its original rule-based distance and to the same
+  // absolute ceiling the generator itself enforces for that type
+  // (PaceForgeGenerator.MAX_REPETITION_SESSION_KM for repetition,
+  // MAX_SUPPORT_SESSION_KM for everything else) either way.
   function applyAiAdjustments(plan, adjustments) {
     if (!Array.isArray(adjustments) || !adjustments.length) return;
-    const { buildSimpleStructure, buildIntervalStructure, buildTempoStructure, MAX_SUPPORT_SESSION_KM } = PaceForgeGenerator;
+    const { buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure, MAX_SUPPORT_SESSION_KM, MAX_REPETITION_SESSION_KM } = PaceForgeGenerator;
 
     let appliedCount = 0;
     const touchedWeeks = new Set();
@@ -1263,13 +1266,19 @@
 
       const suggested = Number(adj.suggestedKm);
       if (!Number.isFinite(suggested) || suggested <= 0) continue;
-      const clamped = Math.min(Math.max(suggested, day.km * 0.8), day.km * 1.2, MAX_SUPPORT_SESSION_KM);
+      const sessionCap = day.type === 'repetition' ? MAX_REPETITION_SESSION_KM : MAX_SUPPORT_SESSION_KM;
+      const clamped = Math.min(Math.max(suggested, day.km * 0.8), day.km * 1.2, sessionCap);
       const rounded = Math.round(clamped * 2) / 2;
       if (rounded === day.km) continue;
 
       day.km = rounded;
-      if (day.type === 'interval') day.structure = buildIntervalStructure(day.km, lastFitnessLevel, lastConservativeMode);
-      else if (day.type === 'tempo') day.structure = buildTempoStructure(day.km);
+      // day.workoutVariant (set by the generator for interval/tempo — see
+      // planGenerator.js) is preserved as-is here so an AI distance tweak
+      // doesn't silently reset e.g. a "short reps" interval week back to
+      // the default variant.
+      if (day.type === 'interval') day.structure = buildIntervalStructure(day.km, lastFitnessLevel, lastConservativeMode, day.workoutVariant);
+      else if (day.type === 'tempo') day.structure = buildTempoStructure(day.km, day.workoutVariant);
+      else if (day.type === 'repetition') day.structure = buildRepetitionStructure(day.km);
       else day.structure = buildSimpleStructure(day.km);
 
       appliedCount++;
@@ -1381,7 +1390,7 @@
   // phase). Every other "easy effort" session (easy/recovery/shakeout/a
   // regular long run) is run by feel, not by the watch, so no pace target
   // is shown for those.
-  const PACE_TARGET_TYPES = new Set(['tempo', 'interval', 'race']);
+  const PACE_TARGET_TYPES = new Set(['tempo', 'interval', 'repetition', 'race']);
 
   function renderDayRow(day) {
     const { formatPace, formatDate, TYPE_LABELS } = PaceForgeGenerator;

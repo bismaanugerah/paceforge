@@ -17,6 +17,7 @@
   --type-longrun: #3aa98c;
   --type-tempo: #d9a53a;
   --type-interval: #d97a4f;
+  --type-repetition: #d9455a;
   --type-rest: #8b93a3;
   --type-race: var(--color-primary);
 
