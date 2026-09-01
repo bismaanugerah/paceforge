@@ -340,20 +340,43 @@ const PaceForgeGenerator = (() => {
     const WEEKLY_GROWTH_RATE = conservativeMode ? 1.05 : 1.08;
     const growthMultiplier = clamp(Math.pow(WEEKLY_GROWTH_RATE, buildWeeks), 1.15, conservativeMode ? 2.2 : 3.2);
     const { longRunShare, slotWeights: baseSlotWeights } = weeklySplitForDays(daysPerWeek);
-    let peakWeeklyKm = Math.max(currentWeeklyKm * growthMultiplier, currentWeeklyKm); // never plan below current base
+    // Theoretical growth target — deliberately NOT what the week-by-week
+    // ramp targets (see peakWeeklyKm below). Only used to anchor
+    // peakLongRunKm within the race-appropriate absolute range; it has no
+    // ceiling of its own and can compound well past anything actually
+    // deliverable once session caps are accounted for.
+    const theoreticalPeakWeeklyKm = Math.max(currentWeeklyKm * growthMultiplier, currentWeeklyKm); // never plan below current base
 
-    // Aim for the race's recommended long-run range, driven off peak weekly
-    // volume — longRunShare already reflects a realistic per-days-per-week
-    // share (see weeklySplitForDays), so no separate "safe share" guardrail
-    // is needed here beyond clamping to the race-appropriate absolute range.
-    let peakLongRunKm = clamp(peakWeeklyKm * longRunShare, profile.longRunMin, profile.longRunMax);
+    // Aim for the race's recommended long-run range — longRunShare already
+    // reflects a realistic per-days-per-week share (see weeklySplitForDays),
+    // clamped to the race-appropriate absolute range.
+    const peakLongRunKm = clamp(theoreticalPeakWeeklyKm * longRunShare, profile.longRunMin, profile.longRunMax);
+
+    // The REAL peak weekly volume this plan will ever schedule: peakLongRunKm
+    // (above) plus whatever each support slot (easy/recovery/tempo/interval)
+    // actually caps out at — the same MAX_SUPPORT_SESSION_KM and
+    // "never >= that week's long run" ceilings the per-day loop below
+    // enforces, evaluated here up front. Ramping week-by-week progress
+    // toward THIS (rather than the unbounded theoreticalPeakWeeklyKm) is
+    // what makes the plan actually climb gradually across the whole build
+    // block and peak only in its final week(s) — ramping toward the
+    // theoretical number instead made every week identical for however long
+    // it took theoreticalPeakWeeklyKm's growth to run past what the caps
+    // allow, because the *visible* schedule hit its ceiling in, say, week 5
+    // of a 13-week build block and had nowhere further to go for the
+    // remaining 8.
+    const peakWeeklyKm = peakLongRunKm + baseSlotWeights.reduce(
+      (sum, w) => sum + Math.min(theoreticalPeakWeeklyKm * w, MAX_SUPPORT_SESSION_KM, peakLongRunKm * 0.95),
+      0
+    );
 
     // Safe long-run ramp: don't let the scheduled long run jump up from the
     // runner's actual longest recent run any faster than a sensible weekly
     // increment (~20%, or 1.5km for very short current long runs, whichever
     // is bigger). The ramp base only ever grows (tracks the highest long run
     // scheduled so far) so a cutback week doesn't reset the allowance.
-    let longRunRampBase = Math.max(longestRecentRunKm || 0, 2);
+    const longRunStartKm = Math.max(longestRecentRunKm || 0, 2);
+    let longRunRampBase = longRunStartKm;
     const MAX_LONG_RUN_JUMP_RATIO = conservativeMode ? 0.15 : 0.2;
     const MIN_LONG_RUN_JUMP_KM = conservativeMode ? 1 : 1.5;
 
@@ -384,18 +407,30 @@ const PaceForgeGenerator = (() => {
       const isRaceWeek = w === planWeeks - 1;
 
       let weekKm;
+      let longRunTargetKm; // this week's long run before the ramp-safety clamp further below
       let phase;
       if (!isTaperWeek) {
         const progress = buildWeeks === 1 ? 1 : (w + 1) / buildWeeks;
         let linearKm = currentWeeklyKm + (peakWeeklyKm - currentWeeklyKm) * progress;
+        // Long run gets its own direct progress-based ramp toward
+        // peakLongRunKm — rather than being derived as weekKm*longRunShare
+        // — so it reliably reaches the intended race-appropriate distance
+        // on the final build week regardless of how weekKm's own
+        // progression interacts with the support-session caps above.
+        let linearLongRunKm = longRunStartKm + (peakLongRunKm - longRunStartKm) * progress;
         const weekNum1based = w + 1;
         const isCutback = weekNum1based % 4 === 0 && weekNum1based !== buildWeeks;
         weekKm = isCutback ? linearKm * 0.8 : linearKm;
+        longRunTargetKm = isCutback ? linearLongRunKm * 0.8 : linearLongRunKm;
         phase = isCutback ? 'Cutback' : buildPhaseForWeek(w, buildWeeks);
       } else {
         const taperIdx = w - buildWeeks;
         const factor = taperFactors[taperIdx] ?? 0.5;
         weekKm = peakWeeklyKm * factor;
+        // Taper reduces the long run by the same factor directly, rather
+        // than through weekKm*longRunShare — standard taper design (e.g.
+        // "75% of peak long run" in the first taper week).
+        longRunTargetKm = peakLongRunKm * factor;
         phase = isRaceWeek ? 'Race Week' : 'Taper';
       }
       weekKm = Math.round(weekKm * 10) / 10;
@@ -441,7 +476,7 @@ const PaceForgeGenerator = (() => {
           ri++;
         });
       }
-      let longRunKmThisWeek = isRaceWeek ? 0 : Math.min(weekKm * longRunShare, peakLongRunKm);
+      let longRunKmThisWeek = isRaceWeek ? 0 : Math.min(longRunTargetKm, peakLongRunKm);
       if (!isRaceWeek) {
         const maxSafeLongRun = longRunRampBase + Math.max(longRunRampBase * MAX_LONG_RUN_JUMP_RATIO, MIN_LONG_RUN_JUMP_KM);
         if (longRunKmThisWeek > maxSafeLongRun) {
@@ -482,21 +517,21 @@ const PaceForgeGenerator = (() => {
 
         // This slot's share of weekKm comes straight from
         // weeklySplitForDays (see weightByDow above) — every non-long-run
-        // weight is already < longRunShare by construction, so under normal
-        // progression no support session can land bigger than the long run.
-        // Two safety nets on top of that proportional split, neither of
-        // which redistributes the trimmed volume elsewhere (a lower actual
-        // weekKm total is safer than forcing it into one oversized day):
-        //   1. The ramp guardrail above can hold longRunKmThisWeek well
-        //      below its weekKm*longRunShare "budget" (e.g. high current
-        //      weekly volume paired with a much shorter longest recent
-        //      single run) without shrinking the other slots to match — so
-        //      clamp against the *actual* long run distance this week too.
-        //   2. weekKm itself has no ceiling of its own (unlike the long
-        //      run, which is clamped to a race-appropriate absolute range —
-        //      see peakLongRunKm), so a support session can still land at
-        //      an unrealistic absolute distance while staying under the
-        //      long run — clamp at MAX_SUPPORT_SESSION_KM regardless.
+        // weight is already < longRunShare by construction, and weekKm's own
+        // progression is bounded by peakWeeklyKm (which is itself derived
+        // from these same caps — see its definition above), so under normal
+        // progression no support session can land bigger than the long run
+        // or past MAX_SUPPORT_SESSION_KM. Two safety nets on top of that
+        // anyway, for edge cases (e.g. a currentWeeklyKm input that's
+        // already high relative to daysPerWeek), neither of which
+        // redistributes the trimmed volume elsewhere (a lower actual weekKm
+        // total is safer than forcing it into one oversized day):
+        //   1. The ramp guardrail above can hold longRunKmThisWeek below its
+        //      progress-based target without shrinking the other slots to
+        //      match — so clamp against the *actual* long run distance this
+        //      week too.
+        //   2. Clamp at MAX_SUPPORT_SESSION_KM regardless, as a final
+        //      absolute backstop.
         let km = weekKm * (weightByDow[dow] ?? 0);
         if (longRunKmThisWeek > 0) km = Math.min(km, longRunKmThisWeek * 0.95);
         if (km > MAX_SUPPORT_SESSION_KM) {
@@ -519,8 +554,10 @@ const PaceForgeGenerator = (() => {
       // Taper/race weeks are intentionally lower-volume by design, so they
       // shouldn't count toward "peak" — only build-phase weeks (Base/Build/
       // Peak/Cutback) do. Tracks what the schedule actually delivers, which
-      // can come in under the theoretical peakWeeklyKm target once the
-      // MAX_SUPPORT_SESSION_KM / long-run guardrails above have trimmed it.
+      // can still come in a bit under the peakWeeklyKm target on the rare
+      // week where a guardrail (ramp limit, MAX_SUPPORT_SESSION_KM) trims
+      // something — peakWeeklyKm itself is already the realistic figure
+      // (see its definition above), not the unbounded theoretical one.
       if (!isTaperWeek) actualPeakWeeklyKm = Math.max(actualPeakWeeklyKm, totalKm);
 
       weeks.push({
