@@ -60,6 +60,26 @@ const PaceForgeGenerator = (() => {
     advanced: 4 * 60 + 45,
   };
 
+  // When there's no explicit target time (that section of the form is
+  // currently hidden — see js/app.js), goalPaceSec is derived purely from
+  // a recent race, which makes it a same-day equivalent-fitness estimate —
+  // identical to currentFitnessPaceSec by construction, with no gap left
+  // to ramp toward across the build block (every week's pace target would
+  // sit flat again despite weeks of training ahead). Project a small,
+  // conservative pace improvement over the block instead — total fraction
+  // achievable by a FULL recommended-length block (RACE_PROFILES.recWeeks)
+  // at that fitness level, scaled down for a shorter/compressed block (see
+  // buildWeeks/profile.recWeeks below) and halved again in conservative
+  // mode. Deliberately modest: a runner already near their genetic ceiling
+  // (advanced) has far less room to gain than a beginner in the same
+  // window, and pace gains are much harder-won than the volume growth
+  // WEEKLY_GROWTH_RATE below assumes.
+  const CONSERVATIVE_FITNESS_GAIN_PCT = {
+    beginner: 0.05,
+    intermediate: 0.035,
+    advanced: 0.02,
+  };
+
   // Absolute floor for any pace this generator will ever schedule or treat
   // as a goal, in sec/km — well under the current marathon world record
   // pace (~2:50/km) and every shorter distance's, so it only ever catches a
@@ -323,7 +343,11 @@ const PaceForgeGenerator = (() => {
       goalPaceSource = 'explicit';
     } else if (recentRaceTimeSec && recentRaceDistanceKm) {
       predictedRaceTimeSec = predictRaceTime(recentRaceTimeSec, recentRaceDistanceKm, raceDistanceKm);
-      goalPaceSec = predictedRaceTimeSec / raceDistanceKm;
+      const currentEquivPaceSec = predictedRaceTimeSec / raceDistanceKm;
+      const gainFraction = CONSERVATIVE_FITNESS_GAIN_PCT[fitnessLevel]
+        * clamp(buildWeeks / profile.recWeeks, 0, 1)
+        * (conservativeMode ? 0.5 : 1);
+      goalPaceSec = currentEquivPaceSec * (1 - gainFraction);
       goalPaceSource = 'recentRace';
     } else {
       goalPaceSec = DEFAULT_GOAL_PACE_SEC[fitnessLevel];
