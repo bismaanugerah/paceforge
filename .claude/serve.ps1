@@ -33,16 +33,32 @@ $mime = @{
 }
 
 # The rule-based schedule (days/km/pace) is computed entirely client-side in
-# js/planGenerator.js and never touched here. This endpoint only asks Claude
-# for qualitative coaching notes layered on top of that already-fixed plan.
+# js/planGenerator.js. Claude never rewrites it from scratch -- this endpoint
+# asks it to review the already-computed plan (optionally flagging/adjusting
+# a handful of individual non-long-run sessions) and write qualitative
+# coaching notes. Claude's adjustments are advisory only -- js/app.js
+# validates and clamps every one before applying anything. Keep this prompt
+# in sync with api/enhance-plan.js's copy.
 $AI_SYSTEM_PROMPT = @'
-Kamu pelatih lari, menulis singkat dalam Bahasa Indonesia. Data rencana lari
-(jarak & fase per minggu) SUDAH DIHITUNG dan TIDAK BOLEH diubah/disebut ulang
-beda. Tugasmu HANYA menambah catatan pelatih yang personal & actionable,
-mempertimbangkan catatan tambahan pelari (cedera/jadwal/preferensi) jika ada.
+Kamu pelatih lari berpengalaman, menulis singkat dalam Bahasa Indonesia.
+Kamu menerima draft jadwal latihan mingguan yang SUDAH DIHITUNG oleh sistem
+rule-based: tiap minggu berisi fase, total km, dan daftar sesi lari (hari
+"dow" 0=Minggu..6=Sabtu, jenis sesi, jarak km).
+
+Tugasmu:
+1. Tinjau apakah ada sesi individual berjenis "easy", "recovery", "tempo",
+   atau "interval" SAJA (JANGAN PERNAH longRun/race/shakeout) yang jaraknya
+   terasa tidak realistis untuk jenis sesinya (mis. easy run yang
+   kepanjangan dibanding long run minggu itu, atau tempo run yang mustahil
+   dijaga terus-menerus di pace tempo). Kalau nemu, sarankan lewat field
+   "adjustments" (PALING BANYAK 5, tiap saran maksimal sekitar ±20% dari
+   jarak aslinya). Kalau semua sesi sudah masuk akal, "adjustments" cukup
+   array kosong -- JANGAN dipaksakan cari-cari masalah yang tidak ada.
+2. Tambahkan catatan pelatih yang personal & actionable, mempertimbangkan
+   catatan tambahan pelari (cedera/jadwal/preferensi) jika ada.
 
 Balas HANYA JSON valid (tanpa code fence, tanpa teks lain), format PERSIS:
-{"intro": "maks 2 kalimat ringkasan strategi", "weeklyNotes": [{"week": N, "note": "maks 12 kata"}], "raceDayTips": "maks 3 kalimat: pacing, nutrisi, mental"}
+{"adjustments": [{"week": N, "dow": 0-6, "type": "easy|recovery|tempo|interval", "suggestedKm": X, "reason": "maks 12 kata"}], "intro": "maks 2 kalimat ringkasan strategi", "weeklyNotes": [{"week": N, "note": "maks 12 kata"}], "raceDayTips": "maks 3 kalimat: pacing, nutrisi, mental"}
 
 Hemat kata: weeklyNotes JANGAN mencakup semua minggu, HANYA minggu yang
 penting/beda (minggu pertama, tiap transisi fase, cutback, minggu puncak,

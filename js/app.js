@@ -38,6 +38,7 @@
   const EXERTION_HEX = { low: '#74b358', moderate: '#e0b93a', high: '#de5b4c' };
 
   const form = document.getElementById('planForm');
+  const submitBtn = form.querySelector('button[type="submit"]');
   const distanceModeToggle = document.getElementById('distanceModeToggle');
   const presetDistanceField = document.getElementById('presetDistanceField');
   const raceDistanceSel = document.getElementById('raceDistance');
@@ -90,14 +91,24 @@
   const aiIntro = document.getElementById('aiIntro');
   const aiRaceDayTips = document.getElementById('aiRaceDayTips');
 
-  // Kept around so the AI enhancement step can send a compact summary of the
-  // currently-rendered plan (and retry on demand) without recomputing anything.
+  // Kept around so the AI review step can send the currently-generated plan
+  // (and retry on demand) without recomputing anything.
   let lastPlan = null;
   // fitnessLevel isn't a form field anymore (derived from currentWeeklyKm —
-  // see deriveFitnessLevel) but enhanceWithAI() still wants it in its
-  // payload, so it's kept alongside lastPlan rather than re-read from a DOM
-  // element that no longer exists.
+  // see deriveFitnessLevel) but reviewPlanWithAI() still wants it in its
+  // payload (and applyAiAdjustments() wants it to rebuild interval
+  // structure), so it's kept alongside lastPlan rather than re-read from a
+  // DOM element that no longer exists.
   let lastFitnessLevel = null;
+  // conservativeMode similarly needs to survive past the submit handler for
+  // the same reasons (AI payload + interval-structure rebuild on adjustment).
+  let lastConservativeMode = false;
+  // Result of the most recent reviewPlanWithAI() call — read right after
+  // renderPlan() (which resets the AI-notes DOM) to (re-)apply whichever of
+  // the two actually happened. Exactly one of these is non-null after a
+  // completed review; both are null while a review is in flight.
+  let pendingAiNotes = null;
+  let aiReviewErrorMessage = null;
 
   // Set a sensible default race date: 12 weeks from today.
   const defaultRaceDate = new Date();
@@ -403,11 +414,31 @@
     userNotesInput.value = userNotes || '';
   }
 
-  function generateAndShowPlan(settings) {
+  // Generates the rule-based plan, then makes the user wait through an AI
+  // review pass (reviewPlanWithAI — may adjust a handful of individual
+  // sessions, see applyAiAdjustments) BEFORE the plan is shown at all, so
+  // what the user sees is never "just whatever the algorithm spat out"
+  // unreviewed. If the review fails or times out, the rule-based plan is
+  // still shown as-is — the algorithm's own guardrails already make it safe
+  // on its own; the AI pass is a second opinion, not a hard dependency.
+  async function generateAndShowPlan(settings) {
     const plan = PaceForgeGenerator.generatePlan(settings);
+    lastPlan = plan;
     lastFitnessLevel = settings.fitnessLevel;
-    renderPlan(plan);
-    enhanceWithAI();
+    lastConservativeMode = settings.conservativeMode;
+
+    const originalLabel = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = '✨ Meninjau plan dengan AI...';
+    try {
+      await reviewPlanWithAI();
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalLabel;
+    }
+
+    renderPlan(lastPlan);
+    applyPendingAiReviewToDom();
     return plan;
   }
 
@@ -485,7 +516,7 @@
         startDate: new Date((data.settings.startDate || new Date().toISOString().slice(0, 10)) + 'T00:00:00'),
       };
       applySettingsToForm(settings, data.user_notes || '');
-      generateAndShowPlan(settings);
+      await generateAndShowPlan(settings);
       paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat (mode dummy — lokal).');
       return true;
     }
@@ -508,7 +539,7 @@
         startDate: new Date((data.settings.startDate || new Date().toISOString().slice(0, 10)) + 'T00:00:00'),
       };
       applySettingsToForm(settings, data.user_notes || '');
-      generateAndShowPlan(settings);
+      await generateAndShowPlan(settings);
       paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat dari akunmu.');
       return true;
     } catch (err) {
@@ -624,19 +655,27 @@
     showGate();
   }
 
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
     clearError();
 
     const settings = gatherSettingsFromForm();
     if (!settings) return;
 
-    generateAndShowPlan(settings);
+    await generateAndShowPlan(settings);
     if (REQUIRE_LOGIN) savePlanForCurrentUser(settings);
   });
 
   document.getElementById('printBtn').addEventListener('click', downloadPlanAsPdf);
-  aiRetryBtn.addEventListener('click', enhanceWithAI);
+  aiRetryBtn.addEventListener('click', async () => {
+    aiRetryBtn.hidden = true;
+    aiStatus.hidden = false;
+    aiStatus.classList.remove('is-error');
+    aiStatus.textContent = '✨ Meminta review dari Claude...';
+    await reviewPlanWithAI();
+    renderPlan(lastPlan);
+    applyPendingAiReviewToDom();
+  });
   document.getElementById('newPlanBtn').addEventListener('click', () => {
     resultSection.hidden = true;
     formSection.hidden = false;
@@ -996,20 +1035,75 @@
     }
   }
 
-  // Runs automatically right after every plan is generated. Sends a compact
-  // summary of the already-computed plan (phase + total km per week — never
-  // the day-by-day numbers) plus the user's free-text notes to the server,
-  // which asks Claude for qualitative coaching notes only. The rule-based
-  // distances/paces already rendered above are never touched.
-  async function enhanceWithAI() {
+  // Which session types Claude is allowed to suggest an adjustment for —
+  // never longRun/race/shakeout, matching the server-side prompt's own
+  // instruction (defense in depth: even if the prompt is ignored, this
+  // still refuses to touch those). MAX_AI_ADJUSTMENTS caps how many
+  // sessions a single review can touch, regardless of how many Claude
+  // returns.
+  const AI_ADJUSTABLE_TYPES = new Set(['easy', 'recovery', 'tempo', 'interval']);
+  const MAX_AI_ADJUSTMENTS = 5;
+
+  // Applies Claude's suggested per-day distance adjustments to an
+  // already-generated rule-based plan, IN PLACE. Claude's numbers are
+  // advisory only — never trusted outright: at most MAX_AI_ADJUSTMENTS
+  // sessions, never long run/race/shakeout, and every survivor clamped to
+  // within ~20% of its original rule-based distance and to
+  // PaceForgeGenerator.MAX_SUPPORT_SESSION_KM (the same absolute ceiling
+  // the generator itself enforces) either way.
+  function applyAiAdjustments(plan, adjustments) {
+    if (!Array.isArray(adjustments) || !adjustments.length) return;
+    const { buildSimpleStructure, buildIntervalStructure, buildTempoStructure, MAX_SUPPORT_SESSION_KM } = PaceForgeGenerator;
+
+    let appliedCount = 0;
+    const touchedWeeks = new Set();
+    for (const adj of adjustments) {
+      if (appliedCount >= MAX_AI_ADJUSTMENTS) break;
+      if (!adj || typeof adj.week !== 'number' || typeof adj.dow !== 'number') continue;
+      const week = plan.weeks.find(w => w.weekNumber === adj.week);
+      if (!week) continue;
+      const day = week.days.find(d => d.dow === adj.dow);
+      if (!day || day.type !== adj.type || !AI_ADJUSTABLE_TYPES.has(day.type)) continue;
+
+      const suggested = Number(adj.suggestedKm);
+      if (!Number.isFinite(suggested) || suggested <= 0) continue;
+      const clamped = Math.min(Math.max(suggested, day.km * 0.8), day.km * 1.2, MAX_SUPPORT_SESSION_KM);
+      const rounded = Math.round(clamped * 2) / 2;
+      if (rounded === day.km) continue;
+
+      day.km = rounded;
+      if (day.type === 'interval') day.structure = buildIntervalStructure(day.km, lastFitnessLevel, lastConservativeMode);
+      else if (day.type === 'tempo') day.structure = buildTempoStructure(day.km);
+      else day.structure = buildSimpleStructure(day.km);
+
+      appliedCount++;
+      touchedWeeks.add(week);
+    }
+
+    touchedWeeks.forEach(week => {
+      week.totalKm = Math.round(week.days.reduce((s, d) => s + (d.km || 0), 0) * 10) / 10;
+    });
+  }
+
+  // Sends the full day-by-day plan (never just week totals — Claude needs
+  // to see each session's actual distance to judge whether it's realistic)
+  // plus the user's free-text notes to the server, which asks Claude to (a)
+  // optionally flag/adjust a handful of individual non-long-run sessions
+  // that look unrealistic and (b) write qualitative coaching notes. Mutates
+  // lastPlan in place via applyAiAdjustments with whatever survives
+  // validation, and stashes the rest of the result in
+  // pendingAiNotes/aiReviewErrorMessage rather than touching the DOM
+  // directly — this runs BEFORE the plan's first render (see
+  // generateAndShowPlan), and again on retry (after render), so the DOM
+  // update has to happen from a shared spot both callers use
+  // (applyPendingAiReviewToDom, right after their own renderPlan() call).
+  async function reviewPlanWithAI() {
+    pendingAiNotes = null;
+    aiReviewErrorMessage = null;
     if (!lastPlan) return;
+
     const { meta, weeks } = lastPlan;
     const { formatPace } = PaceForgeGenerator;
-
-    aiRetryBtn.hidden = true;
-    aiStatus.hidden = false;
-    aiStatus.classList.remove('is-error');
-    aiStatus.textContent = '✨ Meminta catatan pelatih dari Claude...';
 
     const payload = {
       raceLabel: meta.raceLabel,
@@ -1019,20 +1113,42 @@
       peakWeeklyKm: meta.peakWeeklyKm,
       peakLongRunKm: meta.peakLongRunKm,
       goalPace: formatPace(meta.goalPaceSec),
-      conservativeMode: conservativeModeInput.checked,
+      conservativeMode: !!lastConservativeMode,
       userNotes: userNotesInput.value.trim(),
-      weeks: weeks.map(w => ({ week: w.weekNumber, phase: w.phase, totalKm: w.totalKm })),
+      weeks: weeks.map(w => ({
+        week: w.weekNumber,
+        phase: w.phase,
+        totalKm: w.totalKm,
+        days: w.days.filter(d => d.km > 0).map(d => ({ dow: d.dow, type: d.type, km: d.km })),
+      })),
     };
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     try {
       const res = await fetch('/api/enhance-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Server merespons status ${res.status}`);
+      applyAiAdjustments(lastPlan, data.adjustments);
+      pendingAiNotes = data;
+    } catch (err) {
+      aiReviewErrorMessage = err.name === 'AbortError' ? 'waktu tunggu review habis (20 detik)' : err.message;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
 
+  // Reads whatever reviewPlanWithAI() left behind and updates the AI-notes
+  // DOM accordingly — always called right after a renderPlan() call, since
+  // renderPlan() itself resets that DOM to a blank slate first.
+  function applyPendingAiReviewToDom() {
+    if (pendingAiNotes) {
+      const data = pendingAiNotes;
       if (data.intro) {
         aiIntro.textContent = data.intro;
         aiIntro.hidden = false;
@@ -1052,11 +1168,13 @@
         aiRaceDayTips.innerHTML = `<span class="ai-tips-title">Tips Race Day</span>${data.raceDayTips}`;
         aiRaceDayTips.hidden = false;
       }
-
-      aiStatus.textContent = '✨ Catatan AI berhasil ditambahkan ke plan di atas.';
-    } catch (err) {
+      aiStatus.hidden = false;
+      aiStatus.classList.remove('is-error');
+      aiStatus.textContent = '✨ Plan sudah ditinjau & diberi catatan oleh Claude.';
+    } else if (aiReviewErrorMessage) {
+      aiStatus.hidden = false;
       aiStatus.classList.add('is-error');
-      aiStatus.textContent = `Gagal minta saran AI: ${err.message}. Plan dasar di atas tetap berlaku.`;
+      aiStatus.textContent = `Gagal minta review AI: ${aiReviewErrorMessage}. Plan dasar (rule-based) di atas tetap berlaku.`;
       aiRetryBtn.hidden = false;
     }
   }

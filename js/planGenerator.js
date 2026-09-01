@@ -567,5 +567,12 @@ const PaceForgeGenerator = (() => {
     return slots;
   }
 
-  return { generatePlan, formatPace, formatDate, formatDuration, predictRaceTime, TYPE_LABELS, DAY_NAMES };
+  return {
+    generatePlan, formatPace, formatDate, formatDuration, predictRaceTime, TYPE_LABELS, DAY_NAMES,
+    // Exported so js/app.js can recompute a day's workout-structure bar
+    // after applying an AI-suggested distance adjustment (see
+    // applyAiAdjustments), and clamp against the same absolute ceiling
+    // this file itself enforces, without duplicating either.
+    buildSimpleStructure, buildIntervalStructure, buildTempoStructure, MAX_SUPPORT_SESSION_KM,
+  };
 })();
