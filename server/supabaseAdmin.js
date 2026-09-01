@@ -46,6 +46,13 @@ async function selectOne(table, filterColumn, filterValue) {
 }
 
 // Insert-or-update-on-conflict, keyed by `onConflict` (a primary key column).
+// IMPORTANT: `row` must include every NOT NULL column that has no default —
+// PostgREST's upsert is a real `INSERT ... ON CONFLICT DO UPDATE`, and
+// Postgres validates the INSERT's proposed row (including NOT NULL
+// constraints) before it ever gets to the "is there a conflict" check, even
+// though only the columns you pass end up in the eventual UPDATE. A partial
+// row here can fail on a column you never meant to touch. To patch just a
+// few columns on a row you already know exists, use `update` instead.
 async function upsert(table, row, onConflict) {
   return restRequest(`${table}?on_conflict=${onConflict}`, {
     method: 'POST',
@@ -56,4 +63,16 @@ async function upsert(table, row, onConflict) {
   });
 }
 
-module.exports = { selectOne, upsert };
+// Plain UPDATE of an existing row — unlike `upsert`, `patch` can safely
+// contain only the columns you want to change; every other column
+// (including NOT NULL ones) is left untouched, no insert-path validation
+// involved.
+async function update(table, filterColumn, filterValue, patch) {
+  return restRequest(`${table}?${filterColumn}=eq.${encodeURIComponent(filterValue)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify(patch),
+  });
+}
+
+module.exports = { selectOne, upsert, update };

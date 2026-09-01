@@ -7,7 +7,7 @@
  * doesn't re-hit Strava's API every time.
  */
 const { getSession } = require('../server/session');
-const { selectOne, upsert } = require('../server/supabaseAdmin');
+const { selectOne, update } = require('../server/supabaseAdmin');
 const { refreshAccessToken, fetchRecentRuns, summarizeRuns } = require('../server/strava');
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 jam
@@ -45,24 +45,36 @@ module.exports = async (req, res) => {
     if (athlete.expires_at - nowSec < 300) {
       const refreshed = await refreshAccessToken(athlete.refresh_token);
       accessToken = refreshed.access_token;
-      await upsert('strava_athletes', {
-        athlete_id: athlete.athlete_id,
-        access_token: refreshed.access_token,
-        refresh_token: refreshed.refresh_token,
-        expires_at: refreshed.expires_at,
-        updated_at: new Date().toISOString(),
-      }, 'athlete_id');
+      // Best-effort: the refreshed token above is already in hand for this
+      // request regardless of whether persisting it succeeds — a failure
+      // here just means the next request refreshes again, not fatal.
+      try {
+        await update('strava_athletes', 'athlete_id', athlete.athlete_id, {
+          access_token: refreshed.access_token,
+          refresh_token: refreshed.refresh_token,
+          expires_at: refreshed.expires_at,
+          updated_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn('[PaceForge] Gagal menyimpan refreshed Strava token:', err.message);
+      }
     }
 
     const afterEpoch = Math.floor(Date.now() / 1000) - LOOKBACK_DAYS * 24 * 3600;
     const runs = await fetchRecentRuns(accessToken, afterEpoch);
     const summary = summarizeRuns(runs);
 
-    await upsert('strava_athletes', {
-      athlete_id: athlete.athlete_id,
-      summary_cache: summary,
-      summary_cached_at: new Date().toISOString(),
-    }, 'athlete_id');
+    // Best-effort caching too — the summary is already computed and about
+    // to be returned below either way, a caching failure shouldn't turn
+    // into a user-facing error.
+    try {
+      await update('strava_athletes', 'athlete_id', athlete.athlete_id, {
+        summary_cache: summary,
+        summary_cached_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn('[PaceForge] Gagal menyimpan cache summary Strava:', err.message);
+    }
 
     res.status(200).json(summary);
   } catch (err) {
