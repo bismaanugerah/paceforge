@@ -51,6 +51,16 @@ const PaceForgeGenerator = (() => {
     advanced: 4 * 60 + 45,
   };
 
+  // Realistic ceiling for a single non-long-run session (easy/recovery/
+  // tempo/interval), in km. Real high-mileage plans reach big weekly
+  // totals by adding MORE sessions (often doubles), not by ballooning a
+  // handful of them — a 4-day/week plan has no sane way to carry the same
+  // weekly volume a 6-day/week plan can. Used below to cap how high peak
+  // weekly volume is allowed to grow for the days-per-week actually
+  // available, so growth off a high currentWeeklyKm base on a low
+  // daysPerWeek plan can't quietly turn "easy" days into ultras.
+  const MAX_SUPPORT_SESSION_AVG_KM = 15;
+
   // Training-zone pace = goalPaceSec * multiplier. Ordered slow -> fast.
   const PACE_MULTIPLIERS = {
     recovery: 1.25,
@@ -281,6 +291,22 @@ const PaceForgeGenerator = (() => {
     const growthMultiplier = clamp(Math.pow(WEEKLY_GROWTH_RATE, buildWeeks), 1.15, conservativeMode ? 2.2 : 3.2);
     const longRunShare = longRunShareForDays(daysPerWeek);
     let peakWeeklyKm = Math.max(currentWeeklyKm * growthMultiplier, currentWeeklyKm); // never plan below current base
+
+    // Guardrail: cap peak weekly volume so it stays distributable across
+    // daysPerWeek sessions without any single non-long-run day blowing past
+    // MAX_SUPPORT_SESSION_AVG_KM. The long run itself can absorb up to
+    // profile.longRunMax; everything past that has to be spread across the
+    // remaining (daysPerWeek - 1) sessions, so that's the volume ceiling.
+    // Never caps below currentWeeklyKm — same "never plan below current
+    // base" rule as above.
+    const realisticWeeklyKmCeiling = Math.max(
+      profile.longRunMax + (daysPerWeek - 1) * MAX_SUPPORT_SESSION_AVG_KM,
+      currentWeeklyKm
+    );
+    if (peakWeeklyKm > realisticWeeklyKmCeiling) {
+      peakWeeklyKm = realisticWeeklyKmCeiling;
+      warnings.push(`Volume mingguan puncak dibatasi ke sekitar ${Math.round(peakWeeklyKm)} km — dengan ${daysPerWeek} hari latihan/minggu, volume yang lebih tinggi dari itu bakal bikin sesi selain long run jadi nggak realistis (terlalu jauh buat lari "santai"/tempo harian). Kalau mau volume mingguan lebih tinggi, coba tambah jumlah hari latihan per minggu.`);
+    }
 
     // Aim for the race's recommended long-run range, driven off peak weekly volume.
     let peakLongRunKm = clamp(peakWeeklyKm * longRunShare, profile.longRunMin, profile.longRunMax);
