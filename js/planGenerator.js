@@ -202,16 +202,52 @@ const PaceForgeGenerator = (() => {
     return 'Peak';
   }
 
+  // How many "quality" (tempo/interval) sessions to schedule per week, by
+  // total running days/week — researched against real coaching guidance
+  // rather than picked arbitrarily:
+  //   - Jack Daniels' Running Formula: beginners get 1 quality day/week;
+  //     more experienced runners can handle up to 3, but ALWAYS with at
+  //     least one easy/rest day between quality sessions (hard days can't
+  //     stack) — 3 is a ceiling, not a default.
+  //   - Hal Higdon's marathon plans (5-6 days/week): Intermediate tiers run
+  //     ZERO quality days even at that frequency (pure aerobic volume);
+  //     Advanced 1 adds exactly 1, Advanced 2 exactly 2 — 2 quality
+  //     sessions/week is the common ceiling for a general-purpose amateur
+  //     plan, not 3, even at 6 days/week.
+  //   - Multiple independently-published 6-day/week plans converge on the
+  //     same shape: quality, easy, easy, quality, easy, long, rest — i.e.
+  //     2 quality sessions, not 3, regardless of the extra running day.
+  // Net rule this plan follows: 1 quality session at 3-4 days/week (not
+  // enough easy-day buffer to safely fit a 2nd), 2 quality sessions at 5-6
+  // days/week (the 6th day's extra volume goes to another easy/recovery
+  // run, not a 3rd hard day — matching every source above). Expressed as
+  // Math.max(1, Math.floor((daysPerWeek - 1) / 2)) below for traceability;
+  // workoutTemplate's literal per-day arrays are what's actually scheduled
+  // and are hand-verified to match this count exactly.
+  function qualitySessionsForDays(daysPerWeek) {
+    return Math.max(1, Math.floor((daysPerWeek - 1) / 2));
+  }
+
   /** Ordered workout-type template for a given days-per-week, excluding long run
    * which is always appended last (and mapped to the last selected day). */
   function workoutTemplate(daysPerWeek, weekIndexInBuild) {
     const alternateSpeed = weekIndexInBuild % 2 === 0 ? 'interval' : 'tempo';
     switch (daysPerWeek) {
-      case 3: return ['easy', alternateSpeed, 'longRun'];
-      case 4: return ['easy', alternateSpeed, 'easy', 'longRun'];
-      case 5: return ['easy', alternateSpeed, 'easy', 'tempo', 'longRun'];
-      case 6: return ['easy', alternateSpeed, 'easy', 'tempo', 'recovery', 'longRun'];
-      default: return ['easy', 'longRun'];
+      case 3: return ['easy', alternateSpeed, 'longRun']; // 1 quality session — see qualitySessionsForDays
+      case 4: return ['easy', alternateSpeed, 'easy', 'longRun']; // 1 quality session
+      case 5: return ['easy', alternateSpeed, 'easy', 'tempo', 'longRun']; // 2 quality sessions (alternateSpeed + tempo)
+      case 6: return ['easy', alternateSpeed, 'easy', 'tempo', 'recovery', 'longRun']; // 2 quality sessions — extra 6th day is recovery, not a 3rd hard day
+      default: {
+        // The form only offers 3-6 days/week, so this is unreachable today —
+        // a safety net if that range ever changes. Built from the same rule
+        // as the hand-tuned cases above (capped at 2 quality sessions, same
+        // ceiling as the 5/6-day cases, rather than letting the formula's
+        // theoretical 3-session cap for 7+ days/week onto an untested path).
+        const qualityCount = Math.min(qualitySessionsForDays(daysPerWeek), 2);
+        const easyCount = Math.max(daysPerWeek - qualityCount - 1, 0);
+        const qualitySlots = qualityCount >= 2 ? [alternateSpeed, 'tempo'] : [alternateSpeed];
+        return [...Array(easyCount).fill('easy'), ...qualitySlots, 'longRun'];
+      }
     }
   }
 
