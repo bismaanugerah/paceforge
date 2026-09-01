@@ -307,16 +307,12 @@
   // labels described ("belum pernah/baru bisa lari 5K" vs "terbiasa 5-10K"
   // vs "terbiasa 10K+ rutin").
   //
-  // Mileage alone is an incomplete signal though — plenty of runners log
-  // solid weekly volume at an easy, unhurried pace (still developing real
-  // race speed), and plenty of others run comparatively little but are
-  // genuinely fast when they do (e.g. rebuilding volume after time off, or
-  // just naturally quick). When a recent race/time-trial is available,
-  // fold in a pace-based read too and take whichever signal points to the
-  // MORE advanced level — either one is real evidence of fitness the other
-  // might miss on its own.
-  const FITNESS_LEVEL_RANK = { beginner: 0, intermediate: 1, advanced: 2 };
-
+  // Mileage alone is an incomplete signal — it says how much someone runs,
+  // not how fast, and this whole classification exists to calibrate pace
+  // (interval rep distance, default pace fallback, the conservative
+  // pace-ramp gain). A recent race/time-trial is a much more direct read on
+  // that, so it takes priority whenever it's available; mileage is only the
+  // fallback for when there's no pace data at all to go on.
   function deriveFitnessLevelFromMileage(currentWeeklyKm) {
     if (currentWeeklyKm < 15) return 'beginner';
     if (currentWeeklyKm < 40) return 'intermediate';
@@ -344,11 +340,9 @@
   }
 
   function deriveFitnessLevel(currentWeeklyKm, recentRaceTimeSec, recentRaceDistanceKm) {
-    const mileageLevel = deriveFitnessLevelFromMileage(currentWeeklyKm);
-    if (!recentRaceTimeSec || !recentRaceDistanceKm) return mileageLevel;
+    if (!recentRaceTimeSec || !recentRaceDistanceKm) return deriveFitnessLevelFromMileage(currentWeeklyKm);
     const equiv10kTimeSec = PaceForgeGenerator.predictRaceTime(recentRaceTimeSec, recentRaceDistanceKm, 10);
-    const paceLevel = deriveFitnessLevelFromPace(equiv10kTimeSec);
-    return FITNESS_LEVEL_RANK[paceLevel] > FITNESS_LEVEL_RANK[mileageLevel] ? paceLevel : mileageLevel;
+    return deriveFitnessLevelFromPace(equiv10kTimeSec);
   }
 
   // Reads & validates every field, showing an inline error and returning
