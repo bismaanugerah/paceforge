@@ -83,6 +83,11 @@
   // Kept around so the AI enhancement step can send a compact summary of the
   // currently-rendered plan (and retry on demand) without recomputing anything.
   let lastPlan = null;
+  // fitnessLevel isn't a form field anymore (derived from currentWeeklyKm —
+  // see deriveFitnessLevel) but enhanceWithAI() still wants it in its
+  // payload, so it's kept alongside lastPlan rather than re-read from a DOM
+  // element that no longer exists.
+  let lastFitnessLevel = null;
 
   // Set a sensible default race date: 12 weeks from today.
   const defaultRaceDate = new Date();
@@ -224,6 +229,17 @@
     formError.textContent = '';
   }
 
+  // "Level kebugaran" used to be a manual dropdown, but it's redundant now
+  // that currentWeeklyKm is usually real Strava data rather than a guess —
+  // approximate thresholds, same rough boundaries the old dropdown's option
+  // labels described ("belum pernah/baru bisa lari 5K" vs "terbiasa 5-10K"
+  // vs "terbiasa 10K+ rutin").
+  function deriveFitnessLevel(currentWeeklyKm) {
+    if (currentWeeklyKm < 15) return 'beginner';
+    if (currentWeeklyKm < 40) return 'intermediate';
+    return 'advanced';
+  }
+
   // Reads & validates every field, showing an inline error and returning
   // null on the first problem found (same behaviour as the old inline
   // submit-handler code). Returns the settings object PaceForgeGenerator
@@ -254,7 +270,6 @@
     if (startDate < today) { showError('Tanggal mulai training tidak boleh di masa lalu.'); return null; }
     if (startDate >= raceDate) { showError('Tanggal mulai training harus sebelum tanggal race.'); return null; }
 
-    const fitnessLevel = document.getElementById('fitnessLevel').value;
     const currentWeeklyKm = Number(document.getElementById('currentWeeklyKm').value);
     if (currentWeeklyKm < 0 || Number.isNaN(currentWeeklyKm)) {
       showError('Isi rata-rata jarak lari mingguan yang valid (boleh 0 jika baru mulai).');
@@ -266,6 +281,13 @@
       showError('Isi jarak lari terjauhmu dalam 3 bulan terakhir yang valid (boleh 0 jika baru mulai).');
       return null;
     }
+
+    // Bukan lagi field manual — diturunkan dari km mingguan (yang sendirinya
+    // sudah auto-fill dari Strava kalau connected, atau diisi manual di
+    // field yang sama). planGenerator cuma pakai ini sebagai fallback
+    // default pace (kalau target waktu finish & race terakhir kosong
+    // dua-duanya) dan buat nge-tune jarak reps interval.
+    const fitnessLevel = deriveFitnessLevel(currentWeeklyKm);
 
     const daysPerWeek = Number(daysPerWeekInput.value);
     const preferredDays = getSelectedDays();
@@ -332,7 +354,8 @@
       ? settings.startDate.toISOString().slice(0, 10)
       : new Date().toISOString().slice(0, 10);
 
-    document.getElementById('fitnessLevel').value = settings.fitnessLevel;
+    // fitnessLevel sendiri tidak punya field di form lagi — diturunkan
+    // ulang otomatis dari currentWeeklyKm begitu plan digenerate lagi.
     document.getElementById('currentWeeklyKm').value = settings.currentWeeklyKm;
     document.getElementById('longestRecentRunKm').value = settings.longestRecentRunKm;
     conservativeModeInput.checked = settings.conservativeMode;
@@ -372,6 +395,7 @@
 
   function generateAndShowPlan(settings) {
     const plan = PaceForgeGenerator.generatePlan(settings);
+    lastFitnessLevel = settings.fitnessLevel;
     renderPlan(plan);
     enhanceWithAI();
     return plan;
@@ -968,7 +992,7 @@
     const payload = {
       raceLabel: meta.raceLabel,
       raceDate: meta.raceDate.toISOString().slice(0, 10),
-      fitnessLevel: document.getElementById('fitnessLevel').value,
+      fitnessLevel: lastFitnessLevel,
       planWeeks: meta.planWeeks,
       peakWeeklyKm: meta.peakWeeklyKm,
       peakLongRunKm: meta.peakLongRunKm,
