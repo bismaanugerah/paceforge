@@ -228,6 +228,11 @@ const PaceForgeGenerator = (() => {
     return Math.max(1, Math.floor((daysPerWeek - 1) / 2));
   }
 
+  // Shared by workoutTemplate's day-assignment (prioritize these onto
+  // weekdays — see below) and applyConservativeAdjustment (shift weight
+  // off these onto easy/recovery slots).
+  const QUALITY_TYPES = new Set(['tempo', 'interval']);
+
   /** Ordered workout-type template for a given days-per-week, excluding long run
    * which is always appended last (and mapped to the last selected day). */
   function workoutTemplate(daysPerWeek, weekIndexInBuild) {
@@ -258,7 +263,6 @@ const PaceForgeGenerator = (() => {
   // slots, in the same order/shape as `types` (which must be the
   // non-long-run template slots, e.g. restTemplate below).
   function applyConservativeAdjustment(types, weights) {
-    const QUALITY_TYPES = new Set(['tempo', 'interval']);
     let reclaimed = 0;
     const adjusted = weights.map((w, i) => {
       if (!QUALITY_TYPES.has(types[i])) return w;
@@ -636,12 +640,45 @@ const PaceForgeGenerator = (() => {
         const restWeights = conservativeMode
           ? applyConservativeAdjustment(restTemplate, baseSlotWeights)
           : baseSlotWeights;
-        let ri = 0;
-        slotDays.forEach(dow => {
-          if (dow === longRunDow) { typeByDow[dow] = 'longRun'; return; }
-          typeByDow[dow] = restTemplate[ri];
-          weightByDow[dow] = restWeights[ri];
-          ri++;
+
+        // Quality (tempo/interval) sessions get first claim on weekday
+        // (Mon-Fri) slots wherever there's a choice — long run (and often
+        // an easy/recovery day) already anchors the weekend, and a hard
+        // effort fits a normal weekday routine better than competing with
+        // weekend long-run recovery. Only spills onto a weekend day if
+        // there aren't enough weekday slots this week to hold every
+        // quality session (e.g. daysPerWeek=5 with just 2 weekdays picked).
+        // Non-quality slots (easy/recovery) fill whatever's left over, kept
+        // in their original template order to preserve which slot carries
+        // which weeklySplitForDays weight (see restWeights above).
+        const nonLongRunDaysChrono = slotDays.filter(dow => dow !== longRunDow);
+        const isWeekendDow = dow => dow === 0 || dow === 6;
+        const weekdayDays = nonLongRunDaysChrono.filter(dow => !isWeekendDow(dow));
+        const weekendDays = nonLongRunDaysChrono.filter(isWeekendDow);
+        const qualityIdx = restTemplate.map((t, i) => i).filter(i => QUALITY_TYPES.has(restTemplate[i]));
+        const nonQualityIdx = restTemplate.map((t, i) => i).filter(i => !QUALITY_TYPES.has(restTemplate[i]));
+
+        const usedWeekdayForQuality = Math.min(qualityIdx.length, weekdayDays.length);
+        const usedWeekendForQuality = Math.max(0, qualityIdx.length - weekdayDays.length);
+        const qualityDays = [
+          ...weekdayDays.slice(0, usedWeekdayForQuality),
+          ...weekendDays.slice(0, usedWeekendForQuality),
+        ];
+        // Restore chronological (Mon..Sun) order among whatever's left for
+        // the non-quality slots, same ordering rule used for sortedPreferredDays.
+        const leftoverDays = [...weekdayDays.slice(usedWeekdayForQuality), ...weekendDays.slice(usedWeekendForQuality)]
+          .sort((a, b) => (a === 0 ? 7 : a) - (b === 0 ? 7 : b));
+
+        typeByDow[longRunDow] = 'longRun';
+        qualityIdx.forEach((templateIdx, i) => {
+          const dow = qualityDays[i];
+          typeByDow[dow] = restTemplate[templateIdx];
+          weightByDow[dow] = restWeights[templateIdx];
+        });
+        nonQualityIdx.forEach((templateIdx, i) => {
+          const dow = leftoverDays[i];
+          typeByDow[dow] = restTemplate[templateIdx];
+          weightByDow[dow] = restWeights[templateIdx];
         });
       }
       let longRunKmThisWeek = isRaceWeek ? 0 : Math.min(longRunTargetKm, peakLongRunKm);
