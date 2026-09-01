@@ -527,12 +527,17 @@
     suggestedDaysOfWeek: [2, 4, 6, 0],
   };
 
-  // Dipanggil sekali setelah login, hanya kalau athlete itu belum punya plan
-  // tersimpan (lihat wiring di bawah) — mengisi field yang bisa diturunkan
-  // dari histori lari di Strava, tapi tetap lewat elemen form yang sama
-  // yang user isi manual, jadi otomatis tetap bisa diedit sebelum submit.
+  // Dipanggil setelah login (kalau athlete itu belum punya plan tersimpan —
+  // lihat wiring di bawah) dan lagi setiap kali "Buat Plan Baru" diklik, biar
+  // form baru selalu mulai dari data Strava terkini, bukan angka lama dari
+  // plan tersimpan sebelumnya. Mengisi field yang bisa diturunkan dari
+  // histori lari di Strava lewat elemen form yang sama yang user isi manual,
+  // jadi otomatis tetap bisa diedit sebelum submit.
   async function prefillFromStrava() {
     if (!paceforgeAuth) return;
+    // Reset dulu — pemanggilan sebelumnya (kalau ada) mungkin sudah
+    // menampilkannya, dan refresh kali ini belum tentu nemu data baru.
+    stravaFillBadge.hidden = true;
     let summary;
     if (paceforgeAuth.isDummy()) {
       summary = DUMMY_STRAVA_SUMMARY;
@@ -636,6 +641,11 @@
     resultSection.hidden = true;
     formSection.hidden = false;
     formSection.scrollIntoView({ behavior: 'smooth' });
+    // The form up to now still holds whatever was last loaded (typically
+    // the previously-saved plan's numbers) — refresh the Strava-derived
+    // fields so starting a new plan reflects current training, not
+    // whatever was true when that saved plan was first generated.
+    if (REQUIRE_LOGIN) prefillFromStrava();
   });
 
   function renderPlan(plan) {
