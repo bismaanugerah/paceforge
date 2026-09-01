@@ -47,3 +47,14 @@ create table if not exists public.plans (
 );
 
 alter table public.plans enable row level security;
+
+-- `service_role` selalu bypass RLS, TAPI itu lapisan yang beda dari grant
+-- privilege dasar Postgres di level tabel — kalau project dibuat dengan
+-- "Automatically expose new tables" dimatikan (disarankan di README, demi
+-- default-deny anon/authenticated), tabel baru juga tidak otomatis
+-- ke-grant ke `service_role`, bukan cuma ke anon/authenticated. Tanpa baris
+-- di bawah ini, server/supabaseAdmin.js akan gagal dengan
+-- "permission denied for table ..." (Postgres error 42501) meski RLS-nya
+-- sendiri sudah benar.
+grant select, insert, update, delete on public.strava_athletes to service_role;
+grant select, insert, update, delete on public.plans to service_role;
