@@ -17,7 +17,7 @@
  * tanpa login sungguhan).
  */
 window.PACEFORGE_CONFIG = {
-  STRAVA_CLIENT_ID: 'YOUR-STRAVA-CLIENT-ID',
+  STRAVA_CLIENT_ID: '276126',
 
   // Set ke true begitu app Strava + server env vars di atas sudah beneran
   // disambungkan (lihat README, bagian "Setup login & sinkronisasi plan
@@ -25,5 +25,5 @@ window.PACEFORGE_CONFIG = {
   // tombol login/logout di header, badge MODE DUMMY) disembunyikan dan form
   // training plan langsung tampil tanpa login — kodenya tetap ada, tinggal
   // di-flip lagi kapan pun tanpa perlu ubah apa pun yang lain.
-  REQUIRE_LOGIN: false,
+  REQUIRE_LOGIN: true,
 };
