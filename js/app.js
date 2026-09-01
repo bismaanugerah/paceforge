@@ -306,10 +306,49 @@
   // approximate thresholds, same rough boundaries the old dropdown's option
   // labels described ("belum pernah/baru bisa lari 5K" vs "terbiasa 5-10K"
   // vs "terbiasa 10K+ rutin").
-  function deriveFitnessLevel(currentWeeklyKm) {
+  //
+  // Mileage alone is an incomplete signal though — plenty of runners log
+  // solid weekly volume at an easy, unhurried pace (still developing real
+  // race speed), and plenty of others run comparatively little but are
+  // genuinely fast when they do (e.g. rebuilding volume after time off, or
+  // just naturally quick). When a recent race/time-trial is available,
+  // fold in a pace-based read too and take whichever signal points to the
+  // MORE advanced level — either one is real evidence of fitness the other
+  // might miss on its own.
+  const FITNESS_LEVEL_RANK = { beginner: 0, intermediate: 1, advanced: 2 };
+
+  function deriveFitnessLevelFromMileage(currentWeeklyKm) {
     if (currentWeeklyKm < 15) return 'beginner';
     if (currentWeeklyKm < 40) return 'intermediate';
     return 'advanced';
+  }
+
+  // Boundaries expressed as a 10K-equivalent finish time (Riegel-normalized,
+  // so a 5K or half marathon result compares fairly). Anchored to actual
+  // Indonesian recreational-running benchmarks rather than a guess:
+  //   - "Pemula" 10K finishers typically run 60-90 min (IDN Times); a sub-
+  //     5:00/km pace ("pace 4"/"kompetitif") is called out as the amateur
+  //     "holy grail" advanced tier, while a sub-3-hour marathon is still
+  //     considered an exceptional feat in the Indonesian running community
+  //     (i.e. "advanced" here means genuinely strong amateur, not
+  //     world-class) — so the advanced cutoff sits at a sub-50:00 10K, not
+  //     something far stricter.
+  //   - "Rekreasional"/intermediate 10K finishers land 50-70 min.
+  // These also line up with planGenerator.js's DEFAULT_GOAL_PACE_SEC
+  // per-level paces (4:45/6:00/7:30 per km, i.e. ~47:30/60:00/75:00 over
+  // 10K) rounded to clean boundaries.
+  function deriveFitnessLevelFromPace(equiv10kTimeSec) {
+    if (equiv10kTimeSec <= 50 * 60) return 'advanced'; // sub-5:00/km-equivalent
+    if (equiv10kTimeSec <= 65 * 60) return 'intermediate'; // 5:00-6:30/km-equivalent
+    return 'beginner';
+  }
+
+  function deriveFitnessLevel(currentWeeklyKm, recentRaceTimeSec, recentRaceDistanceKm) {
+    const mileageLevel = deriveFitnessLevelFromMileage(currentWeeklyKm);
+    if (!recentRaceTimeSec || !recentRaceDistanceKm) return mileageLevel;
+    const equiv10kTimeSec = PaceForgeGenerator.predictRaceTime(recentRaceTimeSec, recentRaceDistanceKm, 10);
+    const paceLevel = deriveFitnessLevelFromPace(equiv10kTimeSec);
+    return FITNESS_LEVEL_RANK[paceLevel] > FITNESS_LEVEL_RANK[mileageLevel] ? paceLevel : mileageLevel;
   }
 
   // Reads & validates every field, showing an inline error and returning
@@ -354,12 +393,26 @@
       return null;
     }
 
+    let recentRaceTimeSec = null;
+    let recentRaceDistanceKm = null;
+    if (hasRecentRace.checked) {
+      const h = Number(recentRaceHours.value) || 0;
+      const m = Number(recentRaceMinutes.value) || 0;
+      const s = Number(recentRaceSeconds.value) || 0;
+      recentRaceTimeSec = h * 3600 + m * 60 + s;
+      recentRaceDistanceKm = getRecentRaceDistanceKm();
+      if (recentRaceTimeSec <= 0) { showError('Isi waktu race terakhir yang valid.'); return null; }
+      if (!recentRaceDistanceKm || recentRaceDistanceKm <= 0) { showError('Isi jarak race terakhir yang valid.'); return null; }
+    }
+
     // Bukan lagi field manual — diturunkan dari km mingguan (yang sendirinya
     // sudah auto-fill dari Strava kalau connected, atau diisi manual di
-    // field yang sama). planGenerator cuma pakai ini sebagai fallback
-    // default pace (kalau target waktu finish & race terakhir kosong
-    // dua-duanya) dan buat nge-tune jarak reps interval.
-    const fitnessLevel = deriveFitnessLevel(currentWeeklyKm);
+    // field yang sama), dikombinasikan dengan pace dari race terakhir kalau
+    // ada (lihat deriveFitnessLevel di atas). planGenerator cuma pakai ini
+    // sebagai fallback default pace (kalau target waktu finish & race
+    // terakhir kosong dua-duanya) dan buat nge-tune jarak reps interval +
+    // proyeksi kenaikan pace yang konservatif.
+    const fitnessLevel = deriveFitnessLevel(currentWeeklyKm, recentRaceTimeSec, recentRaceDistanceKm);
 
     const daysPerWeek = Number(daysPerWeekInput.value);
     const preferredDays = getSelectedDays();
@@ -372,18 +425,6 @@
     if (longRunDay === null || !preferredDays.includes(longRunDay)) {
       showError('Pilih hari untuk long run dari hari latihan yang sudah kamu tandai.');
       return null;
-    }
-
-    let recentRaceTimeSec = null;
-    let recentRaceDistanceKm = null;
-    if (hasRecentRace.checked) {
-      const h = Number(recentRaceHours.value) || 0;
-      const m = Number(recentRaceMinutes.value) || 0;
-      const s = Number(recentRaceSeconds.value) || 0;
-      recentRaceTimeSec = h * 3600 + m * 60 + s;
-      recentRaceDistanceKm = getRecentRaceDistanceKm();
-      if (recentRaceTimeSec <= 0) { showError('Isi waktu race terakhir yang valid.'); return null; }
-      if (!recentRaceDistanceKm || recentRaceDistanceKm <= 0) { showError('Isi jarak race terakhir yang valid.'); return null; }
     }
 
     let targetTimeSec = null;
