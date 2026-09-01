@@ -317,6 +317,13 @@ const PaceForgeGenerator = (() => {
     let taperWeeks = Math.min(profile.taperWeeks, Math.max(planWeeks - 1, 0));
     let buildWeeks = Math.max(planWeeks - taperWeeks, 1);
 
+    // Same safe compounding weekly rate used for the race-specific block's
+    // own volume ramp below (peakWeeklyKm) — reused here for the pre-block
+    // "prep phase" suggestion (extraWeeks below) so both give a
+    // consistent, evidence-based sense of how fast weekly mileage can
+    // safely grow, rather than two different numbers.
+    const WEEKLY_GROWTH_RATE = conservativeMode ? 1.05 : 1.08;
+
     const warnings = [];
     if (conservativeMode) {
       warnings.push('Mode latihan konservatif aktif — kenaikan volume mingguan, porsi speedwork, dan kenaikan jarak long run di plan ini sengaja diturunkan untuk menjaga cedera/nyeri yang kamu tandai. Kalau nyeri berlanjut, konsultasikan ke dokter/fisioterapis olahraga.');
@@ -326,7 +333,35 @@ const PaceForgeGenerator = (() => {
     }
     const extraWeeks = weeksAvailable - profile.recWeeks;
     if (extraWeeks > 0) {
-      warnings.push(`Kamu punya ${extraWeeks} minggu ekstra sebelum race. Plan detail di bawah mencakup ${planWeeks} minggu terakhir — sebelum itu, jaga jarak lari mingguan sekitar ${currentWeeklyKm} km agar tetap fit.`);
+      // Not "just hold steady" — a runner with this much lead time can (and
+      // should) use it to build a stronger aerobic base before the
+      // race-specific block starts, the same way real periodization works
+      // (a base/prep phase ahead of the structured build). Suggest a
+      // concrete target using the same safe per-week growth rate the block
+      // itself ramps volume by, rather than a flat "just maintain X km" —
+      // floored at 3 km/week so a brand-new runner (currentWeeklyKm 0)
+      // still gets a sensible non-zero number to aim for.
+      //
+      // Two guardrails distinct from the race-block's own peakWeeklyKm
+      // growth cap (3.2x/2.2x) below, which is a loose internal anchor
+      // that downstream clamps (peakLongRunKm's absolute range, per-session
+      // caps) rein in before it becomes a real schedule number — applying
+      // it directly here as a literal target would produce nonsense (e.g.
+      // naively compounding 8%/week for 17 straight weeks implies ~3.2x,
+      // i.e. suggesting 42 km/week become ~134 km/week, an ultra-runner's
+      // volume, which is neither realistic nor safe to suggest):
+      //   1. Nobody should compound weekly growth uninterrupted for months
+      //      — real base-building still needs periodic easier weeks — so
+      //      only apply growth across at most a full recommended block's
+      //      worth of weeks even if extraWeeks is bigger than that.
+      //   2. Cap the total prep-phase gain at a much smaller, genuinely
+      //      achievable multiple of today's mileage.
+      const PREP_GROWTH_CAP = conservativeMode ? 1.3 : 1.6;
+      const prepStartKm = Math.max(currentWeeklyKm, 3);
+      const prepGrowthWeeks = Math.min(extraWeeks, profile.recWeeks);
+      const prepGrowthMultiplier = clamp(Math.pow(WEEKLY_GROWTH_RATE, prepGrowthWeeks), 1, PREP_GROWTH_CAP);
+      const prepTargetWeeklyKm = Math.round(prepStartKm * prepGrowthMultiplier);
+      warnings.push(`Kamu punya ${extraWeeks} minggu ekstra sebelum race. Plan detail di bawah mencakup ${planWeeks} minggu terakhir (training block ${raceLabel} standar) — sebelum itu, manfaatkan buat naikkan base mileage bertahap dari ~${Math.round(prepStartKm)} ke sekitar ${prepTargetWeeklyKm} km/minggu (kira-kira +${Math.round((WEEKLY_GROWTH_RATE - 1) * 100)}% tiap minggu, laju kenaikan aman yang sama dipakai di plan ini). Plan di bawah tetap dihitung dari kondisimu sekarang — generate ulang lebih dekat ke tanggal mulai training kalau base mileage-mu sudah naik, supaya peak volume & long run-nya ikut menyesuaikan jadi lebih kuat.`);
     }
 
     // Goal pace (sec/km), in priority order:
@@ -413,7 +448,8 @@ const PaceForgeGenerator = (() => {
     // of the standard 29-32km range.
     // In conservative mode (injury/pain flagged by the user) volume is grown
     // more slowly and capped lower, on top of the ramp/jump guardrails below.
-    const WEEKLY_GROWTH_RATE = conservativeMode ? 1.05 : 1.08;
+    // (WEEKLY_GROWTH_RATE itself is declared earlier, alongside the
+    // extraWeeks prep-phase warning that reuses it.)
     const growthMultiplier = clamp(Math.pow(WEEKLY_GROWTH_RATE, buildWeeks), 1.15, conservativeMode ? 2.2 : 3.2);
     const { longRunShare, slotWeights: baseSlotWeights } = weeklySplitForDays(daysPerWeek);
     // Theoretical growth target — deliberately NOT what the week-by-week
