@@ -30,16 +30,11 @@ const PaceForgeGenerator = (() => {
 
   // Recommended plan length / taper / peak long-run range per race type.
   // Values are generic heuristics (km), not sports-science guarantees.
-  // maxLongRunShare = the biggest safe fraction of peak weekly volume a single
-  // long run is allowed to be. Real marathon blocks — especially the common
-  // 3-4 day/week plans — legitimately run a long run that's a much bigger
-  // slice of the week (the classic 20-miler inside a 40-mile week) than a
-  // 5K/10K/half build does, so this is race-specific rather than one flat number.
   const RACE_PROFILES = {
-    '5k':   { recWeeks: 8,  taperWeeks: 1, longRunMin: 8,  longRunMax: 12, maxLongRunShare: 0.40 },
-    '10k':  { recWeeks: 10, taperWeeks: 1, longRunMin: 12, longRunMax: 16, maxLongRunShare: 0.40 },
-    'half': { recWeeks: 12, taperWeeks: 2, longRunMin: 16, longRunMax: 19, maxLongRunShare: 0.42 },
-    'full': { recWeeks: 16, taperWeeks: 3, longRunMin: 29, longRunMax: 32, maxLongRunShare: 0.55 },
+    '5k':   { recWeeks: 8,  taperWeeks: 1, longRunMin: 8,  longRunMax: 12 },
+    '10k':  { recWeeks: 10, taperWeeks: 1, longRunMin: 12, longRunMax: 16 },
+    'half': { recWeeks: 12, taperWeeks: 2, longRunMin: 16, longRunMax: 19 },
+    'full': { recWeeks: 16, taperWeeks: 3, longRunMin: 29, longRunMax: 32 },
   };
 
   // Default goal pace (sec/km) by fitness level, used only when the user
@@ -50,16 +45,6 @@ const PaceForgeGenerator = (() => {
     intermediate: 6 * 60,
     advanced: 4 * 60 + 45,
   };
-
-  // Realistic ceiling for a single non-long-run session (easy/recovery/
-  // tempo/interval), in km. Real high-mileage plans reach big weekly
-  // totals by adding MORE sessions (often doubles), not by ballooning a
-  // handful of them — a 4-day/week plan has no sane way to carry the same
-  // weekly volume a 6-day/week plan can. Used below to cap how high peak
-  // weekly volume is allowed to grow for the days-per-week actually
-  // available, so growth off a high currentWeeklyKm base on a low
-  // daysPerWeek plan can't quietly turn "easy" days into ultras.
-  const MAX_SUPPORT_SESSION_AVG_KM = 15;
 
   // Training-zone pace = goalPaceSec * multiplier. Ordered slow -> fast.
   const PACE_MULTIPLIERS = {
@@ -120,10 +105,38 @@ const PaceForgeGenerator = (() => {
     return timeSec * Math.pow(toKm / fromKm, 1.06);
   }
 
-  function longRunShareForDays(daysPerWeek) {
-    if (daysPerWeek <= 4) return 0.35;
-    if (daysPerWeek === 5) return 0.28;
-    return 0.25; // 6 days
+  // How weekKm splits across the week's sessions, by days/week — long run
+  // share plus a weight per non-long-run template slot, in the exact same
+  // order workoutTemplate() below returns them (excluding 'longRun'
+  // itself). Every entry's weights + longRunShare sum to 1.0.
+  //
+  // 3/4/5-day splits are pulled from published weekly-mileage-distribution
+  // guidance (a long run needing to be a much bigger share of the week
+  // when there are only 3-4 runs to carry it, easing down as more days
+  // share the load):
+  //   - 3 days: quality 20%, easy 30%, long run 50%
+  //   - 4 days: easy 20%, quality 20%, easy 25%, long run 35%
+  //   - 5 days: recovery-easy 15%, quality(intensity) 15%, medium-easy 20%,
+  //     quality(threshold) 15%, long run 35%
+  //   (source: runlovers.it "Weekly Mileage Distribution: How to Structure
+  //   Your Running Volume")
+  // 6 days isn't as commonly published with exact numbers — this is a
+  // reasoned extrapolation of the same pattern (long run share keeps
+  // easing down; total quality stays close to the classic 80/20
+  // easy:hard split) rather than a directly-sourced figure.
+  function weeklySplitForDays(daysPerWeek) {
+    switch (daysPerWeek) {
+      // ['easy', quality]
+      case 3: return { longRunShare: 0.50, slotWeights: [0.30, 0.20] };
+      // ['easy', quality, 'easy']
+      case 4: return { longRunShare: 0.35, slotWeights: [0.20, 0.20, 0.25] };
+      // ['easy', quality, 'easy', 'tempo']
+      case 5: return { longRunShare: 0.35, slotWeights: [0.15, 0.15, 0.20, 0.15] };
+      // ['easy', quality, 'easy', 'tempo', 'recovery']
+      case 6: return { longRunShare: 0.27, slotWeights: [0.18, 0.12, 0.21, 0.12, 0.10] };
+      // Fallback for anything outside the 3-6 range the form actually offers.
+      default: return { longRunShare: 0.50, slotWeights: [0.50] };
+    }
   }
 
   /** Standard running-plan periodization: the build block (everything before
@@ -155,6 +168,29 @@ const PaceForgeGenerator = (() => {
       case 6: return ['easy', alternateSpeed, 'easy', 'tempo', 'recovery', 'longRun'];
       default: return ['easy', 'longRun'];
     }
+  }
+
+  // Conservative mode (injury/pain flagged by the user) dials back
+  // speedwork same as it always has, just applied to the new weighted
+  // split instead of the old flat speedShare formula: shift ~35% of each
+  // quality (tempo/interval) slot's weight over to the easy/recovery
+  // slots, in the same order/shape as `types` (which must be the
+  // non-long-run template slots, e.g. restTemplate below).
+  function applyConservativeAdjustment(types, weights) {
+    const QUALITY_TYPES = new Set(['tempo', 'interval']);
+    let reclaimed = 0;
+    const adjusted = weights.map((w, i) => {
+      if (!QUALITY_TYPES.has(types[i])) return w;
+      const cut = w * 0.35;
+      reclaimed += cut;
+      return w - cut;
+    });
+    const easyIdxs = types.map((t, i) => (t === 'easy' || t === 'recovery') ? i : -1).filter(i => i >= 0);
+    if (easyIdxs.length && reclaimed > 0) {
+      const share = reclaimed / easyIdxs.length;
+      easyIdxs.forEach(i => { adjusted[i] += share; });
+    }
+    return adjusted;
   }
 
   // Visual workout-structure breakdown for every non-rest/race session,
@@ -289,38 +325,14 @@ const PaceForgeGenerator = (() => {
     // more slowly and capped lower, on top of the ramp/jump guardrails below.
     const WEEKLY_GROWTH_RATE = conservativeMode ? 1.05 : 1.08;
     const growthMultiplier = clamp(Math.pow(WEEKLY_GROWTH_RATE, buildWeeks), 1.15, conservativeMode ? 2.2 : 3.2);
-    const longRunShare = longRunShareForDays(daysPerWeek);
+    const { longRunShare, slotWeights: baseSlotWeights } = weeklySplitForDays(daysPerWeek);
     let peakWeeklyKm = Math.max(currentWeeklyKm * growthMultiplier, currentWeeklyKm); // never plan below current base
 
-    // Guardrail: cap peak weekly volume so it stays distributable across
-    // daysPerWeek sessions without any single non-long-run day blowing past
-    // MAX_SUPPORT_SESSION_AVG_KM. The long run itself can absorb up to
-    // profile.longRunMax; everything past that has to be spread across the
-    // remaining (daysPerWeek - 1) sessions, so that's the volume ceiling.
-    // Never caps below currentWeeklyKm — same "never plan below current
-    // base" rule as above.
-    const realisticWeeklyKmCeiling = Math.max(
-      profile.longRunMax + (daysPerWeek - 1) * MAX_SUPPORT_SESSION_AVG_KM,
-      currentWeeklyKm
-    );
-    if (peakWeeklyKm > realisticWeeklyKmCeiling) {
-      peakWeeklyKm = realisticWeeklyKmCeiling;
-      warnings.push(`Volume mingguan puncak dibatasi ke sekitar ${Math.round(peakWeeklyKm)} km — dengan ${daysPerWeek} hari latihan/minggu, volume yang lebih tinggi dari itu bakal bikin sesi selain long run jadi nggak realistis (terlalu jauh buat lari "santai"/tempo harian). Kalau mau volume mingguan lebih tinggi, coba tambah jumlah hari latihan per minggu.`);
-    }
-
-    // Aim for the race's recommended long-run range, driven off peak weekly volume.
+    // Aim for the race's recommended long-run range, driven off peak weekly
+    // volume — longRunShare already reflects a realistic per-days-per-week
+    // share (see weeklySplitForDays), so no separate "safe share" guardrail
+    // is needed here beyond clamping to the race-appropriate absolute range.
     let peakLongRunKm = clamp(peakWeeklyKm * longRunShare, profile.longRunMin, profile.longRunMax);
-
-    // Guardrail: never let a single long run swallow an unsafe share of the week just
-    // to hit the recommended distance. If the runner's safe peak weekly volume can't
-    // support it, cap the long run and say so instead of silently shipping a plan that
-    // doesn't match the range it's supposed to. The safe share is race-specific — see
-    // RACE_PROFILES.maxLongRunShare.
-    const safeLongRunCap = peakWeeklyKm * profile.maxLongRunShare;
-    if (peakLongRunKm > safeLongRunCap) {
-      peakLongRunKm = safeLongRunCap;
-      warnings.push(`Long run puncak dibatasi ke sekitar ${Math.round(peakLongRunKm)} km — di bawah rekomendasi umum untuk ${raceLabel} (${profile.longRunMin}-${profile.longRunMax} km) — karena mileage mingguanmu saat ini (${currentWeeklyKm} km) belum cukup untuk mendukung long run sejauh itu dengan aman. Sebaiknya naikkan base mileage mingguan dulu sebelum mulai training block ini.`);
-    }
 
     // Safe long-run ramp: don't let the scheduled long run jump up from the
     // runner's actual longest recent run any faster than a sensible weekly
@@ -349,7 +361,6 @@ const PaceForgeGenerator = (() => {
     const weeks = [];
     let actualPeakLongRunKm = 0;
     let rampLimited = false;
-    let supportRunCapped = false;
 
     for (let w = 0; w < planWeeks; w++) {
       const weekMonday = addDays(firstMonday, w * 7);
@@ -387,23 +398,31 @@ const PaceForgeGenerator = (() => {
 
       // Map ordered template slots onto the chronologically-sorted preferred days.
       const slotDays = sortedPreferredDays.slice(0, daysPerWeek);
-      const nonLongSlots = template.filter(t => t !== 'longRun' && t !== 'race');
 
-      // Which type lands on which day-of-week. Race week keeps its existing
-      // index-based mapping (race always on the last slot). Build/taper weeks
-      // instead pin the long run to the user's chosen long-run day — falling
-      // back to the last chronological slot if that day somehow isn't
-      // selected this week — and fill the remaining slots with the rest of
-      // the template, in order, on the other selected days.
+      // Which type (and, for non-long/race slots, what share of weekKm —
+      // see weeklySplitForDays) lands on which day-of-week. Race week keeps
+      // its existing index-based mapping (race always on the last slot).
+      // Build/taper weeks instead pin the long run to the user's chosen
+      // long-run day — falling back to the last chronological slot if that
+      // day somehow isn't selected this week — and fill the remaining
+      // slots with the rest of the template, in order, on the other
+      // selected days, each carrying its matching weeklySplitForDays weight.
       const typeByDow = {};
+      const weightByDow = {};
       if (isRaceWeek) {
         slotDays.forEach((dow, idx) => { typeByDow[dow] = template[idx]; });
       } else {
         const longRunDow = slotDays.includes(longRunDay) ? longRunDay : slotDays[slotDays.length - 1];
         const restTemplate = template.filter(t => t !== 'longRun');
+        const restWeights = conservativeMode
+          ? applyConservativeAdjustment(restTemplate, baseSlotWeights)
+          : baseSlotWeights;
         let ri = 0;
         slotDays.forEach(dow => {
-          typeByDow[dow] = dow === longRunDow ? 'longRun' : restTemplate[ri++];
+          if (dow === longRunDow) { typeByDow[dow] = 'longRun'; return; }
+          typeByDow[dow] = restTemplate[ri];
+          weightByDow[dow] = restWeights[ri];
+          ri++;
         });
       }
       let longRunKmThisWeek = isRaceWeek ? 0 : Math.min(weekKm * longRunShare, peakLongRunKm);
@@ -416,8 +435,6 @@ const PaceForgeGenerator = (() => {
         longRunRampBase = Math.max(longRunRampBase, longRunKmThisWeek);
         actualPeakLongRunKm = Math.max(actualPeakLongRunKm, longRunKmThisWeek);
       }
-      const remainingKm = weekKm - longRunKmThisWeek;
-      const speedShare = conservativeMode ? 0.12 : 0.20;
 
       slotDays.forEach((dow) => {
         const type = typeByDow[dow];
@@ -447,27 +464,18 @@ const PaceForgeGenerator = (() => {
           return;
         }
 
-        // Distribute remainingKm across the non-long, non-race slots.
-        const countOthers = nonLongSlots.length || 1;
-        let km;
-        if (type === 'tempo' || type === 'interval') {
-          km = weekKm * speedShare;
-        } else {
-          const usedBySpeed = nonLongSlots.includes('tempo') || nonLongSlots.includes('interval') ? weekKm * speedShare : 0;
-          const easySlots = nonLongSlots.filter(t => t === 'easy' || t === 'recovery').length || 1;
-          km = (remainingKm - usedBySpeed) / easySlots;
-        }
-        // Guardrail: a "long run" is only meaningful if it's actually the
-        // longest run of the week — with few training days (a single "easy"
-        // slot has to absorb everything remainingKm doesn't cover), the
-        // formula above can otherwise hand a support session more distance
-        // than that same week's long run. Cap it below the long run instead;
-        // the shortfall just isn't distributed anywhere else (a lower actual
-        // weekKm total is safer than an oversized "easy" day).
-        if (longRunKmThisWeek > 0 && km >= longRunKmThisWeek * 0.85) {
-          km = longRunKmThisWeek * 0.85;
-          supportRunCapped = true;
-        }
+        // This slot's share of weekKm comes straight from
+        // weeklySplitForDays (see weightByDow above) — every non-long-run
+        // weight is already < longRunShare by construction, so under normal
+        // progression no support session can land bigger than the long run.
+        // The one edge case that isn't covered by that alone: the ramp
+        // guardrail above can hold longRunKmThisWeek well below its
+        // weekKm*longRunShare "budget" (e.g. a high current weekly volume
+        // paired with a much shorter longest recent single run) without
+        // shrinking the other slots to match — so still clamp against the
+        // *actual* long run distance this week as a final safety net.
+        let km = weekKm * (weightByDow[dow] ?? 0);
+        if (longRunKmThisWeek > 0) km = Math.min(km, longRunKmThisWeek * 0.95);
         dayObj.type = type;
         dayObj.km = Math.max(0, Math.round(km * 2) / 2);
         dayObj.paceSecPerKm = paces[type] ?? paces.easy;
@@ -494,9 +502,6 @@ const PaceForgeGenerator = (() => {
 
     if (rampLimited) {
       warnings.push(`Long run puncak di jadwal ini (~${Math.round(actualPeakLongRunKm * 10) / 10} km) sengaja ditahan di bawah target ${Math.round(peakLongRunKm)} km, karena lari terjauhmu saat ini baru ${longestRecentRunKm} km — kenaikan jarak long run dinaikkan bertahap per minggu (maks ~20%) supaya aman dari cedera. Kalau waktu persiapanmu masih cukup panjang, ini normal dan long run akan terus naik mendekati race day.`);
-    }
-    if (supportRunCapped) {
-      warnings.push(`Beberapa sesi lari santai/tempo/interval di jadwal ini sengaja ditahan supaya tidak lebih jauh dari long run minggu itu sendiri — dengan cuma ${daysPerWeek} hari latihan/minggu, kadang volume mingguan yang "seharusnya" tercapai tidak muat dibagi rata ke sesi-sesi lain secara aman, jadi totalnya bisa datang lebih rendah dari target. Tambah hari latihan per minggu kalau mau volume mingguan lebih tinggi tanpa harus mengorbankan ini.`);
     }
 
     return {
