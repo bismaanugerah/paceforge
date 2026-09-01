@@ -788,6 +788,57 @@
     if (REQUIRE_LOGIN) prefillFromStrava();
   });
 
+  // Renders the 5-zone VDOT pace table into #paceLegend. VDOT is derived
+  // from the runner's actual recent-race result when the form has one
+  // (most accurate — a real performance), falling back to the generator's
+  // own goal pace at the target race distance otherwise (see
+  // PaceForgeVDOT.vdotFromGoalPace) so the table always has something to
+  // show. Silently renders nothing if both are somehow unavailable/invalid
+  // rather than showing a broken table.
+  function renderPaceZones(meta) {
+    const { formatDuration } = PaceForgeGenerator;
+    const { vdotFromPerformance, vdotFromGoalPace, paceZonesFromVDOT, formatPaceRange, ZONE_ORDER, ZONE_LABELS, ZONE_PCT_RANGES } = PaceForgeVDOT;
+
+    let vdot;
+    let sourceLabel;
+    if (meta.recentRaceTimeSec && meta.recentRaceDistanceKm) {
+      vdot = vdotFromPerformance(meta.recentRaceDistanceKm, meta.recentRaceTimeSec);
+      sourceLabel = `dari waktu race terakhirmu (${formatDuration(meta.recentRaceTimeSec)} / ${meta.recentRaceDistanceKm} km)`;
+    } else {
+      vdot = vdotFromGoalPace(meta.raceDistanceKm, meta.goalPaceSec);
+      sourceLabel = 'dari estimasi goal pace (belum ada data race terakhir)';
+    }
+
+    const zones = vdot ? paceZonesFromVDOT(vdot) : null;
+    if (!zones) { paceLegend.innerHTML = ''; return; }
+
+    paceLegend.innerHTML = `
+      <div class="pace-zone-header">
+        <span class="pace-zone-title">🎯 Zona Pace (VDOT ${vdot.toFixed(1)})</span>
+        <span class="pace-zone-source">${sourceLabel}</span>
+      </div>
+      <div class="table-scroll">
+        <table class="pace-zone-table">
+          <thead><tr><th>Zona</th><th>% VO2max</th><th>Pace /km</th></tr></thead>
+          <tbody>
+            ${ZONE_ORDER.map(key => {
+              const [lo, hi] = ZONE_PCT_RANGES[key];
+              const { fastSec, slowSec } = zones[key];
+              return `
+                <tr>
+                  <td>${ZONE_LABELS[key]}</td>
+                  <td>${Math.round(lo * 100)}–${Math.round(hi * 100)}%</td>
+                  <td><strong>${formatPaceRange(fastSec, slowSec)}</strong></td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <p class="pace-zone-note">Dihitung pakai formula VDOT Jack Daniels (metodologi yang sama dipakai kalkulator seperti vdoto2.com) — bukan tebakan level kebugaran generik. Beda dari pace target di jadwal mingguan di bawah, yang naik bertahap tiap minggu menuju goal pace; tabel ini pace zona berdasar kebugaranmu saat ini.</p>
+    `;
+  }
+
   function renderPlan(plan) {
     lastPlan = plan;
     const { meta, warnings, weeks } = plan;
@@ -824,20 +875,15 @@
       ` : ''}
     `;
 
-    // Pace legend — only the "quality" zones (tempo/interval) where hitting
-    // a precise pace actually matters; recovery/easy/long run are
-    // effort-based (see the exertion legend below) so a specific number
-    // here isn't useful and was cluttering the summary.
-    const legendZones = [
-      ['tempo', meta.paces.tempo],
-      ['interval', meta.paces.interval],
-    ];
-    paceLegend.innerHTML = legendZones.map(([type, sec]) => `
-      <div class="legend-item">
-        <span class="legend-dot" style="background:${TYPE_COLORS[type]}"></span>
-        ${TYPE_LABELS[type]}: <strong>${formatPace(sec)}</strong>
-      </div>
-    `).join('');
+    // Zona Pace — full 5-zone VDOT table (Jack Daniels methodology, same
+    // one popularized by calculators like vdoto2.com), computed from the
+    // runner's actual recent-race performance when available, or from the
+    // generator's own goal pace otherwise (see PaceForgeVDOT.vdotFromGoalPace)
+    // so the table is always shown. Distinct from the schedule's own
+    // recovery/easy/tempo/interval pace targets above (which ramp week to
+    // week toward goal pace) — this is a fitness-level reference table, not
+    // a per-week target.
+    renderPaceZones(meta);
 
     // Weeks
     planWeeksEl.innerHTML = weeks.map(week => `
@@ -978,15 +1024,63 @@
         y += boxHeight + 18;
       }
 
-      // --- Legends (pace zones + exertion colors) -------------------------
-      // Only the "quality" zones (tempo/interval) — see the matching legend
-      // in the on-page summary above for why recovery/easy/long run are left out.
-      const paceLegendItems = [
-        ['tempo', meta.paces.tempo], ['interval', meta.paces.interval],
-      ];
-      y = drawInlineLegend(doc, margin, y, usableWidth,
-        paceLegendItems.map(([type, sec]) => ({ color: TYPE_HEX[type], text: `${TYPE_LABELS[type]}: ${formatPace(sec)}` })));
-      y += 6;
+      // --- Zona Pace (VDOT) table -----------------------------------------
+      // Mirrors the on-screen "Zona Pace" table (see renderPaceZones) —
+      // same VDOT derivation (recent race if given, else the generator's
+      // own goal pace, see PaceForgeVDOT.vdotFromGoalPace) and same 5
+      // Daniels training zones, so the PDF and on-screen result stay
+      // consistent with each other.
+      {
+        const { vdotFromPerformance, vdotFromGoalPace, paceZonesFromVDOT, formatPaceRange, ZONE_ORDER, ZONE_LABELS, ZONE_PCT_RANGES } = PaceForgeVDOT;
+        let vdot, zoneSourceLabel;
+        if (meta.recentRaceTimeSec && meta.recentRaceDistanceKm) {
+          vdot = vdotFromPerformance(meta.recentRaceDistanceKm, meta.recentRaceTimeSec);
+          zoneSourceLabel = `dari waktu race terakhir (${PaceForgeGenerator.formatDuration(meta.recentRaceTimeSec)} / ${meta.recentRaceDistanceKm} km)`;
+        } else {
+          vdot = vdotFromGoalPace(meta.raceDistanceKm, meta.goalPaceSec);
+          zoneSourceLabel = 'dari estimasi goal pace (belum ada data race terakhir)';
+        }
+        const zones = vdot ? paceZonesFromVDOT(vdot) : null;
+        if (zones) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(11);
+          doc.setTextColor(...inkColor);
+          doc.text(`Zona Pace (VDOT ${vdot.toFixed(1)})`, margin, y);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          doc.setTextColor(...mutedColor);
+          doc.text(pdfSafeText(zoneSourceLabel), margin, y + 12);
+          y += 18;
+
+          doc.autoTable({
+            startY: y,
+            margin: { left: margin, right: margin },
+            head: [['Zona', '% VO2max', 'Pace /km']],
+            body: ZONE_ORDER.map(key => {
+              const [lo, hi] = ZONE_PCT_RANGES[key];
+              const { fastSec, slowSec } = zones[key];
+              return [ZONE_LABELS[key], `${Math.round(lo * 100)}–${Math.round(hi * 100)}%`, formatPaceRange(fastSec, slowSec)];
+            }),
+            theme: 'grid',
+            styles: { font: 'helvetica', fontSize: 8.3, cellPadding: 5, textColor: inkColor, lineColor: [225, 228, 236], lineWidth: 0.5 },
+            headStyles: { fillColor: [245, 246, 248], textColor: mutedColor, fontStyle: 'bold', fontSize: 7.2 },
+            columnStyles: { 0: { cellWidth: 150 }, 1: { cellWidth: 100 }, 2: { cellWidth: 'auto' } },
+          });
+          y = doc.lastAutoTable.finalY + 8;
+
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(7.3);
+          doc.setTextColor(...mutedColor);
+          const noteLines = doc.splitTextToSize(
+            'Dihitung pakai formula VDOT Jack Daniels (metodologi yang sama dipakai kalkulator seperti vdoto2.com). Beda dari pace target di jadwal mingguan di bawah, yang naik bertahap tiap minggu menuju goal pace.',
+            usableWidth
+          );
+          doc.text(noteLines, margin, y);
+          y += noteLines.length * 7.3 * 1.35 + 14;
+        }
+      }
+
+      // --- Exertion-color legend --------------------------------------------
       y = drawInlineLegend(doc, margin, y, usableWidth, [
         { color: EXERTION_HEX.low, text: 'Rendah — pace santai' },
         { color: EXERTION_HEX.moderate, text: 'Sedang — mulai berat' },

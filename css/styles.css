@@ -483,22 +483,31 @@ input[type="radio"]:focus-visible {
 }
 
 .pace-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
   margin: 18px 0 6px;
   padding: 14px;
   background: var(--color-bg);
   border-radius: 10px;
 }
-.pace-legend .legend-item {
+.pace-zone-header {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.85rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 14px;
+  margin-bottom: 10px;
 }
-.pace-legend .legend-item strong { font-variant-numeric: tabular-nums; font-weight: 700; }
-.legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.pace-zone-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1rem;
+}
+.pace-zone-source { font-size: 0.8rem; color: var(--color-text-muted); }
+.pace-zone-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.pace-zone-table th, .pace-zone-table td { padding: 6px 10px; text-align: left; white-space: nowrap; }
+.pace-zone-table thead th { color: var(--color-text-muted); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+.pace-zone-table tbody tr:not(:last-child) { border-bottom: 1px solid var(--color-border); }
+.pace-zone-table td:last-child { font-variant-numeric: tabular-nums; }
+.pace-zone-note { font-size: 0.78rem; color: var(--color-text-muted); margin: 10px 0 0; }
 
 /* Week blocks */
 .week-block {
