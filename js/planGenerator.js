@@ -75,9 +75,9 @@ const PaceForgeGenerator = (() => {
   // window, and pace gains are much harder-won than the volume growth
   // WEEKLY_GROWTH_RATE below assumes.
   const CONSERVATIVE_FITNESS_GAIN_PCT = {
-    beginner: 0.05,
-    intermediate: 0.035,
-    advanced: 0.02,
+    beginner: 0.08,
+    intermediate: 0.05,
+    advanced: 0.03,
   };
 
   // Absolute floor for any pace this generator will ever schedule or treat
