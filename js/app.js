@@ -62,7 +62,16 @@
   const recentRaceSeconds = document.getElementById('recentRaceSeconds');
   const recentRaceHint = document.getElementById('recentRaceHint');
   const hasTargetTime = document.getElementById('hasTargetTime');
+  const targetInputWrap = document.getElementById('targetInputWrap');
+  const targetModeToggle = document.getElementById('targetModeToggle');
   const targetTimeFields = document.getElementById('targetTimeFields');
+  const targetPaceFields = document.getElementById('targetPaceFields');
+  const targetHoursInput = document.getElementById('targetHours');
+  const targetMinutesInput = document.getElementById('targetMinutes');
+  const targetSecondsInput = document.getElementById('targetSeconds');
+  const targetPaceMinutesInput = document.getElementById('targetPaceMinutes');
+  const targetPaceSecondsInput = document.getElementById('targetPaceSeconds');
+  const targetPaceHint = document.getElementById('targetPaceHint');
   const conservativeModeInput = document.getElementById('conservativeMode');
   const userNotesInput = document.getElementById('userNotes');
   const formError = document.getElementById('formError');
@@ -232,9 +241,40 @@
   }
   updateLongRunDayOptions();
 
+  function getTargetMode() {
+    return targetModeToggle.querySelector('input[name="targetMode"]:checked').value;
+  }
+
+  function updateTargetPaceHint() {
+    if (getTargetMode() !== 'pace') { targetPaceHint.hidden = true; return; }
+    const paceMin = Number(targetPaceMinutesInput.value) || 0;
+    const paceSec = Number(targetPaceSecondsInput.value) || 0;
+    const paceSecPerKm = paceMin * 60 + paceSec;
+    const raceKm = getCurrentRaceDistanceKm();
+    if (paceSecPerKm <= 0 || !raceKm) {
+      targetPaceHint.hidden = true;
+      return;
+    }
+    const { formatDuration } = PaceForgeGenerator;
+    targetPaceHint.textContent = `≈ ${formatDuration(paceSecPerKm * raceKm)} untuk ${raceKm} km.`;
+    targetPaceHint.hidden = false;
+  }
+
   hasTargetTime.addEventListener('change', () => {
-    targetTimeFields.hidden = !hasTargetTime.checked;
+    targetInputWrap.hidden = !hasTargetTime.checked;
+    updateTargetPaceHint();
   });
+
+  targetModeToggle.addEventListener('change', () => {
+    const isPace = getTargetMode() === 'pace';
+    targetTimeFields.hidden = isPace;
+    targetPaceFields.hidden = !isPace;
+    updateTargetPaceHint();
+  });
+  [targetPaceMinutesInput, targetPaceSecondsInput].forEach(el => el.addEventListener('input', updateTargetPaceHint));
+  raceDistanceSel.addEventListener('change', updateTargetPaceHint);
+  customDistanceKm.addEventListener('input', updateTargetPaceHint);
+  distanceModeToggle.addEventListener('change', updateTargetPaceHint);
 
   function getSelectedDays() {
     return Array.from(dayCheckboxes.querySelectorAll('input:checked')).map(cb => Number(cb.value));
@@ -337,10 +377,18 @@
 
     let targetTimeSec = null;
     if (hasTargetTime.checked) {
-      const h = Number(document.getElementById('targetHours').value) || 0;
-      const m = Number(document.getElementById('targetMinutes').value) || 0;
-      const s = Number(document.getElementById('targetSeconds').value) || 0;
-      targetTimeSec = h * 3600 + m * 60 + s;
+      if (getTargetMode() === 'pace') {
+        const paceMin = Number(targetPaceMinutesInput.value) || 0;
+        const paceSec = Number(targetPaceSecondsInput.value) || 0;
+        const paceSecPerKm = paceMin * 60 + paceSec;
+        if (paceSecPerKm <= 0) { showError('Isi target pace yang valid.'); return null; }
+        targetTimeSec = paceSecPerKm * raceDistanceKm;
+      } else {
+        const h = Number(targetHoursInput.value) || 0;
+        const m = Number(targetMinutesInput.value) || 0;
+        const s = Number(targetSecondsInput.value) || 0;
+        targetTimeSec = h * 3600 + m * 60 + s;
+      }
       if (targetTimeSec <= 0) { showError('Isi target waktu finish yang valid.'); return null; }
     }
 
@@ -404,12 +452,19 @@
     updateRecentRaceHint();
 
     hasTargetTime.checked = settings.targetTimeSec != null;
-    targetTimeFields.hidden = !hasTargetTime.checked;
+    targetInputWrap.hidden = !hasTargetTime.checked;
+    // Saved plans only ever store a resolved targetTimeSec, so restore
+    // always lands back in "waktu finish" mode — pace is just an
+    // alternate way to enter the same value, not a separately-saved mode.
+    targetModeToggle.querySelector('input[value="time"]').checked = true;
+    targetTimeFields.hidden = false;
+    targetPaceFields.hidden = true;
     if (hasTargetTime.checked) {
-      document.getElementById('targetHours').value = Math.floor(settings.targetTimeSec / 3600);
-      document.getElementById('targetMinutes').value = Math.floor((settings.targetTimeSec % 3600) / 60);
-      document.getElementById('targetSeconds').value = settings.targetTimeSec % 60;
+      targetHoursInput.value = Math.floor(settings.targetTimeSec / 3600);
+      targetMinutesInput.value = Math.floor((settings.targetTimeSec % 3600) / 60);
+      targetSecondsInput.value = settings.targetTimeSec % 60;
     }
+    updateTargetPaceHint();
 
     userNotesInput.value = userNotes || '';
   }

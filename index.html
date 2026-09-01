@@ -219,19 +219,41 @@
             </span>
           </label>
         </div>
-        <div class="field-row" id="targetTimeFields" hidden>
-          <div class="field field-small">
-            <label for="targetHours">Jam</label>
-            <input type="number" id="targetHours" min="0" max="10" step="1" value="0">
+        <div id="targetInputWrap" hidden>
+          <div class="field">
+            <label>Masukkan sebagai</label>
+            <div class="mode-toggle" id="targetModeToggle">
+              <label class="mode-chip"><input type="radio" name="targetMode" value="time" checked> Waktu finish</label>
+              <label class="mode-chip"><input type="radio" name="targetMode" value="pace"> Pace</label>
+            </div>
           </div>
-          <div class="field field-small">
-            <label for="targetMinutes">Menit</label>
-            <input type="number" id="targetMinutes" min="0" max="59" step="1" value="30">
+
+          <div class="field-row" id="targetTimeFields">
+            <div class="field field-small">
+              <label for="targetHours">Jam</label>
+              <input type="number" id="targetHours" min="0" max="10" step="1" value="0">
+            </div>
+            <div class="field field-small">
+              <label for="targetMinutes">Menit</label>
+              <input type="number" id="targetMinutes" min="0" max="59" step="1" value="30">
+            </div>
+            <div class="field field-small">
+              <label for="targetSeconds">Detik</label>
+              <input type="number" id="targetSeconds" min="0" max="59" step="1" value="0">
+            </div>
           </div>
-          <div class="field field-small">
-            <label for="targetSeconds">Detik</label>
-            <input type="number" id="targetSeconds" min="0" max="59" step="1" value="0">
+
+          <div class="field-row" id="targetPaceFields" hidden>
+            <div class="field field-small">
+              <label for="targetPaceMinutes">Menit /km</label>
+              <input type="number" id="targetPaceMinutes" min="0" max="59" step="1" value="5">
+            </div>
+            <div class="field field-small">
+              <label for="targetPaceSeconds">Detik /km</label>
+              <input type="number" id="targetPaceSeconds" min="0" max="59" step="1" value="0">
+            </div>
           </div>
+          <p class="field-hint" id="targetPaceHint" hidden></p>
         </div>
         <p class="field-hint">Kalau tidak diisi, pace latihan akan dihitung dari estimasi waktu 5K di atas (kalau diisi), atau diperkirakan otomatis berdasarkan level kebugaranmu.</p>
       </fieldset>
