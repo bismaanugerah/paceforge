@@ -15,9 +15,9 @@
 <header class="site-header">
   <div class="container header-inner">
     <div class="auth-box no-print" id="authBox">
-      <button data-action="login" class="btn btn-secondary btn-small">Login dengan Google</button>
+      <button data-action="login" class="btn btn-secondary btn-small">Login dengan Strava</button>
       <div id="userInfo" class="user-info" hidden>
-        <span id="userEmail" class="user-email"></span>
+        <span id="userName" class="user-email"></span>
         <button data-action="logout" class="btn-link">Logout</button>
       </div>
     </div>
@@ -50,11 +50,11 @@
   <!-- ===================== GATE SECTION (login required) ===================== -->
   <section id="gateSection" class="card gate-card">
     <h1>Masuk untuk mulai</h1>
-    <p class="section-desc">Login dulu supaya training plan yang kamu buat tersimpan ke akunmu dan tidak hilang — bisa dibuka lagi dari device lain.</p>
+    <p class="section-desc">Login dulu dengan Strava supaya PaceForge bisa mengisi sebagian form otomatis dari data lari-mu, dan training plan yang kamu buat tersimpan ke akunmu — tidak hilang meski ganti device.</p>
     <div class="gate-actions">
-      <button data-action="login" class="btn btn-primary btn-large">Login dengan Google</button>
+      <button data-action="login" class="btn btn-primary btn-large">Login dengan Strava</button>
     </div>
-    <p id="dummyModeNote" class="dummy-note" hidden>🔧 Mode dummy: Supabase belum disambungkan. Tombol di atas mensimulasikan login (data tersimpan lokal di browser ini saja) supaya alur login-nya bisa dicoba dulu — belum akun Google sungguhan. Lihat README untuk sambungkan Supabase &amp; Google OAuth asli.</p>
+    <p id="dummyModeNote" class="dummy-note" hidden>🔧 Mode dummy: app Strava belum disambungkan. Tombol di atas mensimulasikan login (data & plan tersimpan lokal di browser ini saja, angka Strava-nya juga contoh/palsu) supaya alur login &amp; auto-fill-nya bisa dicoba dulu — belum akun Strava sungguhan. Lihat README untuk sambungkan Strava &amp; Supabase asli.</p>
   </section>
 
   <!-- ===================== FORM SECTION ===================== -->
@@ -96,6 +96,12 @@
             <label for="raceDate">Tanggal race</label>
             <input type="date" id="raceDate" name="raceDate" required>
           </div>
+        </div>
+
+        <div class="field">
+          <label for="startDate">Mulai training tanggal</label>
+          <input type="date" id="startDate" name="startDate" required>
+          <p class="field-hint" id="startDateHint">Default hari ini. Ganti kalau kamu baru mau mulai training di tanggal lain.</p>
         </div>
         <p class="field-hint" id="raceDateHint"></p>
       </fieldset>
@@ -262,7 +268,7 @@
     <div class="result-header">
       <h2>Training Plan Kamu</h2>
       <div class="result-actions no-print">
-        <button id="printBtn" class="btn btn-secondary">🖨️ Print / Simpan PDF</button>
+        <button id="printBtn" class="btn btn-secondary">📄 Simpan sebagai PDF</button>
         <button id="newPlanBtn" class="btn btn-ghost">↺ Buat Plan Baru</button>
       </div>
     </div>
@@ -276,6 +282,12 @@
     <div id="summaryCards" class="summary-grid"></div>
 
     <div id="paceLegend" class="pace-legend"></div>
+
+    <div class="effort-legend">
+      <span class="effort-item"><span class="effort-dot exertion-low"></span>Rendah — pace santai, masih bisa ngobrol</span>
+      <span class="effort-item"><span class="effort-dot exertion-moderate"></span>Sedang — mulai berat, ngobrol jadi susah</span>
+      <span class="effort-item"><span class="effort-dot exertion-high"></span>Tinggi — maksimal, ngos-ngosan</span>
+    </div>
 
     <div id="planWeeks" class="plan-weeks"></div>
 
@@ -292,9 +304,12 @@
   </div>
 </footer>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<!-- Used only by the "Simpan sebagai PDF" button: builds a proper structured
+     A4 PDF (real text + tables, not a screenshot) and downloads it directly,
+     without going through the browser's native print dialog. -->
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <script src="js/config.js"></script>
-<script src="js/supabaseClient.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/planGenerator.js"></script>
 <script src="js/app.js"></script>

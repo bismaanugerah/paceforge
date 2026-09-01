@@ -6,24 +6,26 @@ lalu PaceForge menyusun jadwal latihan mingguan lengkap dengan jarak dan pace ti
 
 HTML/CSS/JS di sisi klien — generator plan-nya sendiri murni rule-based, tanpa AI/API. **Login
 wajib** sebelum bisa mengisi form: landing page menampilkan layar "Masuk untuk mulai" dengan
-tombol Login dengan Google (Supabase Auth), dan setiap plan yang dibuat otomatis tersimpan ke akun
-user supaya tidak hilang meski ganti device/browser.
+tombol Login dengan Strava. Setelah connect, PaceForge otomatis mengisi sebagian form (rata-rata
+km mingguan, lari terjauh, waktu race terakhir, hari latihan tersering) dari histori lari
+Strava-mu — tetap bisa diedit sebelum submit — dan setiap plan yang dibuat otomatis tersimpan ke
+akun user supaya tidak hilang meski ganti device/browser.
 
-> **Status saat ini: mode dummy.** [`js/config.js`](js/config.js) belum diisi project Supabase
-> sungguhan, jadi tombol "Login dengan Google" untuk sementara mensimulasikan login (user palsu
-> `demo@paceforge.dev`, plan disimpan ke `localStorage` browser, bukan ke akun Google/cloud
-> sungguhan) — supaya alur login-wajib-dulu ini bisa dicoba end-to-end sebelum setup Supabase +
-> Google OAuth asli selesai. Begitu `js/config.js` diisi (lihat "Setup login & sinkronisasi plan"
-> di bawah), file [`js/auth.js`](js/auth.js) otomatis pindah ke Google OAuth &amp; Supabase
-> sungguhan tanpa perlu ubah kode lain — badge "MODE DUMMY" di header akan hilang dengan
-> sendirinya.
+> **Status saat ini: mode dummy.** [`js/config.js`](js/config.js) belum diisi Client ID app Strava
+> sungguhan, jadi tombol "Login dengan Strava" untuk sementara mensimulasikan login (athlete palsu
+> "Demo Runner", plan & angka Strava dipakai/disimpan dari `localStorage` browser, bukan dari akun
+> Strava/cloud sungguhan) — supaya alur login-wajib-dulu + auto-fill ini bisa dicoba end-to-end
+> sebelum setup Strava + Supabase asli selesai. Begitu `js/config.js` diisi (lihat "Setup login &
+> sinkronisasi plan" di bawah), file [`js/auth.js`](js/auth.js) otomatis pindah ke login Strava
+> &amp; Supabase sungguhan tanpa perlu ubah kode lain — badge "MODE DUMMY" di header akan hilang
+> dengan sendirinya.
 
-## Cara menjalankan (mode dummy — tanpa setup Supabase)
+## Cara menjalankan (mode dummy — tanpa setup Strava/Supabase)
 
 Paling gampang: buka `index.html` langsung di browser (double-click filenya), lalu klik "Login
-dengan Google" di layar "Masuk untuk mulai" — karena `js/config.js` masih placeholder, ini akan
-mensimulasikan login (lihat catatan mode dummy di atas) supaya kamu bisa langsung coba generator
-plan-nya tanpa perlu setup apa pun dulu.
+dengan Strava" di layar "Masuk untuk mulai" — karena `js/config.js` masih placeholder, ini akan
+mensimulasikan login + data Strava (lihat catatan mode dummy di atas) supaya kamu bisa langsung
+coba generator plan-nya (termasuk auto-fill-nya) tanpa perlu setup apa pun dulu.
 
 Kalau mau pengalaman yang lebih mirip server sungguhan (disarankan saat development), jalankan
 static server kecil dari folder ini, misalnya:
@@ -42,50 +44,71 @@ lalu buka `http://localhost:5173`.
 
 ## Setup login & sinkronisasi plan sungguhan
 
-Supaya plan tersimpan ke akun user dan tidak hilang meski ganti device/browser, PaceForge pakai
-[Supabase](https://supabase.com) (Auth + Postgres) untuk login Google dan penyimpanan data, dan
-butuh hosting yang bisa menjalankan serverless function (misal [Vercel](https://vercel.com)) untuk
-endpoint AI (`/api/enhance-plan`) di production.
+Login PaceForge pakai **Strava** langsung (bukan Supabase Auth — OAuth2 Strava bukan
+OIDC-compliant jadi tidak bisa dipasang sebagai "provider" bawaan Supabase Auth seperti Google).
+Prakteknya: [Supabase](https://supabase.com) dipakai murni sebagai Postgres storage (bukan
+identity provider), dan seluruh alur OAuth + akses database jalan lewat serverless function — jadi
+butuh hosting yang bisa menjalankannya (misal [Vercel](https://vercel.com)), baik untuk login
+Strava maupun endpoint AI (`/api/enhance-plan`) yang sudah ada sebelumnya.
 
-1. **Buat project Supabase** (gratis) di [supabase.com](https://supabase.com) → dashboard project
-   → **Settings → API** → catat `Project URL` dan key `anon public`.
-2. **Buat tabel `plans`**: buka **SQL Editor** di dashboard Supabase → paste seluruh isi
-   [`supabase/schema.sql`](supabase/schema.sql) → **Run**. Ini juga yang mengaktifkan Row Level
-   Security supaya user hanya bisa baca/tulis datanya sendiri.
-3. **Aktifkan login Google**: dashboard Supabase → **Authentication → Providers → Google** →
-   aktifkan. Ini butuh OAuth Client ID dari
-   [Google Cloud Console](https://console.cloud.google.com/apis/credentials) (gratis, tanpa kartu
-   kredit) — buat "OAuth client ID" tipe **Web application**, isi *Authorized redirect URI* dengan
-   URL callback yang ditunjukkan Supabase di halaman provider Google tsb, lalu paste Client ID &
-   Client Secret yang didapat kembali ke Supabase.
-4. **Isi [`js/config.js`](js/config.js)** dengan `Project URL` & `anon public key` dari langkah 1.
-   Anon key ini aman ditaruh di kode client-side — proteksinya datang dari Row Level Security di
-   langkah 2, bukan dari merahasiakan key ini.
+1. **Daftarkan app di Strava**: buka [strava.com/settings/api](https://www.strava.com/settings/api)
+   (gratis, pakai akun Strava-mu) → buat app baru → isi *Authorization Callback Domain* dengan
+   domain Vercel-mu (mis. `paceforge.vercel.app`, tanpa `https://` atau path) — untuk development
+   lokal lewat `vercel dev`, isi `localhost`. Catat **Client ID** & **Client Secret** yang muncul.
+2. **Buat project Supabase** (gratis) di [supabase.com](https://supabase.com) → dashboard project
+   → **Settings → API** → catat `Project URL` dan key **`service_role`** (BUKAN `anon public` —
+   service role key ini full-access, cuma boleh hidup sebagai environment variable server, jangan
+   pernah ditaruh di kode client-side).
+3. **Buat tabel-tabelnya**: buka **SQL Editor** di dashboard Supabase → paste seluruh isi
+   [`supabase/schema.sql`](supabase/schema.sql) → **Run**.
+4. **Isi [`js/config.js`](js/config.js)** dengan `Client ID` dari langkah 1 (`STRAVA_CLIENT_ID`) —
+   ini identifier publik, aman di kode client-side. Nilai ini di browser cuma dipakai untuk
+   mendeteksi mode dummy vs asli; proses OAuth sungguhan pakai `STRAVA_CLIENT_ID` versi server
+   (langkah berikut), bukan file ini.
 5. **Deploy ke Vercel**: buat akun di [vercel.com](https://vercel.com) → *Add New Project* →
    hubungkan ke repo GitHub ini → deploy (tidak perlu konfigurasi build, situs ini statis + folder
    `api/` otomatis dikenali sebagai serverless function). Di **Project Settings → Environment
-   Variables**, tambahkan `ANTHROPIC_API_KEY` (dan opsional `ANTHROPIC_MODEL`) supaya endpoint AI
-   jalan di production — tanpa ini generator plan tetap normal, hanya catatan pelatih AI yang gagal.
-6. Di Supabase **Authentication → URL Configuration**, tambahkan domain Vercel-mu (dan
-   `http://localhost:5173` untuk development) ke *Site URL* / *Redirect URLs*.
+   Variables**, tambahkan:
+   - `STRAVA_CLIENT_ID` (sama dengan nilai di `js/config.js`) & `STRAVA_CLIENT_SECRET` — dari
+     langkah 1.
+   - `SUPABASE_URL` & `SUPABASE_SERVICE_ROLE_KEY` — dari langkah 2.
+   - `SESSION_JWT_SECRET` — string acak panjang buat menandatangani cookie session (mis. output
+     `openssl rand -hex 32`).
+   - `ANTHROPIC_API_KEY` (dan opsional `ANTHROPIC_MODEL`) — supaya endpoint catatan pelatih AI
+     jalan; tanpa ini generator plan tetap normal, cuma catatan AI-nya yang gagal.
 
 Tanpa langkah-langkah di atas (`js/config.js` masih placeholder), situs tetap berjalan penuh dalam
 **mode dummy** — lihat catatan di paling atas.
 
+**Testing alur login lengkap secara lokal** (bukan mode dummy) butuh serverless function beneran
+jalan — `.claude/serve.ps1` sengaja tidak direplikasi untuk endpoint Strava (cuma untuk
+`/api/enhance-plan` + mode dummy, yang sudah cukup buat iterasi UI sehari-hari). Pakai
+[`vercel dev`](https://vercel.com/docs/cli/dev) (`npx vercel dev`, dengan env var di atas diisi di
+`.env.local` atau lewat `vercel env pull`) supaya semua endpoint di `api/` benar-benar jalan di
+`http://localhost:3000`.
+
 ## Struktur file
 
 ```
-index.html              Halaman utama (gate login, form input, hasil plan)
-css/styles.css           Semua styling
-js/planGenerator.js      Logika inti pembuatan plan (murni fungsi, tanpa DOM)
-js/app.js                Gating login, wiring form, render hasil, simpan/muat plan dari akun
-js/config.js             Isi Project URL & anon key Supabase (lihat setup di atas)
-js/supabaseClient.js     Bikin client Supabase dari config.js (no-op kalau belum diisi)
-js/auth.js               Login/logout Google (atau simulasi mode dummy) + expose status ke app.js
-api/enhance-plan.js      Serverless function (Vercel) — proxy ke Claude API untuk catatan pelatih
-supabase/schema.sql      Skema tabel `plans` + Row Level Security policy
-.claude/launch.json      Config untuk preview server (dipakai tool Claude Code)
-.claude/serve.ps1        Static file server + endpoint AI lokal berbasis PowerShell (dev tanpa Vercel)
+index.html                Halaman utama (gate login, form input, hasil plan)
+css/styles.css            Semua styling
+js/planGenerator.js       Logika inti pembuatan plan (murni fungsi, tanpa DOM)
+js/app.js                 Gating login, wiring form, render hasil, simpan/muat plan, auto-fill Strava
+js/config.js              Isi Client ID Strava (lihat setup di atas)
+js/auth.js                Login/logout Strava (atau simulasi mode dummy) + expose status ke app.js
+api/strava-login.js       Serverless function — bangun URL authorize Strava, redirect + set state cookie
+api/strava-callback.js    Serverless function — tukar code->token, simpan athlete, set session cookie
+api/session.js            Serverless function — baca cookie session, balas status login ke client
+api/logout.js             Serverless function — hapus cookie session
+api/strava-summary.js     Serverless function — analisis aktivitas Strava jadi ringkasan buat form
+api/plan.js               Serverless function — simpan/muat plan tersimpan (ganti akses langsung Supabase)
+api/enhance-plan.js       Serverless function — proxy ke Claude API untuk catatan pelatih
+server/session.js         Helper JWT + cookie session (dipakai banyak file di api/)
+server/supabaseAdmin.js   Helper fetch ke Supabase REST pakai service-role key (server-only)
+server/strava.js          Helper OAuth token + fetch/analisis aktivitas Strava
+supabase/schema.sql       Skema tabel `strava_athletes` + `plans`, RLS default-deny (akses cuma dari server)
+.claude/launch.json       Config untuk preview server (dipakai tool Claude Code)
+.claude/serve.ps1         Static file server + endpoint AI lokal berbasis PowerShell (dev tanpa Vercel)
 ```
 
 ## Cara kerja algoritma (`js/planGenerator.js`)

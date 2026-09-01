@@ -21,6 +21,22 @@
     race: 'var(--type-race)',
   };
 
+  // Hex twins of the CSS custom properties above / the exertion colors in
+  // styles.css — the PDF export draws with jsPDF's own vector primitives
+  // (no DOM, so no access to CSS variables), so it needs the raw values.
+  // Keep these in sync with :root in css/styles.css by hand.
+  const TYPE_HEX = {
+    recovery: '#b0a396',
+    easy: '#74b358',
+    longRun: '#3aa98c',
+    tempo: '#d9a53a',
+    interval: '#d97a4f',
+    shakeout: '#74b358',
+    rest: '#8b93a3',
+    race: '#6366f1',
+  };
+  const EXERTION_HEX = { low: '#74b358', moderate: '#e0b93a', high: '#de5b4c' };
+
   const form = document.getElementById('planForm');
   const distanceModeToggle = document.getElementById('distanceModeToggle');
   const presetDistanceField = document.getElementById('presetDistanceField');
@@ -29,6 +45,7 @@
   const customDistanceKm = document.getElementById('customDistanceKm');
   const raceDateInput = document.getElementById('raceDate');
   const raceDateHint = document.getElementById('raceDateHint');
+  const startDateInput = document.getElementById('startDate');
   const daysPerWeekInput = document.getElementById('daysPerWeek');
   const daysPerWeekOutput = document.getElementById('daysPerWeekOutput');
   const dayCheckboxes = document.getElementById('dayCheckboxes');
@@ -72,6 +89,12 @@
   defaultRaceDate.setDate(defaultRaceDate.getDate() + 12 * 7);
   raceDateInput.value = defaultRaceDate.toISOString().slice(0, 10);
   raceDateInput.min = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+  // Default start date: today — the runner can push it later if they're
+  // not starting right away. Can't be set in the past.
+  const todayStr = new Date().toISOString().slice(0, 10);
+  startDateInput.value = todayStr;
+  startDateInput.min = todayStr;
 
   // Default preferred days: Tue, Thu, Sat, Sun (matches default 4 days/week).
   ['2', '4', '6', '0'].forEach(v => {
@@ -226,6 +249,11 @@
     const today = new Date(); today.setHours(0, 0, 0, 0);
     if (raceDate <= today) { showError('Tanggal race harus di masa depan.'); return null; }
 
+    if (!startDateInput.value) { showError('Pilih tanggal mulai training terlebih dahulu.'); return null; }
+    const startDate = new Date(startDateInput.value + 'T00:00:00');
+    if (startDate < today) { showError('Tanggal mulai training tidak boleh di masa lalu.'); return null; }
+    if (startDate >= raceDate) { showError('Tanggal mulai training harus sebelum tanggal race.'); return null; }
+
     const fitnessLevel = document.getElementById('fitnessLevel').value;
     const currentWeeklyKm = Number(document.getElementById('currentWeeklyKm').value);
     if (currentWeeklyKm < 0 || Number.isNaN(currentWeeklyKm)) {
@@ -276,7 +304,7 @@
     const conservativeMode = conservativeModeInput.checked;
 
     return {
-      raceDistanceKm, raceLabel, raceKey, raceDate,
+      raceDistanceKm, raceLabel, raceKey, raceDate, startDate,
       fitnessLevel, currentWeeklyKm, longestRecentRunKm, daysPerWeek, preferredDays, longRunDay,
       targetTimeSec, recentRaceTimeSec, recentRaceDistanceKm, conservativeMode,
     };
@@ -298,6 +326,11 @@
     }
 
     raceDateInput.value = settings.raceDate.toISOString().slice(0, 10);
+    // Plans saved before the start-date field existed won't have it —
+    // fall back to today, same as the old implicit behaviour.
+    startDateInput.value = settings.startDate
+      ? settings.startDate.toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
 
     document.getElementById('fitnessLevel').value = settings.fitnessLevel;
     document.getElementById('currentWeeklyKm').value = settings.currentWeeklyKm;
@@ -356,90 +389,190 @@
     resultSection.hidden = true;
   }
 
-  // --- Cloud sync (Supabase), or a localStorage stand-in while auth.js is
-  // still in dummy mode (see js/auth.js) — same save/load shape either way,
-  // so nothing here needs to change once a real Supabase project is wired up.
+  // Flip in js/config.js once Strava login is actually wired up. While
+  // false, the whole login gate/UI stays hidden and the form is shown
+  // directly — everything below still runs, it's just never reached.
+  const REQUIRE_LOGIN = !!(window.PACEFORGE_CONFIG && window.PACEFORGE_CONFIG.REQUIRE_LOGIN);
+
+  // --- Cloud sync, via api/plan.js (backed by Supabase server-side), or a
+  // localStorage stand-in while auth.js is still in dummy mode (see
+  // js/auth.js) — same save/load shape either way, so nothing here needs to
+  // change once a real Strava app + server env vars are wired up.
   const paceforgeAuth = window.PaceForgeAuth;
   const DUMMY_PLAN_KEY = 'paceforge_dummy_plan';
 
   async function savePlanForCurrentUser(settings) {
     const payload = {
-      settings: { ...settings, raceDate: settings.raceDate.toISOString().slice(0, 10) },
+      settings: {
+        ...settings,
+        raceDate: settings.raceDate.toISOString().slice(0, 10),
+        startDate: settings.startDate.toISOString().slice(0, 10),
+      },
       user_notes: userNotesInput.value.trim(),
     };
 
-    const client = paceforgeAuth && paceforgeAuth.getClient();
-    if (!client) {
-      if (paceforgeAuth && paceforgeAuth.isDummy()) {
-        localStorage.setItem(DUMMY_PLAN_KEY, JSON.stringify(payload));
-        paceforgeAuth.setSyncStatus('✓ Plan tersimpan (mode dummy — lokal di browser ini saja).');
-      }
+    if (!paceforgeAuth) return;
+
+    if (paceforgeAuth.isDummy()) {
+      localStorage.setItem(DUMMY_PLAN_KEY, JSON.stringify(payload));
+      paceforgeAuth.setSyncStatus('✓ Plan tersimpan (mode dummy — lokal di browser ini saja).');
       return;
     }
 
-    const { data: { user } = {} } = await client.auth.getUser();
-    if (!user) return;
-
     paceforgeAuth.setSyncStatus('Menyimpan plan ke akunmu...');
-    const { error } = await client.from('plans').upsert({
-      user_id: user.id,
-      ...payload,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id' });
-
-    if (error) {
-      paceforgeAuth.setSyncStatus(`Gagal menyimpan plan ke akun: ${error.message}`, true);
-    } else {
+    try {
+      const res = await fetch('/api/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Server merespons status ${res.status}`);
       paceforgeAuth.setSyncStatus('✓ Plan tersimpan ke akunmu.');
+    } catch (err) {
+      paceforgeAuth.setSyncStatus(`Gagal menyimpan plan ke akun: ${err.message}`, true);
     }
   }
 
+  // Returns true kalau ada plan tersimpan yang berhasil dimuat & diterapkan
+  // ke form (dipakai caller untuk memutuskan apakah perlu jatuh ke
+  // prefillFromStrava() sebagai gantinya — lihat bawah).
   async function loadSavedPlanForUser(user) {
-    if (!user) return;
-    const client = paceforgeAuth && paceforgeAuth.getClient();
+    if (!user || !paceforgeAuth) return false;
 
-    if (!client) {
-      if (paceforgeAuth && paceforgeAuth.isDummy()) {
-        const raw = localStorage.getItem(DUMMY_PLAN_KEY);
-        if (!raw) return;
-        const data = JSON.parse(raw);
-        const settings = { ...data.settings, raceDate: new Date(data.settings.raceDate + 'T00:00:00') };
-        applySettingsToForm(settings, data.user_notes || '');
-        generateAndShowPlan(settings);
-        paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat (mode dummy — lokal).');
-      }
-      return;
+    if (paceforgeAuth.isDummy()) {
+      const raw = localStorage.getItem(DUMMY_PLAN_KEY);
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      const settings = {
+        ...data.settings,
+        raceDate: new Date(data.settings.raceDate + 'T00:00:00'),
+        // Older saved plans predate the start-date field — fall back to today.
+        startDate: new Date((data.settings.startDate || new Date().toISOString().slice(0, 10)) + 'T00:00:00'),
+      };
+      applySettingsToForm(settings, data.user_notes || '');
+      generateAndShowPlan(settings);
+      paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat (mode dummy — lokal).');
+      return true;
     }
 
     paceforgeAuth.setSyncStatus('Memuat plan tersimpan...');
-    const { data, error } = await client
-      .from('plans')
-      .select('settings, user_notes')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (error) {
-      paceforgeAuth.setSyncStatus(`Gagal memuat plan tersimpan: ${error.message}`, true);
-      return;
+    try {
+      const res = await fetch('/api/plan');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Server merespons status ${res.status}`);
+      if (!data.settings) {
+        // Belum pernah menyimpan plan dari akun ini — bukan error, cuma
+        // belum ada apa-apa yang perlu direstore.
+        paceforgeAuth.setSyncStatus('');
+        return false;
+      }
+      const settings = {
+        ...data.settings,
+        raceDate: new Date(data.settings.raceDate + 'T00:00:00'),
+        // Older saved plans predate the start-date field — fall back to today.
+        startDate: new Date((data.settings.startDate || new Date().toISOString().slice(0, 10)) + 'T00:00:00'),
+      };
+      applySettingsToForm(settings, data.user_notes || '');
+      generateAndShowPlan(settings);
+      paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat dari akunmu.');
+      return true;
+    } catch (err) {
+      paceforgeAuth.setSyncStatus(`Gagal memuat plan tersimpan: ${err.message}`, true);
+      return false;
     }
-    if (!data) {
-      // Belum pernah menyimpan plan dari akun ini — bukan error, cuma
-      // belum ada apa-apa yang perlu direstore.
-      paceforgeAuth.setSyncStatus('');
-      return;
-    }
-
-    const settings = { ...data.settings, raceDate: new Date(data.settings.raceDate + 'T00:00:00') };
-    applySettingsToForm(settings, data.user_notes || '');
-    generateAndShowPlan(settings);
-    paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat dari akunmu.');
   }
 
-  if (paceforgeAuth) {
+  // Data dummy dipakai saat js/config.js belum diisi STRAVA_CLIENT_ID
+  // sungguhan — supaya alur auto-fill bisa dicoba tanpa app Strava/server
+  // beneran, sama seperti data plan dummy di atas.
+  const DUMMY_STRAVA_SUMMARY = {
+    currentWeeklyKm: 24,
+    longestRecentRunKm: 12.5,
+    recentRace: { distanceKm: 10, timeSec: 52 * 60 + 30 },
+    suggestedDaysOfWeek: [2, 4, 6, 0],
+  };
+
+  // Dipanggil sekali setelah login, hanya kalau athlete itu belum punya plan
+  // tersimpan (lihat wiring di bawah) — mengisi field yang bisa diturunkan
+  // dari histori lari di Strava, tapi tetap lewat elemen form yang sama
+  // yang user isi manual, jadi otomatis tetap bisa diedit sebelum submit.
+  async function prefillFromStrava() {
+    if (!paceforgeAuth) return;
+    let summary;
+    if (paceforgeAuth.isDummy()) {
+      summary = DUMMY_STRAVA_SUMMARY;
+    } else {
+      try {
+        const res = await fetch('/api/strava-summary');
+        summary = await res.json();
+        if (!res.ok) throw new Error(summary.error || `Server merespons status ${res.status}`);
+      } catch (err) {
+        paceforgeAuth.setSyncStatus(`Gagal mengambil data Strava: ${err.message}`, true);
+        return;
+      }
+    }
+    applyStravaSummaryToForm(summary);
+  }
+
+  function applyStravaSummaryToForm(summary) {
+    let filledAny = false;
+
+    if (summary.currentWeeklyKm != null) {
+      document.getElementById('currentWeeklyKm').value = summary.currentWeeklyKm;
+      filledAny = true;
+    }
+    if (summary.longestRecentRunKm != null) {
+      document.getElementById('longestRecentRunKm').value = summary.longestRecentRunKm;
+      filledAny = true;
+    }
+    if (summary.recentRace) {
+      hasRecentRace.checked = true;
+      recentRaceFields.hidden = false;
+      const isPreset = ['5', '10', '15', '21.1', '42.2'].includes(String(summary.recentRace.distanceKm));
+      recentRaceDistanceSel.value = isPreset ? String(summary.recentRace.distanceKm) : 'custom';
+      recentRaceCustomField.hidden = isPreset;
+      if (!isPreset) recentRaceCustomKm.value = summary.recentRace.distanceKm;
+      recentRaceHours.value = Math.floor(summary.recentRace.timeSec / 3600);
+      recentRaceMinutes.value = Math.floor((summary.recentRace.timeSec % 3600) / 60);
+      recentRaceSeconds.value = summary.recentRace.timeSec % 60;
+      updateRecentRaceHint();
+      filledAny = true;
+    }
+    if (Array.isArray(summary.suggestedDaysOfWeek) && summary.suggestedDaysOfWeek.length) {
+      const daysPerWeek = Number(daysPerWeekInput.value);
+      const picks = summary.suggestedDaysOfWeek.slice(0, daysPerWeek);
+      dayCheckboxes.querySelectorAll('input').forEach(cb => {
+        cb.checked = picks.includes(Number(cb.value));
+      });
+      updateDayCountHint();
+      updateLongRunDayOptions();
+      filledAny = true;
+    }
+
+    if (filledAny) {
+      paceforgeAuth.setSyncStatus('✨ Sebagian field (km mingguan, lari terjauh, race terakhir, hari latihan) diisi otomatis dari data Strava-mu — cek dulu sebelum submit.');
+    }
+  }
+
+  if (!REQUIRE_LOGIN) {
+    // Login not wired up to a real backend yet — hide every trace of the
+    // login UI (gate screen, header login/logout, MODE DUMMY badge) and go
+    // straight to the form. Set REQUIRE_LOGIN back to true in
+    // js/config.js once Strava login is ready; nothing else here needs to
+    // change.
+    const authBox = document.getElementById('authBox');
+    const dummyBadge = document.getElementById('dummyBadge');
+    if (authBox) authBox.hidden = true;
+    if (dummyBadge) dummyBadge.hidden = true;
+    showForm();
+  } else if (paceforgeAuth) {
     paceforgeAuth.onAuthChange((user) => {
       if (user) {
         showForm();
-        loadSavedPlanForUser(user);
+        loadSavedPlanForUser(user).then((loaded) => {
+          if (!loaded) prefillFromStrava();
+        });
       } else {
         showGate();
       }
@@ -458,10 +591,10 @@
     if (!settings) return;
 
     generateAndShowPlan(settings);
-    savePlanForCurrentUser(settings);
+    if (REQUIRE_LOGIN) savePlanForCurrentUser(settings);
   });
 
-  document.getElementById('printBtn').addEventListener('click', () => window.print());
+  document.getElementById('printBtn').addEventListener('click', downloadPlanAsPdf);
   aiRetryBtn.addEventListener('click', enhanceWithAI);
   document.getElementById('newPlanBtn').addEventListener('click', () => {
     resultSection.hidden = true;
@@ -528,20 +661,293 @@
           <span class="week-phase">${week.phase} • ${formatDate(week.startDate)} – ${formatDate(week.endDate)}</span>
           <span class="week-total">Total: ${week.totalKm} km</span>
         </div>
-        <table class="day-table">
-          <thead>
-            <tr><th>Hari</th><th>Tanggal</th><th>Sesi</th><th>Jarak</th><th>Pace Target</th></tr>
-          </thead>
-          <tbody>
-            ${week.days.map(renderDayRow).join('')}
-          </tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="day-table">
+            <thead>
+              <tr><th>Hari</th><th>Tanggal</th><th>Sesi</th><th>Jarak</th><th>Pace Target</th></tr>
+            </thead>
+            <tbody>
+              ${week.days.map(renderDayRow).join('')}
+            </tbody>
+          </table>
+        </div>
       </div>
     `).join('');
 
     resultSection.hidden = false;
     formSection.hidden = true;
     resultSection.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function hexToRgb(hex) {
+    const v = hex.replace('#', '');
+    return [parseInt(v.slice(0, 2), 16), parseInt(v.slice(2, 4), 16), parseInt(v.slice(4, 6), 16)];
+  }
+
+  // jsPDF's built-in fonts (Helvetica etc.) only cover the WinAnsi/cp1252
+  // range — glyphs outside it (→, ⚠, 🏁, ✨, ...) don't throw, they just
+  // silently render as the wrong character (→ came out as ↑, ⚠ as "&" in
+  // testing). Anything going into doc.text()/autoTable cells is run
+  // through this first instead of embedding a custom Unicode font.
+  function pdfSafeText(str) {
+    return String(str)
+      .replace(/→/g, '->')
+      .replace(/⚠️|⚠/g, '')
+      .replace(/🏁/g, '')
+      .replace(/✨/g, '')
+      .trim();
+  }
+
+  // Builds the currently-shown plan into a proper structured A4 PDF — real
+  // vector text and tables via jsPDF + jspdf-autotable, not a screenshot —
+  // and downloads it directly, no browser print dialog involved. Mirrors
+  // the on-screen report (header, summary, legends, per-week tables with
+  // colored session badges and the interval/tempo structure bars) but laid
+  // out for print: fixed A4 margins, table headers repeating on page
+  // breaks, and week sections never starting right at the bottom edge of a
+  // page.
+  async function downloadPlanAsPdf() {
+    if (!lastPlan || !window.jspdf || !window.jspdf.jsPDF) {
+      alert('Fitur simpan PDF belum siap (library belum termuat). Coba muat ulang halaman.');
+      return;
+    }
+
+    const btn = document.getElementById('printBtn');
+    const originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Menyiapkan PDF...';
+
+    try {
+      const { jsPDF } = window.jspdf;
+      const { formatPace, formatDate, TYPE_LABELS } = PaceForgeGenerator;
+      const { meta, warnings, weeks } = lastPlan;
+
+      const doc = new jsPDF('p', 'pt', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 40;
+      const usableWidth = pageWidth - margin * 2;
+      const inkColor = [30, 34, 48];
+      const mutedColor = [110, 116, 132];
+      let y = margin;
+
+      // --- Header -------------------------------------------------------
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(20);
+      doc.setTextColor(...hexToRgb('#1f6f5c'));
+      doc.text('PaceForge', margin, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9.5);
+      doc.setTextColor(...mutedColor);
+      doc.text('Training Plan Lari', margin, y + 14);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(...inkColor);
+      doc.text(meta.raceLabel, pageWidth - margin, y, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9.5);
+      doc.setTextColor(...mutedColor);
+      doc.text(`Race day: ${formatDate(meta.raceDate)}`, pageWidth - margin, y + 14, { align: 'right' });
+
+      y += 26;
+      doc.setDrawColor(225, 228, 236);
+      doc.line(margin, y, pageWidth - margin, y);
+      y += 20;
+
+      // --- Summary stats grid --------------------------------------------
+      const summaryItems = [
+        ['Durasi Plan', `${meta.planWeeks} minggu`],
+        ['Peak Weekly Volume', `${meta.peakWeeklyKm} km`],
+        ['Peak Long Run', `${meta.peakLongRunKm} km`],
+        ['Goal Pace', formatPace(meta.goalPaceSec)],
+      ];
+      const summaryColW = usableWidth / summaryItems.length;
+      summaryItems.forEach(([label, value], i) => {
+        const x = margin + i * summaryColW;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.3);
+        doc.setTextColor(...mutedColor);
+        doc.text(label.toUpperCase(), x, y);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(13.5);
+        doc.setTextColor(...hexToRgb('#1f6f5c'));
+        doc.text(value, x, y + 17);
+      });
+      y += 38;
+
+      // --- Warnings -------------------------------------------------------
+      if (warnings.length) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        const bodyText = warnings.map(w => `• ${pdfSafeText(w)}`).join('\n\n');
+        const lines = doc.splitTextToSize(bodyText, usableWidth - 20);
+        const warningLineHeight = 8.5 * 1.35;
+        const boxHeight = lines.length * warningLineHeight + 16;
+        doc.setFillColor(255, 247, 224);
+        doc.setDrawColor(230, 190, 110);
+        doc.roundedRect(margin, y, usableWidth, boxHeight, 4, 4, 'FD');
+        doc.setTextColor(140, 92, 12);
+        doc.text(lines, margin + 10, y + 13, { lineHeightFactor: 1.35 });
+        y += boxHeight + 18;
+      }
+
+      // --- Legends (pace zones + exertion colors) -------------------------
+      const paceLegendItems = [
+        ['recovery', meta.paces.recovery], ['easy', meta.paces.easy], ['longRun', meta.paces.longRun],
+        ['tempo', meta.paces.tempo], ['interval', meta.paces.interval],
+      ];
+      y = drawInlineLegend(doc, margin, y, usableWidth,
+        paceLegendItems.map(([type, sec]) => ({ color: TYPE_HEX[type], text: `${TYPE_LABELS[type]}: ${formatPace(sec)}` })));
+      y += 6;
+      y = drawInlineLegend(doc, margin, y, usableWidth, [
+        { color: EXERTION_HEX.low, text: 'Rendah — pace santai' },
+        { color: EXERTION_HEX.moderate, text: 'Sedang — mulai berat' },
+        { color: EXERTION_HEX.high, text: 'Tinggi — maksimal' },
+      ]);
+      y += 16;
+
+      // --- Per-week tables --------------------------------------------------
+      weeks.forEach((week) => {
+        // Keep a week's heading from landing right at the bottom edge with
+        // no room for its table underneath.
+        if (y > pageHeight - 130) { doc.addPage(); y = margin; }
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(12);
+        doc.setTextColor(...inkColor);
+        doc.text(`Minggu ${week.weekNumber}`, margin, y);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(...mutedColor);
+        doc.text(`${week.phase} • ${formatDate(week.startDate)} – ${formatDate(week.endDate)}`, margin + 78, y);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...hexToRgb('#6366f1'));
+        doc.text(`Total: ${week.totalKm} km`, pageWidth - margin, y, { align: 'right' });
+        y += 8;
+
+        const rowMeta = [];
+        const body = [];
+        week.days.forEach(day => {
+          const label = pdfSafeText((day.type === 'longRun' && day.isMarathonSpecific)
+            ? `${TYPE_LABELS.longRun} (Pace Marathon)`
+            : (TYPE_LABELS[day.type] || day.type));
+          const km = day.km ? `${day.km} km` : '—';
+          const showPace = PACE_TARGET_TYPES.has(day.type) || (day.type === 'longRun' && day.isMarathonSpecific);
+          const pace = (showPace && day.paceSecPerKm) ? formatPace(day.paceSecPerKm) : '—';
+          body.push([day.dayName, day.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }), label, km, pace]);
+          rowMeta.push({ kind: 'day', type: day.type });
+          if (day.structure) {
+            const { segments, caption } = structureToSegments(day.structure);
+            body.push([{ content: '', colSpan: 5, styles: { minCellHeight: 30, fillColor: [255, 255, 255] } }]);
+            rowMeta.push({ kind: 'structure', segments, caption });
+          }
+        });
+
+        doc.autoTable({
+          startY: y,
+          margin: { left: margin, right: margin, bottom: margin },
+          head: [['Hari', 'Tanggal', 'Sesi', 'Jarak', 'Pace Target']],
+          body,
+          theme: 'grid',
+          styles: { font: 'helvetica', fontSize: 8.3, cellPadding: 5, textColor: inkColor, lineColor: [225, 228, 236], lineWidth: 0.5, valign: 'middle' },
+          headStyles: { fillColor: [245, 246, 248], textColor: mutedColor, fontStyle: 'bold', fontSize: 7.2 },
+          columnStyles: { 0: { cellWidth: 58 }, 1: { cellWidth: 55 }, 2: { cellWidth: 150 }, 3: { cellWidth: 58 }, 4: { cellWidth: 'auto' } },
+          didParseCell: (data) => {
+            if (data.section !== 'body') return;
+            const rowInfo = rowMeta[data.row.index];
+            if (!rowInfo) return;
+            if (rowInfo.kind === 'day' && data.column.index === 2) {
+              data.cell.styles.fillColor = hexToRgb(TYPE_HEX[rowInfo.type] || TYPE_HEX.rest);
+              data.cell.styles.textColor = [255, 255, 255];
+              data.cell.styles.fontStyle = 'bold';
+              data.cell.styles.halign = 'center';
+            }
+            if (rowInfo.kind === 'day' && rowInfo.type === 'race') {
+              data.cell.styles.fontStyle = data.cell.styles.fontStyle || 'bold';
+              if (data.column.index !== 2) data.cell.styles.fillColor = [232, 234, 253];
+            }
+          },
+          didDrawCell: (data) => {
+            if (data.section !== 'body') return;
+            const rowInfo = rowMeta[data.row.index];
+            if (!rowInfo || rowInfo.kind !== 'structure') return;
+            drawStructureBar(doc, data.cell, rowInfo.segments, rowInfo.caption, mutedColor);
+          },
+        });
+
+        y = doc.lastAutoTable.finalY + 22;
+      });
+
+      // --- Footer (page numbers) on every page ---------------------------
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let p = 1; p <= pageCount; p++) {
+        doc.setPage(p);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(...mutedColor);
+        doc.text(`PaceForge • Halaman ${p} dari ${pageCount}`, pageWidth - margin, pageHeight - 18, { align: 'right' });
+      }
+
+      const fileSafeLabel = (meta.raceLabel || 'Plan').replace(/[^\w]+/g, '-');
+      doc.save(`PaceForge-${fileSafeLabel}.pdf`);
+    } catch (err) {
+      alert(`Gagal membuat PDF: ${err.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+    }
+  }
+
+  // Draws a row of colored-dot + label items, wrapping onto further rows
+  // when they don't fit `width`, and returns the y position just below the
+  // last row drawn — used for the pace/exertion legends in the PDF.
+  function drawInlineLegend(doc, x0, y0, width, items) {
+    const dotR = 3.2;
+    const gapAfterDot = 7;
+    const gapBetweenItems = 18;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.3);
+    let x = x0;
+    let y = y0;
+    items.forEach(({ color, text }) => {
+      const textWidth = doc.getTextWidth(text);
+      const itemWidth = dotR * 2 + gapAfterDot + textWidth;
+      if (x + itemWidth > x0 + width) { x = x0; y += 15; }
+      doc.setFillColor(...hexToRgb(color));
+      doc.circle(x + dotR, y - 3, dotR, 'F');
+      doc.setTextColor(70, 76, 92);
+      doc.text(text, x + dotR * 2 + gapAfterDot, y);
+      x += itemWidth + gapBetweenItems;
+    });
+    return y + 6;
+  }
+
+  // Draws the warm up / work / recovery / cool down bar for one structured
+  // workout directly inside its autoTable cell, proportional to distance —
+  // the PDF equivalent of renderWorkoutStructure()'s HTML bar.
+  function drawStructureBar(doc, cell, segments, caption, mutedColor) {
+    const padX = 6;
+    const barX = cell.x + padX;
+    const barY = cell.y + 6;
+    const barWidth = cell.width - padX * 2;
+    const barHeight = 9;
+    const gap = 1.2;
+    const total = Math.max(segments.reduce((s, seg) => s + Math.max(seg.km, 0.05), 0), 0.05);
+    const n = segments.length;
+    let x = barX;
+    segments.forEach((seg, i) => {
+      const w = Math.max((Math.max(seg.km, 0.05) / total) * (barWidth - gap * (n - 1)), 1.5);
+      doc.setFillColor(...hexToRgb(EXERTION_HEX[seg.exertion] || EXERTION_HEX.low));
+      doc.roundedRect(x, barY, w, barHeight, 1.5, 1.5, 'F');
+      x += w + gap;
+    });
+    if (caption) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.3);
+      doc.setTextColor(...mutedColor);
+      doc.text(pdfSafeText(caption), barX, barY + barHeight + 10, { maxWidth: barWidth });
+    }
   }
 
   // Runs automatically right after every plan is generated. Sends a compact
@@ -609,15 +1015,29 @@
     }
   }
 
+  // Pace targets are only meaningful for effort levels a runner actually
+  // paces to: tempo, interval sets, race day, and — for full-marathon plans
+  // — the marathon-specific long run (goal-pace long run during the Peak
+  // phase). Every other "easy effort" session (easy/recovery/shakeout/a
+  // regular long run) is run by feel, not by the watch, so no pace target
+  // is shown for those.
+  const PACE_TARGET_TYPES = new Set(['tempo', 'interval', 'race']);
+
   function renderDayRow(day) {
     const { formatPace, formatDate, TYPE_LABELS } = PaceForgeGenerator;
     const isRest = day.type === 'rest';
     const isRace = day.type === 'race';
     const rowClass = isRest ? 'is-rest' : (isRace ? 'is-race' : '');
-    const label = TYPE_LABELS[day.type] || day.type;
+    const label = (day.type === 'longRun' && day.isMarathonSpecific)
+      ? `${TYPE_LABELS.longRun} (Pace Marathon)`
+      : (TYPE_LABELS[day.type] || day.type);
     const km = day.km ? `${day.km} km` : '—';
-    const pace = (!isRest && day.paceSecPerKm) ? formatPace(day.paceSecPerKm) : '—';
+    const showPace = PACE_TARGET_TYPES.has(day.type) || (day.type === 'longRun' && day.isMarathonSpecific);
+    const pace = (showPace && day.paceSecPerKm) ? formatPace(day.paceSecPerKm) : '—';
     const color = TYPE_COLORS[day.type] || 'var(--type-rest)';
+    const structureRow = day.structure
+      ? `<tr class="structure-row ${rowClass}"><td colspan="5">${renderWorkoutStructure(day.structure)}</td></tr>`
+      : '';
     return `
       <tr class="${rowClass}">
         <td>${day.dayName}</td>
@@ -626,6 +1046,61 @@
         <td>${km}</td>
         <td>${pace}</td>
       </tr>
+      ${structureRow}
+    `;
+  }
+
+  // Renders the warm up / work / recovery / cool down breakdown for a
+  // workout as a proportional segmented bar, sized by DISTANCE (km) so it
+  // lines up with the "Jarak" column — visual shorthand for "what does this
+  // session actually feel like", similar to the low/moderate/max-exertion
+  // interval charts runners are used to seeing. A plain continuous run
+  // (easy/recovery/long run/shakeout) renders as a single solid low-exertion
+  // block; interval/tempo sessions break down into their segments.
+  function formatKm(km) {
+    return km < 1 ? `${Math.round(km * 1000)} m` : `${Math.round(km * 10) / 10} km`;
+  }
+
+  // Turns a day.structure object into plain { segments, caption } data —
+  // shared by the HTML bar (renderWorkoutStructure, below) and the PDF bar
+  // (drawStructureBar) so the two never drift apart.
+  function structureToSegments(structure) {
+    let segments;
+    let caption = '';
+    if (structure.kind === 'interval') {
+      segments = [{ label: 'Warm Up', km: structure.warmupKm, exertion: 'low' }];
+      for (let i = 0; i < structure.reps; i++) {
+        segments.push({ label: `Set ${i + 1}`, km: structure.workKm, exertion: structure.workExertion });
+        segments.push({ label: 'Recovery', km: structure.recoveryKm, exertion: 'low' });
+      }
+      segments.push({ label: 'Cool Down', km: structure.cooldownKm, exertion: 'low' });
+      caption = `Warm up ${formatKm(structure.warmupKm)} → ${structure.reps}× (${formatKm(structure.workKm)} keras + ${formatKm(structure.recoveryKm)} pemulihan) → Cool down ${formatKm(structure.cooldownKm)}`;
+    } else if (structure.kind === 'tempo') {
+      segments = [
+        { label: 'Warm Up', km: structure.warmupKm, exertion: 'low' },
+        { label: 'Tempo', km: structure.tempoKm, exertion: 'moderate' },
+        { label: 'Cool Down', km: structure.cooldownKm, exertion: 'low' },
+      ];
+      caption = `Warm up ${formatKm(structure.warmupKm)} → Tempo ${formatKm(structure.tempoKm)} → Cool down ${formatKm(structure.cooldownKm)}`;
+    } else {
+      // 'simple' — a single continuous block, no warm up/cool down split.
+      segments = [{ label: 'Lari', km: structure.km, exertion: structure.exertion }];
+    }
+    return { segments, caption };
+  }
+
+  function renderWorkoutStructure(structure) {
+    const { segments, caption } = structureToSegments(structure);
+
+    const bar = segments.map(seg => `
+      <span class="structure-seg exertion-${seg.exertion}" style="flex-grow:${Math.max(seg.km, 0.05).toFixed(2)}" title="${seg.label} • ${formatKm(seg.km)}"></span>
+    `).join('');
+
+    return `
+      <div class="workout-structure">
+        <div class="structure-bar">${bar}</div>
+        ${caption ? `<div class="structure-caption">${caption}</div>` : ''}
+      </div>
     `;
   }
 })();

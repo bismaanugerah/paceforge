@@ -1,24 +1,29 @@
 /**
  * PaceForge — auth.js
- * Wires every login/logout button (header + gate screen) to Supabase Auth
- * (Google sign-in) and exposes window.PaceForgeAuth so app.js can react to
- * login state without knowing anything about Supabase itself.
+ * Wires every login/logout button (header + gate screen) to Strava login
+ * (api/strava-login.js → Strava consent → api/strava-callback.js →
+ * api/session.js) and exposes window.PaceForgeAuth so app.js can react to
+ * login state without knowing anything about how the session is
+ * implemented server-side.
  *
- * DUMMY MODE: while js/config.js is still unfilled (no real Supabase
- * project yet), "login" is simulated — a fake local user is stored in
- * localStorage so the login-gated flow can be tried end-to-end before any
- * real Google OAuth / Supabase setup exists. Once js/config.js is filled in
- * with a real project, this file automatically switches to real Google
- * sign-in — nothing else needs to change.
+ * DUMMY MODE: while js/config.js still has the placeholder STRAVA_CLIENT_ID
+ * (no real Strava app connected yet), "login" is simulated — a fake local
+ * athlete is stored in localStorage so the login-gated flow (including the
+ * Strava-data auto-fill in app.js) can be tried end-to-end before any real
+ * Strava app / server env vars exist. Once js/config.js is filled in, this
+ * file automatically switches to real Strava login — nothing else needs to
+ * change.
  */
 (() => {
-  const client = window.PaceForgeSupabase;
+  const cfg = window.PACEFORGE_CONFIG || {};
+  const looksUnconfigured = !cfg.STRAVA_CLIENT_ID || cfg.STRAVA_CLIENT_ID.includes('YOUR-STRAVA');
+
   const DUMMY_SESSION_KEY = 'paceforge_dummy_session';
 
   const loginBtns = document.querySelectorAll('[data-action="login"]');
   const logoutBtns = document.querySelectorAll('[data-action="logout"]');
   const userInfo = document.getElementById('userInfo');
-  const userEmailEl = document.getElementById('userEmail');
+  const userNameEl = document.getElementById('userName');
   const syncStatus = document.getElementById('syncStatus');
   const dummyBadge = document.getElementById('dummyBadge');
   const dummyModeNote = document.getElementById('dummyModeNote');
@@ -26,10 +31,10 @@
   const authChangeListeners = [];
   // "Replay last value to late subscribers" (same idea as a BehaviorSubject):
   // app.js is a separate <script src> loaded right after this one, and the
-  // browser is free to process an already-elapsed setTimeout/Promise
-  // callback while it's still fetching that next script over the network —
-  // so notifyAuthChange can genuinely fire before app.js has registered its
-  // listener. NOT_YET_KNOWN vs. null (logged out) has to stay distinguishable.
+  // browser is free to process an already-elapsed fetch callback while it's
+  // still fetching that next script over the network — so notifyAuthChange
+  // can genuinely fire before app.js has registered its listener.
+  // NOT_YET_KNOWN vs. null (logged out) has to stay distinguishable.
   const NOT_YET_KNOWN = Symbol('not-yet-known');
   let lastUser = NOT_YET_KNOWN;
 
@@ -41,7 +46,7 @@
   function setLoggedInUI(user) {
     loginBtns.forEach(btn => { btn.hidden = !!user; });
     userInfo.hidden = !user;
-    userEmailEl.textContent = user?.email || '';
+    userNameEl.textContent = user ? ([user.firstname, user.lastname].filter(Boolean).join(' ') || 'Runner') : '';
   }
 
   function setSyncStatus(text, isError) {
@@ -55,17 +60,13 @@
     syncStatus.classList.toggle('is-error', !!isError);
   }
 
-  if (!client) {
-    // --- Dummy mode: no Supabase project configured yet ---
+  if (looksUnconfigured) {
+    // --- Dummy mode: belum ada app Strava sungguhan tersambung ---
     if (dummyBadge) dummyBadge.hidden = false;
     if (dummyModeNote) dummyModeNote.hidden = false;
 
     function signInDummy() {
-      const dummyUser = {
-        id: 'dummy-local-user',
-        email: 'demo@paceforge.dev',
-        user_metadata: { full_name: 'Demo User (mode dummy)' },
-      };
+      const dummyUser = { id: 'dummy-athlete', firstname: 'Demo', lastname: 'Runner (mode dummy)', profilePicture: '' };
       localStorage.setItem(DUMMY_SESSION_KEY, JSON.stringify(dummyUser));
       setLoggedInUI(dummyUser);
       notifyAuthChange(dummyUser);
@@ -88,37 +89,47 @@
     setLoggedInUI(dummyUser);
     notifyAuthChange(dummyUser);
   } else {
-    // --- Real mode: Supabase project configured ---
-    loginBtns.forEach(btn => btn.addEventListener('click', async () => {
-      const { error } = await client.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: window.location.origin + window.location.pathname },
-      });
-      if (error) setSyncStatus(`Gagal memulai login: ${error.message}`, true);
+    // --- Real mode: app Strava + server env vars sudah disambungkan ---
+    loginBtns.forEach(btn => btn.addEventListener('click', () => {
+      window.location.href = '/api/strava-login';
     }));
 
     logoutBtns.forEach(btn => btn.addEventListener('click', async () => {
-      await client.auth.signOut();
+      try {
+        await fetch('/api/logout', { method: 'POST' });
+      } catch { /* tetap update UI meski request logout gagal */ }
+      setLoggedInUI(null);
+      notifyAuthChange(null);
       setSyncStatus('');
     }));
 
-    client.auth.onAuthStateChange((_event, session) => {
-      const user = session?.user ?? null;
-      setLoggedInUI(user);
-      notifyAuthChange(user);
-    });
+    // api/strava-callback.js redirect balik ke sini dengan ?strava_error=...
+    // kalau user tolak akses atau tukar-token gagal — tampilkan lalu bersihkan
+    // dari URL supaya tidak muncul lagi kalau halaman di-refresh.
+    const params = new URLSearchParams(window.location.search);
+    const stravaError = params.get('strava_error');
+    if (stravaError) {
+      setSyncStatus(`Gagal login dengan Strava: ${stravaError}`, true);
+      params.delete('strava_error');
+      const cleanUrl = window.location.pathname + (params.toString() ? `?${params}` : '');
+      window.history.replaceState({}, '', cleanUrl);
+    }
 
-    client.auth.getSession().then(({ data, error }) => {
-      if (error) { setSyncStatus(`Gagal cek status login: ${error.message}`, true); return; }
-      const user = data.session?.user ?? null;
-      setLoggedInUI(user);
-      notifyAuthChange(user);
-    });
+    fetch('/api/session')
+      .then(res => res.json())
+      .then(data => {
+        const user = data.loggedIn ? data.athlete : null;
+        setLoggedInUI(user);
+        notifyAuthChange(user);
+      })
+      .catch(err => {
+        setSyncStatus(`Gagal cek status login: ${err.message}`, true);
+        notifyAuthChange(null);
+      });
   }
 
   window.PaceForgeAuth = {
-    getClient: () => client,
-    isDummy: () => !client,
+    isDummy: () => looksUnconfigured,
     // Called with (user) — user is null when logged out. Fires immediately
     // with the current state if already known (see NOT_YET_KNOWN above),
     // then again on every subsequent login/logout.

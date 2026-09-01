@@ -8,6 +8,7 @@
  *   raceDistanceKm: number,
  *   raceLabel: string,
  *   raceDate: Date,
+ *   startDate: Date | null,   (when the runner wants to start training; defaults to today if omitted)
  *   fitnessLevel: 'beginner' | 'intermediate' | 'advanced',
  *   currentWeeklyKm: number,
  *   longestRecentRunKm: number,  (longest single run in the last ~3 months)
@@ -146,6 +147,47 @@ const PaceForgeGenerator = (() => {
     }
   }
 
+  // Visual workout-structure breakdown for every non-rest/race session,
+  // expressed in distance (km) — not time — so the bar's segment widths line
+  // up with the "Jarak" column already shown for that day: a continuous run
+  // (easy/recovery/long run/shakeout) is one solid low-exertion block, while
+  // interval/tempo sessions break down into warm up + work/recovery + cool
+  // down, derived from that day's own computed distance. Purely additive for
+  // the UI's workout-structure bar; day.km and day.paceSecPerKm (used for
+  // weekly totals) are untouched.
+  const REP_DISTANCE_KM = { beginner: 0.4, intermediate: 0.8, advanced: 1.0 };
+  const REP_RECOVERY_KM = { beginner: 0.3, intermediate: 0.4, advanced: 0.4 };
+
+  function buildSimpleStructure(sessionKm) {
+    return { kind: 'simple', km: sessionKm, exertion: 'low' };
+  }
+
+  function buildIntervalStructure(sessionKm, fitnessLevel, conservativeMode) {
+    const repKm = REP_DISTANCE_KM[fitnessLevel] || REP_DISTANCE_KM.intermediate;
+    const recoveryKm = REP_RECOVERY_KM[fitnessLevel] || REP_RECOVERY_KM.intermediate;
+    const warmupKm = clamp(sessionKm * 0.2, 1, 2.5);
+    const cooldownKm = clamp(sessionKm * 0.15, 1, 2);
+    const workoutKm = Math.max(sessionKm - warmupKm - cooldownKm, repKm + recoveryKm);
+    const reps = clamp(Math.round(workoutKm / (repKm + recoveryKm)), 3, 8);
+    const workExertion = conservativeMode ? 'moderate' : (fitnessLevel === 'beginner' ? 'moderate' : 'high');
+    return {
+      kind: 'interval',
+      warmupKm,
+      cooldownKm,
+      reps,
+      workKm: repKm,
+      workExertion,
+      recoveryKm,
+    };
+  }
+
+  function buildTempoStructure(sessionKm) {
+    const warmupKm = clamp(sessionKm * 0.25, 1, 2);
+    const cooldownKm = clamp(sessionKm * 0.2, 1, 1.5);
+    const tempoKm = Math.max(sessionKm - warmupKm - cooldownKm, 1);
+    return { kind: 'tempo', warmupKm, cooldownKm, tempoKm };
+  }
+
   const TYPE_LABELS = {
     recovery: 'Lari Pemulihan',
     easy: 'Lari Santai',
@@ -159,16 +201,25 @@ const PaceForgeGenerator = (() => {
 
   function generatePlan(settings) {
     const {
-      raceDistanceKm, raceLabel, raceKey, raceDate,
+      raceDistanceKm, raceLabel, raceKey, raceDate, startDate,
       fitnessLevel, currentWeeklyKm, longestRecentRunKm, daysPerWeek, preferredDays, longRunDay,
       targetTimeSec, recentRaceTimeSec, recentRaceDistanceKm, conservativeMode,
     } = settings;
 
-    const today = startOfDay(new Date());
+    // Anchor for "how many weeks do I actually have before race day" — the
+    // date the runner wants to start training, not necessarily today (e.g.
+    // they're finishing up something else first). Falls back to today when
+    // not given, which is the previous, unconditional behaviour.
+    const planStartAnchor = startOfDay(startDate || new Date());
     const race = startOfDay(raceDate);
     const profile = resolveRaceProfile(raceDistanceKm, raceKey);
+    // Marathon-specific long run (MSL): a long run carrying goal marathon
+    // pace, only meaningful for full-marathon plans, and only scheduled
+    // during the Peak phase — the block of build weeks with the highest
+    // long-run distances, right before taper (see buildPhaseForWeek).
+    const isFullMarathonPlan = profile === RACE_PROFILES.full;
 
-    const daysUntilRace = Math.round((race - today) / MS_PER_DAY);
+    const daysUntilRace = Math.round((race - planStartAnchor) / MS_PER_DAY);
     const weeksAvailable = Math.max(1, Math.floor(daysUntilRace / 7));
 
     let planWeeks = Math.min(weeksAvailable, profile.recWeeks);
@@ -353,15 +404,19 @@ const PaceForgeGenerator = (() => {
           return;
         }
         if (type === 'longRun') {
+          const isMSL = isFullMarathonPlan && phase === 'Peak';
           dayObj.type = 'longRun';
           dayObj.km = Math.round(longRunKmThisWeek * 2) / 2;
-          dayObj.paceSecPerKm = paces.longRun;
+          dayObj.paceSecPerKm = isMSL ? paces.goal : paces.longRun;
+          dayObj.isMarathonSpecific = isMSL;
+          if (dayObj.km > 0) dayObj.structure = buildSimpleStructure(dayObj.km);
           return;
         }
         if (type === 'shakeout') {
           dayObj.type = 'shakeout';
           dayObj.km = Math.max(2, Math.round(currentWeeklyKm * 0.08));
           dayObj.paceSecPerKm = paces.easy;
+          if (dayObj.km > 0) dayObj.structure = buildSimpleStructure(dayObj.km);
           return;
         }
 
@@ -378,6 +433,13 @@ const PaceForgeGenerator = (() => {
         dayObj.type = type;
         dayObj.km = Math.max(0, Math.round(km * 2) / 2);
         dayObj.paceSecPerKm = paces[type] ?? paces.easy;
+        if (type === 'interval' && dayObj.km > 0) {
+          dayObj.structure = buildIntervalStructure(dayObj.km, fitnessLevel, conservativeMode);
+        } else if (type === 'tempo' && dayObj.km > 0) {
+          dayObj.structure = buildTempoStructure(dayObj.km);
+        } else if (dayObj.km > 0) {
+          dayObj.structure = buildSimpleStructure(dayObj.km);
+        }
       });
 
       const totalKm = Math.round(days.reduce((s, d) => s + (d.km || 0), 0) * 10) / 10;

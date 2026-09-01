@@ -20,6 +20,10 @@
   --type-rest: #8b93a3;
   --type-race: var(--color-primary);
 
+  --exertion-low: #74b358;
+  --exertion-moderate: #e0b93a;
+  --exertion-high: #de5b4c;
+
   --radius: 12px;
   --shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
   --font-body: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -513,6 +517,10 @@ input[type="radio"]:focus-visible {
   color: var(--color-primary-dark);
 }
 
+/* Lets the table scroll horizontally on its own if it's ever too wide for
+   the screen (long labels, very small phones) instead of silently clipping
+   against .week-block's overflow:hidden. */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .day-table { width: 100%; border-collapse: collapse; }
 .day-table th {
   text-align: left;
@@ -545,6 +553,56 @@ input[type="radio"]:focus-visible {
   color: #fff;
 }
 
+/* Effort/exertion legend (low/moderate/high) shown above the plan, explains
+   the colors used in the workout-structure bars below. */
+.effort-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 0 0 6px;
+  padding: 12px 14px;
+  background: var(--color-bg);
+  border-radius: 10px;
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+.effort-legend .effort-item { display: flex; align-items: center; gap: 6px; }
+.effort-legend .effort-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.effort-legend .exertion-low { background: var(--exertion-low); }
+.effort-legend .exertion-moderate { background: var(--exertion-moderate); }
+.effort-legend .exertion-high { background: var(--exertion-high); }
+
+/* Workout-structure bar: warm up / work / recovery / cool down, proportional
+   to duration — a quick visual read of what an interval or tempo session
+   actually feels like. */
+.structure-row td { padding: 2px 16px 14px; border-bottom: 1px solid var(--color-border); }
+.structure-row.is-rest td { border-bottom: none; }
+.workout-structure { display: flex; flex-direction: column; gap: 6px; }
+.structure-bar {
+  display: flex;
+  align-items: stretch;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  gap: 2px;
+  background: var(--color-border);
+}
+.structure-seg { flex: 0 0 auto; min-width: 3px; }
+.structure-seg.exertion-low { background: var(--exertion-low); }
+.structure-seg.exertion-moderate { background: var(--exertion-moderate); }
+.structure-seg.exertion-high { background: var(--exertion-high); }
+.structure-caption {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
 .disclaimer {
   margin-top: 26px;
   font-size: 0.82rem;
@@ -563,6 +621,16 @@ input[type="radio"]:focus-visible {
 
 /* ---------- Print ---------- */
 @media print {
+  /* Browsers strip background colors/images when printing by default (to
+     save ink) unless a page opts back in — without this, the type badges
+     and the workout-structure bars (both pure background-color, no visible
+     border/text of their own) print as blank/invisible instead of matching
+     what's shown on screen. */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
   :root {
     color-scheme: light;
     --color-bg: #f5f6f8;
@@ -585,4 +653,13 @@ input[type="radio"]:focus-visible {
 @media (max-width: 600px) {
   .card { padding: 20px 16px 24px; }
   .brand-name { font-size: 1.6rem; }
+
+  /* Tighten the day table so Hari/Tanggal/Sesi/Jarak/Pace all fit on a
+     narrow phone screen without needing to scroll sideways. */
+  .day-table th { padding: 6px 6px; font-size: 0.66rem; }
+  .day-table td { padding: 8px 6px; font-size: 0.8rem; }
+  .type-badge { padding: 3px 7px; font-size: 0.72rem; }
+  .structure-row td { padding: 2px 6px 12px; }
+  .structure-caption { font-size: 0.72rem; }
+  .week-header { padding: 10px 12px; }
 }
