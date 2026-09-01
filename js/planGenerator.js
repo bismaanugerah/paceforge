@@ -349,6 +349,7 @@ const PaceForgeGenerator = (() => {
     const weeks = [];
     let actualPeakLongRunKm = 0;
     let rampLimited = false;
+    let supportRunCapped = false;
 
     for (let w = 0; w < planWeeks; w++) {
       const weekMonday = addDays(firstMonday, w * 7);
@@ -456,6 +457,17 @@ const PaceForgeGenerator = (() => {
           const easySlots = nonLongSlots.filter(t => t === 'easy' || t === 'recovery').length || 1;
           km = (remainingKm - usedBySpeed) / easySlots;
         }
+        // Guardrail: a "long run" is only meaningful if it's actually the
+        // longest run of the week — with few training days (a single "easy"
+        // slot has to absorb everything remainingKm doesn't cover), the
+        // formula above can otherwise hand a support session more distance
+        // than that same week's long run. Cap it below the long run instead;
+        // the shortfall just isn't distributed anywhere else (a lower actual
+        // weekKm total is safer than an oversized "easy" day).
+        if (longRunKmThisWeek > 0 && km >= longRunKmThisWeek * 0.85) {
+          km = longRunKmThisWeek * 0.85;
+          supportRunCapped = true;
+        }
         dayObj.type = type;
         dayObj.km = Math.max(0, Math.round(km * 2) / 2);
         dayObj.paceSecPerKm = paces[type] ?? paces.easy;
@@ -482,6 +494,9 @@ const PaceForgeGenerator = (() => {
 
     if (rampLimited) {
       warnings.push(`Long run puncak di jadwal ini (~${Math.round(actualPeakLongRunKm * 10) / 10} km) sengaja ditahan di bawah target ${Math.round(peakLongRunKm)} km, karena lari terjauhmu saat ini baru ${longestRecentRunKm} km — kenaikan jarak long run dinaikkan bertahap per minggu (maks ~20%) supaya aman dari cedera. Kalau waktu persiapanmu masih cukup panjang, ini normal dan long run akan terus naik mendekati race day.`);
+    }
+    if (supportRunCapped) {
+      warnings.push(`Beberapa sesi lari santai/tempo/interval di jadwal ini sengaja ditahan supaya tidak lebih jauh dari long run minggu itu sendiri — dengan cuma ${daysPerWeek} hari latihan/minggu, kadang volume mingguan yang "seharusnya" tercapai tidak muat dibagi rata ke sesi-sesi lain secara aman, jadi totalnya bisa datang lebih rendah dari target. Tambah hari latihan per minggu kalau mau volume mingguan lebih tinggi tanpa harus mengorbankan ini.`);
     }
 
     return {
