@@ -115,6 +115,12 @@
       window.history.replaceState({}, '', cleanUrl);
     }
 
+    // Silent background check, bukan error user-facing kalau gagal (mis.
+    // serverless function belum jalan — mis. lokal via .claude/serve.ps1
+    // tanpa `vercel dev`) — cukup anggap belum login, jangan tampilkan
+    // banner merah untuk sesuatu yang belum tentu user coba lakukan.
+    // Kegagalan pas user benar-benar klik tombol login/logout tetap
+    // ditampilkan (lihat listener di atas).
     fetch('/api/session')
       .then(res => res.json())
       .then(data => {
@@ -123,7 +129,7 @@
         notifyAuthChange(user);
       })
       .catch(err => {
-        setSyncStatus(`Gagal cek status login: ${err.message}`, true);
+        console.warn('[PaceForge] Gagal cek status login (dianggap belum login):', err.message);
         notifyAuthChange(null);
       });
   }

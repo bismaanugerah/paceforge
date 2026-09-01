@@ -110,7 +110,7 @@
     const isCustom = getDistanceMode() === 'custom';
     presetDistanceField.hidden = isCustom;
     customDistanceField.hidden = !isCustom;
-    updateEstimate5kHint();
+    updateRecentRaceHint();
   });
 
   function getCurrentRaceDistanceKm() {
