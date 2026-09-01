@@ -65,6 +65,16 @@
   const conservativeModeInput = document.getElementById('conservativeMode');
   const userNotesInput = document.getElementById('userNotes');
   const formError = document.getElementById('formError');
+  const currentWeeklyKmInput = document.getElementById('currentWeeklyKm');
+  const longestRecentRunKmInput = document.getElementById('longestRecentRunKm');
+  const stravaFillBadge = document.getElementById('stravaFillBadge');
+
+  // Kalau user ngedit salah satu angka ini sendiri setelah auto-fill dari
+  // Strava, badge-nya nggak relevan lagi — angkanya sekarang pilihan user,
+  // bukan lagi murni dari Strava.
+  [currentWeeklyKmInput, longestRecentRunKmInput].forEach(el => {
+    el.addEventListener('input', () => { stravaFillBadge.hidden = true; });
+  });
 
   const DAY_LABELS = { 0: 'Minggu', 1: 'Senin', 2: 'Selasa', 3: 'Rabu', 4: 'Kamis', 5: "Jum'at", 6: 'Sabtu' };
 
@@ -270,13 +280,13 @@
     if (startDate < today) { showError('Tanggal mulai training tidak boleh di masa lalu.'); return null; }
     if (startDate >= raceDate) { showError('Tanggal mulai training harus sebelum tanggal race.'); return null; }
 
-    const currentWeeklyKm = Number(document.getElementById('currentWeeklyKm').value);
+    const currentWeeklyKm = Number(currentWeeklyKmInput.value);
     if (currentWeeklyKm < 0 || Number.isNaN(currentWeeklyKm)) {
       showError('Isi rata-rata jarak lari mingguan yang valid (boleh 0 jika baru mulai).');
       return null;
     }
 
-    const longestRecentRunKm = Number(document.getElementById('longestRecentRunKm').value);
+    const longestRecentRunKm = Number(longestRecentRunKmInput.value);
     if (longestRecentRunKm < 0 || Number.isNaN(longestRecentRunKm)) {
       showError('Isi jarak lari terjauhmu dalam 3 bulan terakhir yang valid (boleh 0 jika baru mulai).');
       return null;
@@ -356,8 +366,8 @@
 
     // fitnessLevel sendiri tidak punya field di form lagi — diturunkan
     // ulang otomatis dari currentWeeklyKm begitu plan digenerate lagi.
-    document.getElementById('currentWeeklyKm').value = settings.currentWeeklyKm;
-    document.getElementById('longestRecentRunKm').value = settings.longestRecentRunKm;
+    currentWeeklyKmInput.value = settings.currentWeeklyKm;
+    longestRecentRunKmInput.value = settings.longestRecentRunKm;
     conservativeModeInput.checked = settings.conservativeMode;
 
     daysPerWeekInput.value = settings.daysPerWeek;
@@ -543,11 +553,13 @@
     let filledAny = false;
 
     if (summary.currentWeeklyKm != null) {
-      document.getElementById('currentWeeklyKm').value = summary.currentWeeklyKm;
+      currentWeeklyKmInput.value = summary.currentWeeklyKm;
+      stravaFillBadge.hidden = false;
       filledAny = true;
     }
     if (summary.longestRecentRunKm != null) {
-      document.getElementById('longestRecentRunKm').value = summary.longestRecentRunKm;
+      longestRecentRunKmInput.value = summary.longestRecentRunKm;
+      stravaFillBadge.hidden = false;
       filledAny = true;
     }
     if (summary.recentRace) {
