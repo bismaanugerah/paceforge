@@ -11,7 +11,7 @@ const { selectOne, update } = require('../server/supabaseAdmin');
 const { refreshAccessToken, fetchRecentRuns, summarizeRuns } = require('../server/strava');
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 jam
-const LOOKBACK_DAYS = 190; // sedikit lebih dari 180 hari (buffer buat deteksi race terakhir)
+const LOOKBACK_DAYS = 100; // sedikit lebih dari 90 hari (buffer buat deteksi race terbaik 3 bulan terakhir — lihat summarizeRuns)
 
 module.exports = async (req, res) => {
   if (req.method !== 'GET') {

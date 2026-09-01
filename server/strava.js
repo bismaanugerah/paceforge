@@ -77,18 +77,27 @@ function daysAgo(n) {
   return new Date(Date.now() - n * 24 * 3600 * 1000);
 }
 
+// Riegel's race-time-prediction formula — same formula/exponent as
+// js/planGenerator.js's predictRaceTime, duplicated here since this runs
+// server-side and has no access to that client-only module. Used below to
+// compare race-tagged runs of different distances on equal footing (a fast
+// 5K and a slower half marathon aren't directly comparable by raw time).
+function riegelPredict(timeSec, fromKm, toKm) {
+  return timeSec * Math.pow(toKm / fromKm, 1.06);
+}
+
 // Turns a raw Run-activity list into exactly the fields PaceForge's form
 // can use to prefill itself. See supabase/schema.sql + api/strava-summary.js
 // for how this gets cached.
 function summarizeRuns(runs) {
   const cutoff28 = daysAgo(28);
   const cutoff90 = daysAgo(90);
-  const cutoff180 = daysAgo(180);
   const cutoff56 = daysAgo(56);
 
   let km28 = 0;
   let longestKm90 = 0;
-  let mostRecentRace = null;
+  let bestRace = null;
+  let bestRaceEquivSec = Infinity; // bestRace's time normalized to a 10K-equivalent effort (Riegel), lower = better performance
   const dayOfWeekCounts = new Array(7).fill(0);
 
   for (const run of runs) {
@@ -101,10 +110,19 @@ function summarizeRuns(runs) {
     if (startedAt >= cutoff56) dayOfWeekCounts[startedAt.getDay()]++;
 
     // workout_type === 1 is how Strava itself tags an activity as "Race"
-    // (set by the athlete, either at upload or afterward in Strava).
-    if (run.workout_type === 1 && startedAt >= cutoff180) {
-      if (!mostRecentRace || startedAt > new Date(mostRecentRace.start_date_local || mostRecentRace.start_date)) {
-        mostRecentRace = run;
+    // (set by the athlete, either at upload or afterward in Strava). Among
+    // those, in the last 3 months (matching longestKm90's window above),
+    // pick the one that best represents current fitness — the BEST
+    // performance (fastest 10K-equivalent time via Riegel), not simply the
+    // most recently run one: a mediocre-effort race run last week is a
+    // worse fitness signal than a strong one run six weeks ago (e.g. a
+    // supported long run someone tagged "Race" in Strava for logistics
+    // reasons, not as a timed effort, shouldn't win just for being newer).
+    if (run.workout_type === 1 && startedAt >= cutoff90 && km > 0 && run.moving_time > 0) {
+      const equivSec = riegelPredict(run.moving_time, km, 10);
+      if (equivSec < bestRaceEquivSec) {
+        bestRaceEquivSec = equivSec;
+        bestRace = run;
       }
     }
   }
@@ -118,9 +136,9 @@ function summarizeRuns(runs) {
   return {
     currentWeeklyKm: km28 > 0 ? Math.round(km28 / 4) : null,
     longestRecentRunKm: longestKm90 > 0 ? Math.round(longestKm90 * 10) / 10 : null,
-    recentRace: mostRecentRace ? {
-      distanceKm: Math.round((mostRecentRace.distance / 1000) * 10) / 10,
-      timeSec: Math.round(mostRecentRace.moving_time),
+    recentRace: bestRace ? {
+      distanceKm: Math.round((bestRace.distance / 1000) * 10) / 10,
+      timeSec: Math.round(bestRace.moving_time),
     } : null,
     suggestedDaysOfWeek,
   };
