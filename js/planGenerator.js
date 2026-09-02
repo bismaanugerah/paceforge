@@ -1086,8 +1086,15 @@ const PaceForgeGenerator = (() => {
         const qualityDays = pickSpacedQualityDays(qualityCandidatePool, qualityIdx.length);
         // Restore chronological (Mon..Sun) order among whatever's left for
         // the non-quality slots, same ordering rule used for sortedPreferredDays.
+        // Filtered from nonLongRunDaysChrono (every non-long-run selected
+        // day), NOT qualityCandidatePool — a weekend day that was never a
+        // quality candidate (e.g. Sunday when Saturday's long run already
+        // fills the weekend) would otherwise vanish from this list entirely,
+        // leaving nonQualityIdx.forEach below one day short and that real
+        // calendar day with no type assigned at all (silently left as
+        // `undefined` instead of its 'easy'/'recovery' slot).
         const qualityDaysSet = new Set(qualityDays);
-        const leftoverDays = qualityCandidatePool
+        const leftoverDays = nonLongRunDaysChrono
           .filter(dow => !qualityDaysSet.has(dow))
           .sort((a, b) => chronoRank(a) - chronoRank(b));
 
