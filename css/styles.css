@@ -494,6 +494,14 @@ input[type="radio"]:focus-visible {
 }
 .result-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 
+/* Opened by #feelingOffBtn — see handleFeedbackSubmit in js/app.js. */
+.feedback-panel { margin: 16px 0; display: flex; flex-direction: column; gap: 10px; }
+.feedback-panel label { font-size: 0.88rem; color: var(--color-text-muted); }
+.feedback-panel textarea { width: 100%; resize: vertical; }
+.feedback-actions { display: flex; gap: 10px; }
+.feedback-status { font-size: 0.85rem; color: var(--color-accent); margin: 0; }
+.feedback-status.is-error { color: #ff9c90; }
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

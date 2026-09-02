@@ -297,9 +297,28 @@
     <div class="result-header">
       <h2>Training Plan Kamu</h2>
       <div class="result-actions no-print">
+        <button id="feelingOffBtn" class="btn btn-secondary">😔 Lagi nggak fit?</button>
         <button id="printBtn" class="btn btn-secondary">📄 Simpan sebagai PDF</button>
         <button id="newPlanBtn" class="btn btn-ghost">↺ Buat Plan Baru</button>
       </div>
+    </div>
+
+    <!-- Opened by #feelingOffBtn — tells the AI (or, when it's unavailable,
+         a simpler rule-based fallback — see handleFeedbackSubmit in
+         js/app.js) to back off whichever upcoming sessions the runner
+         picks, based on how they say they're doing right now. -->
+    <div id="feedbackPanel" class="feedback-panel no-print card" hidden>
+      <label for="feedbackNote">Ceritain kondisimu sekarang (sakit, cedera, capek, sibuk, dll.)</label>
+      <textarea id="feedbackNote" rows="2" placeholder="mis. kaki nyeri dari kemarin, atau minggu ini kerjaan lagi padat banget"></textarea>
+      <div class="mode-toggle" id="feedbackScopeToggle">
+        <label class="mode-chip"><input type="radio" name="feedbackScope" value="week" checked> Minggu ini saja</label>
+        <label class="mode-chip"><input type="radio" name="feedbackScope" value="rest"> Sisa plan (dari hari ini)</label>
+      </div>
+      <div class="feedback-actions">
+        <button type="button" id="feedbackSubmitBtn" class="btn btn-primary btn-small">Sesuaikan Jadwal</button>
+        <button type="button" id="feedbackCancelBtn" class="btn btn-ghost btn-small">Batal</button>
+      </div>
+      <p id="feedbackStatus" class="feedback-status" hidden></p>
     </div>
 
     <div class="ai-status-row no-print">

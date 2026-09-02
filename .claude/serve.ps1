@@ -66,11 +66,79 @@ tiap minggu taper, race week). Minggu rutin yang mirip minggu sebelumnya:
 lewati saja, jangan dipaksa dikomentari.
 '@
 
+# User-triggered (runner says "I'm sick/tired/injured today"), separate
+# from the automatic post-generation review above. Keep this prompt in
+# sync with api/adjust-plan-feedback.js's copy.
+$FEEDBACK_SYSTEM_PROMPT = @'
+Kamu pelatih lari berpengalaman, menulis singkat dalam Bahasa Indonesia.
+Pelari lagi kasih tau kondisinya (sakit/cedera/capek/sibuk/dll) dan minta
+jadwal latihan yang SUDAH DIHITUNG sistem rule-based disesuaikan buat
+beberapa hari ke depan yang dia pilih sendiri.
+
+Kamu menerima:
+- "note": catatan kondisi pelari, bahasa bebas.
+- "days": daftar sesi yang BOLEH disesuaikan (hari "dow" 0=Minggu..6=Sabtu,
+  minggu "week", jenis sesi "type", jarak "km" saat ini). Long run BOLEH
+  ada di daftar ini kalau memang perlu disesuaikan -- race day TIDAK PERNAH
+  ada di daftar ini.
+
+Tugasmu: untuk tiap sesi di "days" yang menurutmu perlu disesuaikan
+berdasarkan catatan pelari, sarankan salah satu:
+- "skip": sesi itu diistirahatkan total (jarak jadi 0).
+- "reduce": jarak diturunkan ke "suggestedKm" (HARUS lebih kecil dari jarak
+  aslinya, jangan pernah menaikkan).
+Sesi yang menurutmu masih aman dijalankan seperti rencana, JANGAN
+dimasukkan ke "adjustments" sama sekali. Sesuaikan levelnya sama beratnya
+kondisi pelari -- capek ringan mungkin cuma perlu diturunkan sedikit,
+cedera/sakit lebih baik banyak sesi di-skip.
+
+Balas HANYA JSON valid (tanpa code fence, tanpa teks lain), format PERSIS:
+{"adjustments": [{"week": N, "dow": 0-6, "action": "skip|reduce", "suggestedKm": X, "reason": "maks 12 kata"}], "summary": "maks 2 kalimat, jelaskan ke pelari kenapa jadwalnya disesuaikan begini"}
+'@
+
 function Send-JsonResponse($res, $statusCode, $jsonText) {
   $res.StatusCode = $statusCode
   $res.ContentType = "application/json"
   $bytes = [System.Text.Encoding]::UTF8.GetBytes($jsonText)
   $res.OutputStream.Write($bytes, 0, $bytes.Length)
+}
+
+# Shared by both AI endpoints below (enhance-plan and adjust-plan-feedback)
+# -- same call/response/error shape, only the system prompt, user message,
+# and token budget differ.
+function Send-AiResponse($res, $apiKey, $model, $systemPrompt, $userContent, $maxTokens) {
+  $requestBody = @{
+    model = $model
+    max_tokens = $maxTokens
+    system = $systemPrompt
+    messages = @(@{ role = "user"; content = $userContent })
+  } | ConvertTo-Json -Depth 10
+
+  try {
+    $aiResponse = Invoke-RestMethod -Uri "https://api.anthropic.com/v1/messages" -Method Post -Headers @{
+      "x-api-key" = $apiKey
+      "anthropic-version" = "2023-06-01"
+      "content-type" = "application/json"
+    } -Body $requestBody -TimeoutSec 60
+
+    $textOut = $aiResponse.content[0].text
+    $textOut = $textOut -replace '^\s*```json\s*', '' -replace '\s*```\s*$', ''
+    # Validate it's actually JSON before handing it to the browser.
+    $null = $textOut | ConvertFrom-Json
+    Send-JsonResponse $res 200 $textOut
+  } catch {
+    $errDetail = $_.Exception.Message
+    if ($_.Exception.Response) {
+      try {
+        $stream = $_.Exception.Response.GetResponseStream()
+        $streamReader = New-Object System.IO.StreamReader($stream)
+        $errBody = $streamReader.ReadToEnd()
+        $streamReader.Close()
+        if ($errBody) { $errDetail = $errBody }
+      } catch {}
+    }
+    Send-JsonResponse $res 502 (@{ error = "Gagal memanggil Claude API: $errDetail" } | ConvertTo-Json)
+  }
 }
 
 while ($listener.IsListening) {
@@ -80,7 +148,7 @@ while ($listener.IsListening) {
   try {
     $path = $req.Url.LocalPath
 
-    if ($req.HttpMethod -eq "POST" -and $path -eq "/api/enhance-plan") {
+    if ($req.HttpMethod -eq "POST" -and ($path -eq "/api/enhance-plan" -or $path -eq "/api/adjust-plan-feedback")) {
       $apiKey = Get-EnvOrRegistry "ANTHROPIC_API_KEY"
       if (-not $apiKey) {
         Send-JsonResponse $res 400 (@{ error = "ANTHROPIC_API_KEY belum diset di environment variable server. Set dulu (mis. `$env:ANTHROPIC_API_KEY = 'sk-ant-...') lalu restart server." } | ConvertTo-Json)
@@ -95,37 +163,11 @@ while ($listener.IsListening) {
         # but pricier — writing quality.
         $model = Get-EnvOrRegistry "ANTHROPIC_MODEL"
         if (-not $model) { $model = "claude-haiku-4-5-20251001" }
-        $requestBody = @{
-          model = $model
-          max_tokens = 900
-          system = $AI_SYSTEM_PROMPT
-          messages = @(@{ role = "user"; content = "Data rencana latihan (JSON):`n$bodyText" })
-        } | ConvertTo-Json -Depth 10
 
-        try {
-          $aiResponse = Invoke-RestMethod -Uri "https://api.anthropic.com/v1/messages" -Method Post -Headers @{
-            "x-api-key" = $apiKey
-            "anthropic-version" = "2023-06-01"
-            "content-type" = "application/json"
-          } -Body $requestBody -TimeoutSec 60
-
-          $textOut = $aiResponse.content[0].text
-          $textOut = $textOut -replace '^\s*```json\s*', '' -replace '\s*```\s*$', ''
-          # Validate it's actually JSON before handing it to the browser.
-          $null = $textOut | ConvertFrom-Json
-          Send-JsonResponse $res 200 $textOut
-        } catch {
-          $errDetail = $_.Exception.Message
-          if ($_.Exception.Response) {
-            try {
-              $stream = $_.Exception.Response.GetResponseStream()
-              $streamReader = New-Object System.IO.StreamReader($stream)
-              $errBody = $streamReader.ReadToEnd()
-              $streamReader.Close()
-              if ($errBody) { $errDetail = $errBody }
-            } catch {}
-          }
-          Send-JsonResponse $res 502 (@{ error = "Gagal memanggil Claude API: $errDetail" } | ConvertTo-Json)
+        if ($path -eq "/api/enhance-plan") {
+          Send-AiResponse $res $apiKey $model $AI_SYSTEM_PROMPT "Data rencana latihan (JSON):`n$bodyText" 900
+        } else {
+          Send-AiResponse $res $apiKey $model $FEEDBACK_SYSTEM_PROMPT $bodyText 700
         }
       }
     } else {

@@ -261,6 +261,12 @@
   const aiStatus = document.getElementById('aiStatus');
   const aiRetryBtn = document.getElementById('aiRetryBtn');
   const aiIntro = document.getElementById('aiIntro');
+  const feelingOffBtn = document.getElementById('feelingOffBtn');
+  const feedbackPanel = document.getElementById('feedbackPanel');
+  const feedbackNote = document.getElementById('feedbackNote');
+  const feedbackSubmitBtn = document.getElementById('feedbackSubmitBtn');
+  const feedbackCancelBtn = document.getElementById('feedbackCancelBtn');
+  const feedbackStatus = document.getElementById('feedbackStatus');
 
   // Kept around so the AI review step can send the currently-generated plan
   // (and retry on demand) without recomputing anything.
@@ -296,6 +302,15 @@
   // while waiting for the user to click a second day to swap it with —
   // null when no swap is in progress. See handleSwapDayClick.
   let swapSelection = null;
+  // Every "I'm sick/tired" adjustment the user has accepted, as {week,
+  // dow, type, km} absolute overrides (not deltas — unlike daySwaps,
+  // which just exchanges two days' content and so replays cleanly
+  // regardless of what a regenerated plan's numbers happen to be, a
+  // feedback adjustment's whole point is a *specific* runner-approved
+  // distance/type for that slot, so it's saved and replayed as that
+  // literal value). Persisted and replayed the same way as daySwaps —
+  // see handleFeedbackSubmit and applySavedDaySwaps/applySavedFeedback.
+  let feedbackOverrides = [];
 
   // Set a sensible default race date: 12 weeks from today.
   const defaultRaceDate = new Date();
@@ -700,11 +715,13 @@
     lastSettings = settings;
     lastFitnessLevel = settings.fitnessLevel;
     lastConservativeMode = settings.conservativeMode;
-    // Freshly generated plan has no swaps applied yet — a restoring caller
-    // (loadSavedPlanForUser) replays its saved daySwaps itself right after
-    // this returns, once the resulting DOM actually exists to update.
+    // Freshly generated plan has no swaps/overrides applied yet — a
+    // restoring caller (loadSavedPlanForUser) replays its saved daySwaps
+    // and feedbackOverrides itself right after this returns, once the
+    // resulting DOM actually exists to update.
     daySwaps = [];
     swapSelection = null;
+    feedbackOverrides = [];
 
     showLoading(restoring ? 'Memuat training plan-mu...' : undefined);
     loadingSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -822,6 +839,191 @@
     touchedWeeks.forEach(reRenderWeek);
   }
 
+  // Applies one "I'm sick/tired" adjustment to a day in place — either
+  // 'skip' (rest it entirely) or 'reduce' (shrink it to a smaller
+  // distance, rebuilding its workout-structure bar at the new size with
+  // the same type-specific builder the generator itself would use, so an
+  // interval/tempo/repetition session still shows a correctly-sized
+  // warm-up/work/cooldown breakdown rather than a stale one sized for the
+  // original distance). Long run uses buildSimpleStructure rather than
+  // its usual race-specific builder — this is a one-off runner-approved
+  // exception to the plan, not a re-run of the generator's own long-run
+  // logic, so losing the race-pace-segment detail here is an acceptable
+  // simplification.
+  function applyFeedbackAdjustment(day, action, suggestedKm) {
+    const km = action === 'skip' ? 0 : Math.max(0, Math.round(suggestedKm * 2) / 2);
+    const SESSION_FIELDS_TO_CLEAR = ['structure', 'isMarathonSpecific', 'workoutVariant', 'recoveryPaceSecPerKm'];
+    if (action === 'skip' || km <= 0) {
+      SESSION_FIELDS_TO_CLEAR.forEach(field => delete day[field]);
+      day.type = 'rest';
+      day.km = 0;
+      return;
+    }
+    day.km = km;
+    const { buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure } = PaceForgeGenerator;
+    if (day.type === 'interval') {
+      day.structure = buildIntervalStructure(km, lastFitnessLevel, lastConservativeMode, day.workoutVariant, day.recoveryPaceSecPerKm);
+    } else if (day.type === 'tempo') {
+      day.structure = buildTempoStructure(km, day.workoutVariant, day.recoveryPaceSecPerKm);
+    } else if (day.type === 'repetition') {
+      day.structure = buildRepetitionStructure(km, day.recoveryPaceSecPerKm);
+    } else {
+      day.structure = buildSimpleStructure(km);
+    }
+  }
+
+  // Replays a saved feedbackOverrides list against a just-regenerated
+  // lastPlan — same reasoning as applySavedDaySwaps above: restoring a
+  // saved plan re-runs generatePlan() from settings, which reproduces
+  // none of a runner-approved override on its own.
+  function applySavedFeedbackOverrides(savedOverrides) {
+    if (!Array.isArray(savedOverrides) || !savedOverrides.length || !lastPlan) return;
+    const touchedWeeks = new Set();
+    savedOverrides.forEach(entry => {
+      const week = lastPlan.weeks.find(w => w.weekNumber === entry.week);
+      const day = week?.days.find(d => d.dow === entry.dow);
+      if (!day) return;
+      // structure isn't saved (large, and cheaply rebuildable) — just
+      // reconstruct it the same way applyFeedbackAdjustment does rather
+      // than duplicating that logic here. Also relies on it (rather than
+      // setting day.type/day.km directly) to clear stale fields left over
+      // from whatever this day was regenerated as — a 'rest' override
+      // still needs its old structure/workoutVariant/etc wiped, same as
+      // a fresh 'skip' does.
+      applyFeedbackAdjustment(day, entry.type === 'rest' ? 'skip' : 'reduce', entry.km);
+      touchedWeeks.add(entry.week);
+    });
+    feedbackOverrides = savedOverrides.slice();
+    touchedWeeks.forEach(reRenderWeek);
+  }
+
+  // Deterministic stand-in for the AI endpoint when it's unavailable
+  // (network error, no ANTHROPIC_API_KEY, timeout — reviewPlanWithAI's
+  // enhance-plan call degrades the same way, just to "no notes" instead
+  // of to a fallback that still does something). Errs conservative and
+  // uniform rather than trying to weigh how serious the runner's note
+  // sounds without an LLM to actually read it: quality (tempo/interval/
+  // repetition) sessions are skipped outright, the long run is cut by
+  // 40%, and easy/recovery/shakeout are cut by 25% — every candidate day
+  // gets *something* backed off, which is the safe default when "how bad
+  // is this, really" can't be judged.
+  // planGenerator.js has its own QUALITY_TYPES, but it's private to that
+  // file's closure — not worth exporting just for this one check.
+  const FEEDBACK_QUALITY_TYPES = new Set(['tempo', 'interval', 'repetition']);
+  function buildRuleBasedFeedbackAdjustments(candidates) {
+    return candidates.map(day => {
+      if (FEEDBACK_QUALITY_TYPES.has(day.type)) return { week: day.week, dow: day.dow, action: 'skip' };
+      const cutFraction = day.type === 'longRun' ? 0.4 : 0.25;
+      return { week: day.week, dow: day.dow, action: 'reduce', suggestedKm: day.km * (1 - cutFraction) };
+    });
+  }
+
+  function closeFeedbackPanel() {
+    feedbackPanel.hidden = true;
+    feedbackStatus.hidden = true;
+    feedbackStatus.classList.remove('is-error');
+    feedbackNote.value = '';
+  }
+
+  async function handleFeedbackSubmit() {
+    if (!lastPlan) return;
+    const note = feedbackNote.value.trim();
+    if (!note) {
+      feedbackStatus.hidden = false;
+      feedbackStatus.classList.add('is-error');
+      feedbackStatus.textContent = 'Ceritain dulu kondisimu sebelum disesuaikan.';
+      return;
+    }
+    const scope = document.querySelector('input[name="feedbackScope"]:checked')?.value || 'week';
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const scopeWeek = scope === 'week' ? (findCurrentWeek(lastPlan.weeks) || lastPlan.weeks[0]) : null;
+
+    // Candidate days: upcoming (today onward), never race day, and only
+    // ones with actual distance — a rest day has nothing left to back off.
+    const candidates = [];
+    lastPlan.weeks.forEach(week => {
+      if (scopeWeek && week.weekNumber !== scopeWeek.weekNumber) return;
+      week.days.forEach(day => {
+        const dayDate = new Date(day.date);
+        dayDate.setHours(0, 0, 0, 0);
+        if (dayDate < today || day.type === 'race' || day.type === 'rest' || !day.km) return;
+        candidates.push({ week: week.weekNumber, dow: day.dow, type: day.type, km: day.km });
+      });
+    });
+    if (!candidates.length) {
+      feedbackStatus.hidden = false;
+      feedbackStatus.classList.add('is-error');
+      feedbackStatus.textContent = 'Nggak ada sesi yang bisa disesuaikan di rentang itu.';
+      return;
+    }
+
+    feedbackSubmitBtn.disabled = true;
+    feedbackStatus.hidden = false;
+    feedbackStatus.classList.remove('is-error');
+    feedbackStatus.textContent = '✨ Menyesuaikan jadwal...';
+
+    let adjustments;
+    let summary;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    try {
+      const res = await fetch('/api/adjust-plan-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note, days: candidates }),
+        signal: controller.signal,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Server merespons status ${res.status}`);
+      adjustments = Array.isArray(data.adjustments) ? data.adjustments : [];
+      summary = data.summary;
+    } catch (err) {
+      adjustments = buildRuleBasedFeedbackAdjustments(candidates);
+      summary = 'Nggak bisa hubungi AI, jadi jadwalnya disesuaikan otomatis pakai aturan standar (sesi keras diistirahatkan, sesi lain dikurangi).';
+    } finally {
+      clearTimeout(timeoutId);
+      feedbackSubmitBtn.disabled = false;
+    }
+
+    // Validated/clamped the same way applyAiAdjustments treats the
+    // automatic review's suggestions — every adjustment must reference a
+    // day this call actually offered up as a candidate (never trust the
+    // AI to only touch what it was given), and 'reduce' can only ever
+    // shrink a session, never grow one.
+    const candidateByKey = new Map(candidates.map(c => [`${c.week}:${c.dow}`, c]));
+    const touchedWeeks = new Set();
+    adjustments.forEach(adj => {
+      if (!adj || typeof adj.week !== 'number' || typeof adj.dow !== 'number') return;
+      const candidate = candidateByKey.get(`${adj.week}:${adj.dow}`);
+      if (!candidate) return;
+      const week = lastPlan.weeks.find(w => w.weekNumber === adj.week);
+      const day = week?.days.find(d => d.dow === adj.dow);
+      if (!day || day.type !== candidate.type) return;
+      if (adj.action === 'skip') {
+        applyFeedbackAdjustment(day, 'skip');
+      } else if (adj.action === 'reduce' && Number.isFinite(adj.suggestedKm) && adj.suggestedKm > 0 && adj.suggestedKm < candidate.km) {
+        applyFeedbackAdjustment(day, 'reduce', adj.suggestedKm);
+      } else {
+        return;
+      }
+      feedbackOverrides = feedbackOverrides.filter(o => !(o.week === adj.week && o.dow === adj.dow));
+      feedbackOverrides.push({ week: adj.week, dow: adj.dow, type: day.type, km: day.km });
+      touchedWeeks.add(adj.week);
+    });
+    touchedWeeks.forEach(reRenderWeek);
+
+    if (touchedWeeks.size) {
+      markCompletedSessionsFromStrava(lastPlan).catch(() => {});
+      if (REQUIRE_LOGIN && lastSettings) savePlanForCurrentUser(lastSettings);
+      feedbackStatus.classList.remove('is-error');
+      feedbackStatus.textContent = summary || `✓ ${touchedWeeks.size} sesi disesuaikan.`;
+    } else {
+      feedbackStatus.classList.add('is-error');
+      feedbackStatus.textContent = 'Nggak ada sesi yang perlu disesuaikan menurut catatan itu.';
+    }
+  }
+
   // Handles a click on a day row's swap button (⇄) — the first click
   // picks that day as the swap's source (highlighted, see renderDayRow),
   // the second click on a different day in the *same* week performs the
@@ -927,6 +1129,7 @@
         // itself ignores keys it doesn't recognize, so this needed no
         // schema or endpoint change on either path.
         daySwaps,
+        feedbackOverrides,
       },
       user_notes: userNotesInput.value.trim(),
     };
@@ -973,6 +1176,7 @@
       applySettingsToForm(settings, data.user_notes || '');
       await generateAndShowPlan(settings, { restoring: true });
       applySavedDaySwaps(data.settings.daySwaps);
+      applySavedFeedbackOverrides(data.settings.feedbackOverrides);
       paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat (mode dummy — lokal).');
       return true;
     }
@@ -997,6 +1201,7 @@
       applySettingsToForm(settings, data.user_notes || '');
       await generateAndShowPlan(settings, { restoring: true });
       applySavedDaySwaps(data.settings.daySwaps);
+      applySavedFeedbackOverrides(data.settings.feedbackOverrides);
       paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat dari akunmu.');
       return true;
     } catch (err) {
@@ -1288,6 +1493,12 @@
     if (!row) return;
     handleDayDrop(e, Number(row.dataset.week), Number(row.dataset.dow));
   });
+  feelingOffBtn.addEventListener('click', () => {
+    feedbackPanel.hidden = !feedbackPanel.hidden;
+    if (!feedbackPanel.hidden) feedbackNote.focus();
+  });
+  feedbackCancelBtn.addEventListener('click', closeFeedbackPanel);
+  feedbackSubmitBtn.addEventListener('click', handleFeedbackSubmit);
   aiRetryBtn.addEventListener('click', async () => {
     aiRetryBtn.hidden = true;
     aiStatus.hidden = false;
@@ -1379,6 +1590,7 @@
     aiRetryBtn.hidden = true;
     aiIntro.hidden = true;
     aiIntro.textContent = '';
+    closeFeedbackPanel();
     // No separate reset for race-day tips (or the per-week AI notes further
     // below) needed — both get appended straight into a week-block's own
     // markup (see applyPendingAiReviewToDom), and planWeeksEl.innerHTML is
