@@ -77,6 +77,22 @@ function daysAgo(n) {
   return new Date(Date.now() - n * 24 * 3600 * 1000);
 }
 
+// Strava's start_date_local is the athlete's local wall-clock time,
+// serialized as ISO 8601 but with a 'Z' suffix as if it were UTC (Strava's
+// own documented quirk) — so a Date parsed from it has the *local*
+// calendar date sitting in its UTC-getters, not its local ones (those
+// would additionally apply *this server's* own timezone offset on top,
+// which is wrong here). Read with getUTC*() specifically so this stays
+// correct regardless of what timezone the server process itself runs in.
+function localDateStr(startDateLocalIso) {
+  const d = new Date(startDateLocalIso);
+  if (Number.isNaN(d.getTime())) return null;
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // Riegel's race-time-prediction formula — same formula/exponent as
 // js/planGenerator.js's predictRaceTime, duplicated here since this runs
 // server-side and has no access to that client-only module. Used below to
@@ -133,6 +149,19 @@ function summarizeRuns(runs) {
     .sort((a, b) => b.count - a.count)
     .map(d => d.dow);
 
+  // Lightweight per-activity list (one entry per run, whole `runs` window —
+  // not clipped to any of the cutoffs above) so the client can match a
+  // plan day against whatever actually happened on that calendar date —
+  // see js/app.js's markCompletedSessionsFromStrava. Deliberately just
+  // date/distance/time, not the full Strava activity payload.
+  const recentRuns = runs
+    .map(run => {
+      const date = localDateStr(run.start_date_local || run.start_date);
+      if (!date || !(run.distance > 0)) return null;
+      return { date, km: Math.round((run.distance / 1000) * 100) / 100, movingTimeSec: Math.round(run.moving_time || 0) };
+    })
+    .filter(Boolean);
+
   return {
     currentWeeklyKm: km28 > 0 ? Math.round(km28 / 4) : null,
     longestRecentRunKm: longestKm90 > 0 ? Math.round(longestKm90 * 10) / 10 : null,
@@ -141,6 +170,7 @@ function summarizeRuns(runs) {
       timeSec: Math.round(bestRace.moving_time),
     } : null,
     suggestedDaysOfWeek,
+    recentRuns,
   };
 }
 

@@ -116,6 +116,19 @@
     return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
   }
 
+  // 'YYYY-MM-DD' using this Date's own LOCAL calendar fields (never
+  // toISOString(), which is UTC and can land on the wrong day depending on
+  // the browser's offset) — used to key/match a plan day against a Strava
+  // activity's date (see markCompletedSessionsFromStrava), where both
+  // sides need to agree on "the runner's local day", the same thing a
+  // human means by "that day's run".
+  function dateKey(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
   // This week's own VDOT — derived the same way as the top Zona Pace card
   // (see renderPaceZones), just from week.weekGoalPaceSec (that week's own
   // interpolated goal pace, see planGenerator.js) instead of the overall
@@ -835,6 +848,85 @@
     }
   }
 
+  // Fake recent activities for dummy mode, generated fresh (relative to
+  // "today") on every call rather than baked into DUMMY_STRAVA_SUMMARY
+  // above — so the demo still lines up with whatever plan is currently on
+  // screen (its week 1 typically starts right around today; see
+  // planStartAnchor in planGenerator.js).
+  function buildDummyRecentRuns() {
+    const daysAgo = n => { const d = new Date(); d.setDate(d.getDate() - n); return d; };
+    return [
+      { date: dateKey(daysAgo(1)), km: 8.2, movingTimeSec: 48 * 60 },
+      { date: dateKey(daysAgo(3)), km: 5.0, movingTimeSec: 27 * 60 },
+      { date: dateKey(daysAgo(4)), km: 12.5, movingTimeSec: 68 * 60 },
+    ];
+  }
+
+  // Compares the currently-shown plan's PAST-or-today sessions against the
+  // runner's actual Strava activities, so a page reload or a fresh login
+  // shows which sessions have already been done — recomputed fresh every
+  // time a plan is displayed (see renderPlan) rather than stored anywhere,
+  // so it's always exactly as current as Strava itself. Best-effort: any
+  // failure (not logged in, request error, nothing matches) just leaves
+  // the schedule showing nothing extra — this is a nice-to-have overlay on
+  // an already-complete, already-usable rendered plan, never something
+  // that should surface as an error the user has to deal with.
+  async function markCompletedSessionsFromStrava(plan) {
+    if (!REQUIRE_LOGIN || !paceforgeAuth) return;
+
+    let recentRuns;
+    if (paceforgeAuth.isDummy()) {
+      recentRuns = buildDummyRecentRuns();
+    } else {
+      const res = await fetch('/api/strava-summary');
+      if (!res.ok) return;
+      const summary = await res.json();
+      recentRuns = summary.recentRuns;
+    }
+    if (!Array.isArray(recentRuns) || !recentRuns.length) return;
+
+    // Group by date — a runner can log more than one activity on the same
+    // day (a shakeout jog + the main session, say), so pick whichever
+    // same-day activity's distance is closest to what was actually
+    // planned rather than just the first/last one Strava happens to list.
+    const runsByDate = new Map();
+    recentRuns.forEach(run => {
+      if (!runsByDate.has(run.date)) runsByDate.set(run.date, []);
+      runsByDate.get(run.date).push(run);
+    });
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    plan.weeks.forEach(week => {
+      week.days.forEach(day => {
+        if (day.type === 'rest' || !day.km) return;
+        const dayDate = new Date(day.date);
+        dayDate.setHours(0, 0, 0, 0);
+        if (dayDate > today) return; // hasn't happened yet — nothing to match
+
+        const key = dateKey(day.date);
+        const candidates = runsByDate.get(key);
+        if (!candidates || !candidates.length) return;
+
+        let best = candidates[0];
+        let bestDiff = Math.abs(best.km - day.km);
+        candidates.slice(1).forEach(c => {
+          const diff = Math.abs(c.km - day.km);
+          if (diff < bestDiff) { best = c; bestDiff = diff; }
+        });
+
+        const row = planWeeksEl.querySelector(`tr[data-date="${key}"]`);
+        if (!row) return;
+        row.classList.add('is-completed');
+        const slot = row.querySelector('.completed-slot');
+        if (slot) {
+          slot.innerHTML = `<span class="completed-badge" title="Selesai — tercatat ${best.km} km di Strava">✅</span>`;
+        }
+      });
+    });
+  }
+
   if (!REQUIRE_LOGIN) {
     // Login not wired up to a real backend yet — hide every trace of the
     // login UI (gate screen, header login/logout, MODE DUMMY badge) and go
@@ -1039,6 +1131,12 @@
     resultSection.hidden = false;
     formSection.hidden = true;
     resultSection.scrollIntoView({ behavior: 'smooth' });
+
+    // Best-effort, not awaited — the schedule above is already fully
+    // rendered and usable without this; a completed-session checkmark
+    // arriving a beat later (or not at all, if this fails) is a nice-to-
+    // have overlay, never something the rest of the page should wait on.
+    markCompletedSessionsFromStrava(plan).catch(() => {});
   }
 
   function hexToRgb(hex) {
@@ -1533,10 +1631,10 @@
       ? `<tr class="structure-row ${rowClass}"><td colspan="5">${renderWorkoutStructure(day.structure, zone)}</td></tr>`
       : '';
     return `
-      <tr class="${rowClass}">
+      <tr class="${rowClass}" data-date="${dateKey(day.date)}">
         <td>${day.dayName}</td>
         <td>${day.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</td>
-        <td><span class="type-badge" style="background:${color}">${label}</span></td>
+        <td><span class="type-badge" style="background:${color}">${label}</span><span class="completed-slot"></span></td>
         <td>${km}</td>
         <td>${pace}</td>
       </tr>

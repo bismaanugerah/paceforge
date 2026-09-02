@@ -596,6 +596,19 @@ input[type="radio"]:focus-visible {
   color: #fff;
 }
 
+/* Marks a day whose scheduled session has a matching completed Strava
+   activity — added after the fact by markCompletedSessionsFromStrava in
+   js/app.js, not part of the initial render, so this stays a lightweight
+   overlay rather than a distinct row variant baked into day-table styles. */
+.day-table tr.is-completed { background: var(--color-accent-light); }
+.completed-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  font-size: 0.85rem;
+  cursor: default;
+}
+
 /* Workout-structure bar: warm up / work / recovery / cool down, proportional
    to duration — a quick visual read of what an interval or tempo session
    actually feels like. */
