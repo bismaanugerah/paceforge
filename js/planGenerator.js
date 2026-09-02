@@ -804,6 +804,19 @@ const PaceForgeGenerator = (() => {
       return na - nb;
     });
 
+    // Pace (VDOT) progress speed: more quality (tempo/interval/repetition)
+    // sessions per week is more actual fitness-improving stimulus, so a
+    // 2-quality-session plan (5-6 days/week) should reach goal pace sooner
+    // than a 1-quality-session plan (3-4 days/week) of the same length —
+    // not, as before, at literally the same fraction of the build block
+    // regardless of how much quality work is actually happening each week.
+    // 1.25x lets a 2-session plan reach goal pace by ~80% of the way
+    // through the build block and hold it for the rest (paceProgress is
+    // clamped to 1 below); a 1-session plan is unaffected (1x — reaches it
+    // exactly at the last build week, same as before this existed).
+    const qualitySessionsThisPlan = qualitySessionsForDays(daysPerWeek);
+    const PACE_PROGRESS_MULTIPLIER = qualitySessionsThisPlan >= 2 ? 1.25 : 1;
+
     const weeks = [];
     let actualPeakLongRunKm = 0;
     let rampLimited = false;
@@ -821,7 +834,7 @@ const PaceForgeGenerator = (() => {
       let paceProgress; // 0 (currentFitnessPaceSec) -> 1 (goalPaceSec); see weekPaces below
       if (!isTaperWeek) {
         const progress = buildWeeks === 1 ? 1 : (w + 1) / buildWeeks;
-        paceProgress = progress;
+        paceProgress = Math.min(1, progress * PACE_PROGRESS_MULTIPLIER);
         let linearKm = currentWeeklyKm + (peakWeeklyKm - currentWeeklyKm) * progress;
         // Long run gets its own direct progress-based ramp toward
         // peakLongRunKm — rather than being derived as weekKm*longRunShare
