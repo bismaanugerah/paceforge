@@ -118,13 +118,22 @@ const PaceForgeGenerator = (() => {
     repetition: 0.83,
   };
 
-  function resolveRaceProfile(raceDistanceKm, raceKey) {
-    if (RACE_PROFILES[raceKey]) return RACE_PROFILES[raceKey];
+  // Single source of truth for "which of the 4 known profiles (5k/10k/half/
+  // full) does this race match" — shared by resolveRaceProfile below and
+  // resolveQualityRotation (see QUALITY_ROTATIONS further down), so a
+  // custom-distance race resolves to the same bucket for both instead of
+  // each re-implementing (and risking drifting from) the same thresholds.
+  function resolveRaceProfileKey(raceDistanceKm, raceKey) {
+    if (RACE_PROFILES[raceKey]) return raceKey;
     // Custom distance: interpolate a sensible profile from nearest known ones.
-    if (raceDistanceKm <= 5) return RACE_PROFILES['5k'];
-    if (raceDistanceKm <= 10) return RACE_PROFILES['10k'];
-    if (raceDistanceKm <= 21.1) return RACE_PROFILES['half'];
-    return RACE_PROFILES['full'];
+    if (raceDistanceKm <= 5) return '5k';
+    if (raceDistanceKm <= 10) return '10k';
+    if (raceDistanceKm <= 21.1) return 'half';
+    return 'full';
+  }
+
+  function resolveRaceProfile(raceDistanceKm, raceKey) {
+    return RACE_PROFILES[resolveRaceProfileKey(raceDistanceKm, raceKey)];
   }
 
   function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -195,7 +204,7 @@ const PaceForgeGenerator = (() => {
       case 4: return { longRunShare: 0.35, slotWeights: [0.20, 0.20, 0.25] };
       // ['easy', quality, 'easy', quality2] — quality/quality2 are whichever
       // workout qualityPick() rotates in that week (tempo/interval/
-      // repetition), not literally always tempo — see QUALITY_ROTATION.
+      // repetition), not literally always tempo — see QUALITY_ROTATIONS.
       case 5: return { longRunShare: 0.35, slotWeights: [0.15, 0.15, 0.20, 0.15] };
       // ['easy', quality, 'easy', quality2, 'recovery']
       case 6: return { longRunShare: 0.27, slotWeights: [0.18, 0.12, 0.21, 0.12, 0.10] };
@@ -357,29 +366,91 @@ const PaceForgeGenerator = (() => {
   //     recovery between each. Cruise intervals are Daniels' own preferred
   //     way for most runners to accumulate T-pace volume, since holding
   //     the pace in chunks is easier to sustain than one long continuous
-  //     block at the same total distance.
+  //     block at the same total distance — and, being more recovery-
+  //     friendly than an equal-time continuous block, the pick more of the
+  //     longer distances (half/full) lean on to accumulate threshold
+  //     volume without competing with their own long-run/M-pace work.
   //   - Repetition (R pace): short (~200m) reps at faster-than-interval
   //     pace with full recovery between each — builds speed and running
-  //     economy. Daniels recommends occasional R work year-round (not
-  //     only in a dedicated speed phase), so it's mixed into the rotation
-  //     rather than gated to a specific training phase.
-  // Cycles every 6 weeks. A week with 2 quality slots (5-6 days/week
-  // plans) reads its 2nd slot 3 positions ahead of the 1st in this same
-  // array (see qualityPick's slotOffset) — since every entry differs from
-  // the one 3 positions away, the two slots in any given week are always a
-  // different pick, without needing a separate rotation for each slot.
-  const QUALITY_ROTATION = [
-    { type: 'interval', variant: 'mid' },
-    { type: 'tempo', variant: 'continuous' },
-    { type: 'interval', variant: 'short' },
-    { type: 'tempo', variant: 'cruise' },
-    { type: 'interval', variant: 'long' },
-    { type: 'repetition', variant: null },
-  ];
+  //     economy.
+  //
+  // The MIX of these three shifts by race distance, not just their
+  // variant — how close the race itself is run to VO2max (I-pace territory)
+  // vs lactate threshold (T-pace) is what should drive which one a plan
+  // leans on:
+  //   - 5K is raced at ~95-98% VO2max, so I-pace and R-pace (speed/economy)
+  //     carry the most specific benefit; threshold stays present but
+  //     secondary. (McMillan Running's 5K guide; Daniels' Running Formula's
+  //     5K-10K plan, whose Phase II centers on R-pace work.)
+  //   - 10K sits closer to threshold (~90-95% VO2max) — tempo becomes the
+  //     priority pick, interval second, repetition the rare touch.
+  //     ("Workout hierarchy in 10K training": long run first, tempo
+  //     closest to race demand, intervals third.)
+  //   - Half marathon is raced at ~85-90% VO2max, making lactate threshold
+  //     THE primary determinant of performance — tempo dominates, interval
+  //     drops to an occasional maintenance touch, and repetition survives
+  //     only as Daniels' own half-marathon plans use it: paired with tempo
+  //     work, not as a standalone speed phase.
+  //   - Marathon runs even lower relative to VO2max (~75-85%), so interval
+  //     work adds recovery cost that competes with marathon-pace volume for
+  //     little specific return — coaching guidance caps it at roughly once
+  //     every 10-14 days. Repetition drops out entirely: full-recovery
+  //     sprint work has the least transfer to marathon demands and adds
+  //     injury risk at a point in the plan carrying the highest overall
+  //     volume. (Marathon-specific pace work itself is handled separately,
+  //     by the race-specific long run in the Peak phase — see
+  //     usesRaceSpecificLongRun below — not by this rotation.)
+  //
+  // Each cycles every 6 weeks. A week with 2 quality slots (5-6 days/week
+  // plans) reads its 2nd slot half the rotation's length ahead of the 1st
+  // (see qualityPick's slotOffset, sized off rotation.length) so the two
+  // never land on the same pick.
+  const QUALITY_ROTATIONS = {
+    '5k': [
+      { type: 'interval', variant: 'short' },
+      { type: 'interval', variant: 'mid' },
+      { type: 'repetition', variant: null },
+      { type: 'tempo', variant: 'cruise' },
+      { type: 'interval', variant: 'long' },
+      { type: 'repetition', variant: null },
+    ],
+    '10k': [
+      { type: 'tempo', variant: 'continuous' },
+      { type: 'interval', variant: 'mid' },
+      { type: 'tempo', variant: 'cruise' },
+      { type: 'interval', variant: 'short' },
+      { type: 'tempo', variant: 'continuous' },
+      { type: 'repetition', variant: null },
+    ],
+    half: [
+      { type: 'tempo', variant: 'continuous' },
+      { type: 'tempo', variant: 'cruise' },
+      { type: 'repetition', variant: null },
+      { type: 'tempo', variant: 'continuous' },
+      { type: 'interval', variant: 'mid' },
+      { type: 'tempo', variant: 'cruise' },
+    ],
+    full: [
+      { type: 'tempo', variant: 'cruise' },
+      { type: 'tempo', variant: 'continuous' },
+      { type: 'tempo', variant: 'cruise' },
+      { type: 'interval', variant: 'mid' },
+      { type: 'tempo', variant: 'continuous' },
+      { type: 'tempo', variant: 'cruise' },
+    ],
+  };
 
-  // Resolves one quality slot's workout for a given week. slotOffset
-  // distinguishes a week's 1st quality slot (0) from its 2nd (half the
-  // rotation's length, see QUALITY_ROTATION above) so the two never land
+  // Same distance -> bucket resolution RACE_PROFILES uses (see
+  // resolveRaceProfileKey), so a custom-distance race gets the rotation
+  // that matches whichever known profile it was already sized against.
+  function resolveQualityRotation(raceDistanceKm, raceKey) {
+    return QUALITY_ROTATIONS[resolveRaceProfileKey(raceDistanceKm, raceKey)];
+  }
+
+  // Resolves one quality slot's workout for a given week from `rotation`
+  // (this race's QUALITY_ROTATIONS entry — see resolveQualityRotation).
+  // slotOffset distinguishes a week's 1st quality slot (0) from its 2nd
+  // (half of rotation.length, passed by the caller) so the two never land
   // on the same pick. Conservative mode (injury/pain flagged by the user)
   // skips repetition specifically — full-recovery, faster-than-interval
   // reps carry more per-stride risk than steady tempo/interval effort —
@@ -387,9 +458,9 @@ const PaceForgeGenerator = (() => {
   // just being removed from the rotation (that fallback keeps every
   // week's quality-session *count* exactly as qualitySessionsForDays
   // expects; only the affected slot's own workout changes).
-  function qualityPick(weekIndex, slotOffset, conservativeMode) {
-    const idx = (weekIndex + slotOffset) % QUALITY_ROTATION.length;
-    const pick = QUALITY_ROTATION[idx];
+  function qualityPick(weekIndex, slotOffset, conservativeMode, rotation) {
+    const idx = (weekIndex + slotOffset) % rotation.length;
+    const pick = rotation[idx];
     if (conservativeMode && pick.type === 'repetition') {
       return { type: 'tempo', variant: 'continuous' };
     }
@@ -479,7 +550,7 @@ const PaceForgeGenerator = (() => {
     return { kind: 'interval', warmupKm, cooldownKm, reps, workKm: repKm, workExertion, recoveryKm, recoverySec };
   }
 
-  // Interval (I-pace) rep-distance variants — see QUALITY_ROTATION above for
+  // Interval (I-pace) rep-distance variants — see QUALITY_ROTATIONS above for
   // why/when each one gets picked. repKm approximates common track-workout
   // distances; recoverySec is the jog-recovery duration commonly prescribed
   // for that rep length (shorter reps get shorter recoveries); minReps/
@@ -503,7 +574,7 @@ const PaceForgeGenerator = (() => {
 
   // Cruise intervals: ~1 mile (1.6km) T-pace segments with a short (~60s)
   // jog recovery between — Daniels' own preferred way to accumulate T-pace
-  // volume for most runners (see QUALITY_ROTATION above); recovery here is
+  // volume for most runners (see QUALITY_ROTATIONS above); recovery here is
   // deliberately shorter than a real interval's, by design.
   const TEMPO_CRUISE_PROFILE = { repKm: 1.6, recoverySec: 60, minReps: 2, maxReps: 4 };
 
@@ -595,6 +666,10 @@ const PaceForgeGenerator = (() => {
     const planStartAnchor = startOfDay(startDate || new Date());
     const race = startOfDay(raceDate);
     const profile = resolveRaceProfile(raceDistanceKm, raceKey);
+    // This race's quality-session mix (see QUALITY_ROTATIONS above) —
+    // resolved once here, alongside profile, and reused by qualityPick
+    // every week below rather than re-resolving per week.
+    const qualityRotation = resolveQualityRotation(raceDistanceKm, raceKey);
     // profile.maxSupportKm is used as-is regardless of daysPerWeek — no
     // per-day scaling. That was tried (scaling it down at 3-4 days, up at
     // 6) to stop a low-day plan's one remaining easy slot from ballooning
@@ -1009,8 +1084,8 @@ const PaceForgeGenerator = (() => {
       // *where* each type lands) and the per-day structure builder further
       // below (deciding *what shape* that type's session takes) always
       // agree, instead of picking the rotation twice and risking drift.
-      const qualityPrimary = qualityPick(w, 0, conservativeMode);
-      const qualitySecondary = qualityPick(w, 3, conservativeMode);
+      const qualityPrimary = qualityPick(w, 0, conservativeMode, qualityRotation);
+      const qualitySecondary = qualityPick(w, Math.floor(qualityRotation.length / 2), conservativeMode, qualityRotation);
 
       // Build the list of workout slots for this week.
       const template = isRaceWeek
@@ -1197,7 +1272,7 @@ const PaceForgeGenerator = (() => {
         // this week's template) tell us which variant this specific
         // interval/tempo day should build as — whichever of the two picks
         // actually matches this slot's type (they're never both the same
-        // type in one week, see QUALITY_ROTATION's comment above).
+        // type in one week, see QUALITY_ROTATIONS' comment above).
         if (type === 'interval' && dayObj.km > 0) {
           const variant = (qualityPrimary.type === 'interval' ? qualityPrimary : qualitySecondary).variant;
           dayObj.workoutVariant = variant;
