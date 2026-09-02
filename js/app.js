@@ -189,6 +189,7 @@
 
   const gateSection = document.getElementById('gateSection');
   const formSection = document.getElementById('formSection');
+  const loadingSection = document.getElementById('loadingSection');
   const resultSection = document.getElementById('resultSection');
   const resultWarning = document.getElementById('resultWarning');
   const summaryCards = document.getElementById('summaryCards');
@@ -610,23 +611,31 @@
   // unreviewed. If the review fails or times out, the rule-based plan is
   // still shown as-is — the algorithm's own guardrails already make it safe
   // on its own; the AI pass is a second opinion, not a hard dependency.
+  // The rule-based schedule itself computes instantly, but that AI pass is
+  // a network call (up to a 20s timeout — see reviewPlanWithAI) — swaps to
+  // loadingSection for the duration so that wait is never a frozen page,
+  // regardless of where the caller found this function mid-flow (a fresh
+  // form submit, or restoring a saved plan right after login).
   async function generateAndShowPlan(settings) {
     const plan = PaceForgeGenerator.generatePlan(settings);
     lastPlan = plan;
     lastFitnessLevel = settings.fitnessLevel;
     lastConservativeMode = settings.conservativeMode;
 
-    const originalLabel = submitBtn.textContent;
+    gateSection.hidden = true;
+    formSection.hidden = true;
+    resultSection.hidden = true;
+    loadingSection.hidden = false;
+    loadingSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
     submitBtn.disabled = true;
-    submitBtn.textContent = '✨ Meninjau plan dengan AI...';
     try {
       await reviewPlanWithAI();
     } finally {
       submitBtn.disabled = false;
-      submitBtn.textContent = originalLabel;
     }
 
-    renderPlan(lastPlan);
+    renderPlan(lastPlan); // hides loadingSection, shows resultSection — see renderPlan
     applyPendingAiReviewToDom();
     return plan;
   }
@@ -635,11 +644,13 @@
   function showGate() {
     gateSection.hidden = false;
     formSection.hidden = true;
+    loadingSection.hidden = true;
     resultSection.hidden = true;
   }
   function showForm() {
     gateSection.hidden = true;
     formSection.hidden = false;
+    loadingSection.hidden = true;
     resultSection.hidden = true;
   }
 
@@ -1009,6 +1020,7 @@
     `;
     }).join('');
 
+    loadingSection.hidden = true;
     resultSection.hidden = false;
     formSection.hidden = true;
     resultSection.scrollIntoView({ behavior: 'smooth' });
