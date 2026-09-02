@@ -937,17 +937,21 @@
     const scope = document.querySelector('input[name="feedbackScope"]:checked')?.value || 'week';
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const scopeWeek = scope === 'week' ? (findCurrentWeek(lastPlan.weeks) || lastPlan.weeks[0]) : null;
+    const scopeWeek = scope === 'today' || scope === 'week' ? (findCurrentWeek(lastPlan.weeks) || lastPlan.weeks[0]) : null;
 
-    // Candidate days: upcoming (today onward), never race day, and only
-    // ones with actual distance — a rest day has nothing left to back off.
+    // Candidate days: today or later (never past, and — for scope
+    // "today" specifically — never later than today either), never race
+    // day, and only ones with actual distance — a rest day has nothing
+    // left to back off.
     const candidates = [];
     lastPlan.weeks.forEach(week => {
       if (scopeWeek && week.weekNumber !== scopeWeek.weekNumber) return;
       week.days.forEach(day => {
         const dayDate = new Date(day.date);
         dayDate.setHours(0, 0, 0, 0);
-        if (dayDate < today || day.type === 'race' || day.type === 'rest' || !day.km) return;
+        if (dayDate < today) return;
+        if (scope === 'today' && dayDate.getTime() !== today.getTime()) return;
+        if (day.type === 'race' || day.type === 'rest' || !day.km) return;
         candidates.push({ week: week.weekNumber, dow: day.dow, type: day.type, km: day.km });
       });
     });
