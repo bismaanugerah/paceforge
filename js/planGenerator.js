@@ -512,6 +512,22 @@ const PaceForgeGenerator = (() => {
     const planStartAnchor = startOfDay(startDate || new Date());
     const race = startOfDay(raceDate);
     const profile = resolveRaceProfile(raceDistanceKm, raceKey);
+    // profile.maxSupportKm on its own assumes a plan spread across enough
+    // days that no single non-long-run session has to carry a big share of
+    // the week — true of the real plans it's sourced from (Pfitzinger's
+    // "medium-long run", Hal Higdon's marathon block), which run 5-6 days a
+    // week. At fewer training days, weeklySplitForDays hands relatively
+    // more of the week to each remaining slot (see its own comment — a
+    // 4-day week's second easy slot alone gets 25%, more than the quality
+    // slot), so the same weekly total concentrates into fewer, bigger
+    // sessions — a 90km/week marathon block run on just 4 days a week can
+    // otherwise still produce a ~24km "easy run" that's realistic in
+    // absolute terms but not in the sparser context it's actually
+    // scheduled into. Scaled down at lower day counts so the ceiling
+    // reflects how much room there actually is to spread that volume
+    // across the week, not just the race distance.
+    const MAX_SUPPORT_KM_DAYS_SCALE = { 3: 0.7, 4: 0.7, 5: 0.85, 6: 1 };
+    const maxSupportKm = profile.maxSupportKm * (MAX_SUPPORT_KM_DAYS_SCALE[daysPerWeek] ?? 1);
     const isFullMarathonPlan = profile === RACE_PROFILES.full;
     // Race-specific long run (MSL, or its half-marathon equivalent): a
     // long run partly held at goal race pace (see
@@ -703,19 +719,19 @@ const PaceForgeGenerator = (() => {
 
     // The REAL peak weekly volume this plan will ever schedule: peakLongRunKm
     // (above) plus whatever each support slot (easy/recovery/tempo/interval)
-    // actually caps out at — the same profile.maxSupportKm and
-    // "never >= that week's long run" ceilings the per-day loop below
-    // enforces, evaluated here up front. Ramping week-by-week progress
-    // toward THIS (rather than the unbounded theoreticalPeakWeeklyKm) is
-    // what makes the plan actually climb gradually across the whole build
-    // block and peak only in its final week(s) — ramping toward the
-    // theoretical number instead made every week identical for however long
-    // it took theoreticalPeakWeeklyKm's growth to run past what the caps
-    // allow, because the *visible* schedule hit its ceiling in, say, week 5
-    // of a 13-week build block and had nowhere further to go for the
-    // remaining 8.
+    // actually caps out at — the same maxSupportKm (already scaled for
+    // daysPerWeek above) and "never >= that week's long run" ceilings the
+    // per-day loop below enforces, evaluated here up front. Ramping
+    // week-by-week progress toward THIS (rather than the unbounded
+    // theoreticalPeakWeeklyKm) is what makes the plan actually climb
+    // gradually across the whole build block and peak only in its final
+    // week(s) — ramping toward the theoretical number instead made every
+    // week identical for however long it took theoreticalPeakWeeklyKm's
+    // growth to run past what the caps allow, because the *visible*
+    // schedule hit its ceiling in, say, week 5 of a 13-week build block and
+    // had nowhere further to go for the remaining 8.
     const peakWeeklyKm = peakLongRunKm + baseSlotWeights.reduce(
-      (sum, w) => sum + Math.min(theoreticalPeakWeeklyKm * w, profile.maxSupportKm, peakLongRunKm * 0.95),
+      (sum, w) => sum + Math.min(theoreticalPeakWeeklyKm * w, maxSupportKm, peakLongRunKm * 0.95),
       0
     );
 
@@ -968,7 +984,7 @@ const PaceForgeGenerator = (() => {
         // progression is bounded by peakWeeklyKm (which is itself derived
         // from these same caps — see its definition above), so under normal
         // progression no support session can land bigger than the long run
-        // or past profile.maxSupportKm. Two safety nets on top of that
+        // or past maxSupportKm. Two safety nets on top of that
         // anyway, for edge cases (e.g. a currentWeeklyKm input that's
         // already high relative to daysPerWeek), neither of which
         // redistributes the trimmed volume elsewhere (a lower actual weekKm
@@ -977,10 +993,14 @@ const PaceForgeGenerator = (() => {
         //      progress-based target without shrinking the other slots to
         //      match — so clamp against the *actual* long run distance this
         //      week too.
-        //   2. Clamp at profile.maxSupportKm regardless, as a final
-        //      absolute backstop (tighter for repetition specifically —
-        //      see MAX_REPETITION_SESSION_KM).
-        const sessionCap = type === 'repetition' ? MAX_REPETITION_SESSION_KM : profile.maxSupportKm;
+        //   2. Clamp at maxSupportKm regardless, as a final absolute
+        //      backstop — tighter still for repetition specifically (see
+        //      MAX_REPETITION_SESSION_KM), though maxSupportKm itself can
+        //      now come in under that flat number on a short race/low-days
+        //      combo (see its own scaling above), so take whichever of the
+        //      two is actually smaller rather than assuming
+        //      MAX_REPETITION_SESSION_KM always is.
+        const sessionCap = type === 'repetition' ? Math.min(MAX_REPETITION_SESSION_KM, maxSupportKm) : maxSupportKm;
         let km = weekKm * (weightByDow[dow] ?? 0);
         if (longRunKmThisWeek > 0) km = Math.min(km, longRunKmThisWeek * 0.95);
         if (km > sessionCap) {
@@ -1018,7 +1038,7 @@ const PaceForgeGenerator = (() => {
       // shouldn't count toward "peak" — only build-phase weeks (Base/Build/
       // Peak/Cutback) do. Tracks what the schedule actually delivers, which
       // can still come in a bit under the peakWeeklyKm target on the rare
-      // week where a guardrail (ramp limit, profile.maxSupportKm) trims
+      // week where a guardrail (ramp limit, maxSupportKm) trims
       // something — peakWeeklyKm itself is already the realistic figure
       // (see its definition above), not the unbounded theoretical one.
       if (!isTaperWeek) actualPeakWeeklyKm = Math.max(actualPeakWeeklyKm, totalKm);
@@ -1046,7 +1066,7 @@ const PaceForgeGenerator = (() => {
       warnings.push(`Long run puncak di jadwal ini (~${Math.round(actualPeakLongRunKm * 10) / 10} km) sengaja ditahan di bawah target ${Math.round(peakLongRunKm)} km, karena lari terjauhmu saat ini baru ${longestRecentRunKm} km — kenaikan jarak long run dinaikkan bertahap per minggu (maks ~${Math.round(MAX_LONG_RUN_JUMP_RATIO * 100)}%) supaya aman dari cedera. Kalau waktu persiapanmu masih cukup panjang, ini normal dan long run akan terus naik mendekati race day.`);
     }
     if (supportSessionCapped) {
-      warnings.push(`Beberapa sesi lari santai/tempo/interval/repetition di jadwal ini dibatasi maksimal ${profile.maxSupportKm} km (repetition: ${MAX_REPETITION_SESSION_KM} km) — dengan volume mingguanmu yang cukup tinggi, porsi proporsionalnya bisa lebih jauh dari itu, tapi sesi selain long run sebaiknya tidak sejauh itu. Total mingguan jadi sedikit lebih rendah dari target sebagai konsekuensinya — lebih aman begitu daripada memaksakan sesi harian yang kepanjangan.`);
+      warnings.push(`Beberapa sesi lari santai/tempo/interval/repetition di jadwal ini dibatasi maksimal ${Math.round(maxSupportKm * 10) / 10} km (repetition: ${MAX_REPETITION_SESSION_KM} km) — dengan volume mingguanmu yang cukup tinggi, porsi proporsionalnya bisa lebih jauh dari itu, tapi sesi selain long run sebaiknya tidak sejauh itu. Total mingguan jadi sedikit lebih rendah dari target sebagai konsekuensinya — lebih aman begitu daripada memaksakan sesi harian yang kepanjangan.`);
     }
     if (Math.abs(currentFitnessPaceSec - goalPaceSec) >= 3) {
       warnings.push(`Pace target di sesi tempo/interval/long run dimulai lebih santai (${formatPace(currentFitnessPaceSec)}, sesuai kemampuanmu saat ini) lalu naik bertahap tiap minggu menuju goal pace ${formatPace(goalPaceSec)} di puncak training block — bukan langsung dipatok di goal pace dari minggu 1.`);
@@ -1073,10 +1093,10 @@ const PaceForgeGenerator = (() => {
         planStart: firstWeekStart,
         weeksAvailable,
         // Exposed so js/app.js's applyAiAdjustments can clamp an AI-
-        // suggested distance tweak to the same race-appropriate ceiling
-        // this file itself enforces (see profile.maxSupportKm above)
-        // without needing to re-resolve the race profile itself.
-        maxSupportKm: profile.maxSupportKm,
+        // suggested distance tweak to the same ceiling this file itself
+        // enforces (see maxSupportKm above — already scaled for
+        // daysPerWeek) without needing to re-derive it.
+        maxSupportKm,
       },
       warnings,
       weeks,
