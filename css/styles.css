@@ -648,6 +648,23 @@ summary.week-header::-webkit-details-marker { display: none; }
 .day-table tr:last-child td { border-bottom: none; }
 .day-table tr.is-rest { color: var(--color-text-muted); }
 .day-table tr.is-race { background: var(--color-primary-light); font-weight: 700; }
+/* Highlights a row picked as a day-swap's first side while its second
+   click is still pending — see handleSwapDayClick in js/app.js. */
+.day-table tr.is-swap-selected { background: var(--color-primary-light); box-shadow: inset 3px 0 0 var(--color-primary); }
+.swap-day-btn {
+  float: right;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  line-height: 1;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.swap-day-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.is-swap-selected .swap-day-btn { border-color: var(--color-primary); color: var(--color-primary); }
 
 .type-badge {
   display: inline-block;

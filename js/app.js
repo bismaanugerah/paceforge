@@ -280,6 +280,22 @@
   // completed review; both are null while a review is in flight.
   let pendingAiNotes = null;
   let aiReviewErrorMessage = null;
+  // The settings that produced lastPlan — kept so a day-swap (see
+  // swapPlanDaySessions/handleSwapDayClick below) can re-save the plan
+  // through the same savePlanForCurrentUser() path a fresh form submit
+  // already uses, without needing to re-read the form.
+  let lastSettings = null;
+  // Every day-swap the user has made on the current plan, as {week, dowA,
+  // dowB} triples — persisted alongside settings (see
+  // savePlanForCurrentUser) and replayed against a freshly regenerated
+  // plan on load (see loadSavedPlanForUser), since restoring a saved plan
+  // re-runs generatePlan() from settings rather than storing the plan
+  // itself, and a swap isn't something settings alone can reproduce.
+  let daySwaps = [];
+  // The day (as {week, dow}) currently picked as a swap's first side,
+  // while waiting for the user to click a second day to swap it with —
+  // null when no swap is in progress. See handleSwapDayClick.
+  let swapSelection = null;
 
   // Set a sensible default race date: 12 weeks from today.
   const defaultRaceDate = new Date();
@@ -681,8 +697,14 @@
   async function generateAndShowPlan(settings, { restoring = false } = {}) {
     const plan = PaceForgeGenerator.generatePlan(settings);
     lastPlan = plan;
+    lastSettings = settings;
     lastFitnessLevel = settings.fitnessLevel;
     lastConservativeMode = settings.conservativeMode;
+    // Freshly generated plan has no swaps applied yet — a restoring caller
+    // (loadSavedPlanForUser) replays its saved daySwaps itself right after
+    // this returns, once the resulting DOM actually exists to update.
+    daySwaps = [];
+    swapSelection = null;
 
     showLoading(restoring ? 'Memuat training plan-mu...' : undefined);
     loadingSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -737,12 +759,133 @@
   const paceforgeAuth = window.PaceForgeAuth;
   const DUMMY_PLAN_KEY = 'paceforge_dummy_plan';
 
+  // Every field a day's session actually carries, as opposed to date/
+  // dayName/dow (which belong to the calendar day itself, not whatever
+  // session is scheduled on it, and must stay put when swapping). Shared
+  // by swapPlanDaySessions below and nothing else — kept as a flat list
+  // so it's obvious at a glance exactly what does and doesn't move.
+  const SESSION_FIELDS = ['type', 'km', 'paceSecPerKm', 'structure', 'isMarathonSpecific', 'workoutVariant', 'recoveryPaceSecPerKm'];
+
+  // Swaps everything about what's scheduled on two days (type, distance,
+  // pace, workout structure, ...) while leaving each day's own date fixed
+  // — used by handleSwapDayClick below (a user manually moving a session
+  // to a different day) and applySavedDaySwaps (replaying that same move
+  // after the plan's been regenerated from settings on a later load).
+  // Explicitly deletes each field before reassigning rather than relying
+  // on Object.assign alone, since Object.assign only overwrites keys that
+  // exist on the source — a field the destination day doesn't have (e.g.
+  // an easy day has no `structure`) would otherwise survive the swap as a
+  // stale leftover from whatever this day used to be.
+  function swapPlanDaySessions(dayA, dayB) {
+    const sessionA = {};
+    const sessionB = {};
+    SESSION_FIELDS.forEach(field => {
+      if (field in dayA) sessionA[field] = dayA[field];
+      if (field in dayB) sessionB[field] = dayB[field];
+    });
+    SESSION_FIELDS.forEach(field => { delete dayA[field]; delete dayB[field]; });
+    Object.assign(dayA, sessionB);
+    Object.assign(dayB, sessionA);
+  }
+
+  // Re-renders one week's day rows in place from lastPlan's current data
+  // — used after a swap instead of a full renderPlan() so the accordion's
+  // open/closed state, other weeks' rows, and everything outside
+  // <tbody> (AI notes, race-day tips, ...) are left untouched.
+  function reRenderWeek(weekNumber) {
+    if (!lastPlan) return;
+    const week = lastPlan.weeks.find(w => w.weekNumber === weekNumber);
+    const block = planWeeksEl.querySelector(`.week-block[data-week-number="${weekNumber}"]`);
+    const tbody = block?.querySelector('table.day-table tbody');
+    if (!week || !tbody) return;
+    tbody.innerHTML = week.days.map(day => renderDayRow(day, weekNumber)).join('');
+  }
+
+  // Replays a saved daySwaps list (see savePlanForCurrentUser/
+  // loadSavedPlanForUser) against a just-regenerated lastPlan — restoring
+  // a saved plan re-runs generatePlan() from settings rather than storing
+  // the plan itself, so a manual day-swap has to be re-applied every time
+  // rather than surviving in the regenerated data on its own.
+  function applySavedDaySwaps(savedSwaps) {
+    if (!Array.isArray(savedSwaps) || !savedSwaps.length || !lastPlan) return;
+    const touchedWeeks = new Set();
+    savedSwaps.forEach(swap => {
+      const week = lastPlan.weeks.find(w => w.weekNumber === swap.week);
+      if (!week) return;
+      const dayA = week.days.find(d => d.dow === swap.dowA);
+      const dayB = week.days.find(d => d.dow === swap.dowB);
+      if (!dayA || !dayB) return;
+      swapPlanDaySessions(dayA, dayB);
+      touchedWeeks.add(swap.week);
+    });
+    daySwaps = savedSwaps.slice();
+    touchedWeeks.forEach(reRenderWeek);
+  }
+
+  // Handles a click on a day row's swap button (⇄) — the first click
+  // picks that day as the swap's source (highlighted, see renderDayRow),
+  // the second click on a different day in the *same* week performs the
+  // swap; clicking the already-selected day's button again cancels.
+  // Race day is never swappable (it's tied to the runner's actual
+  // real-world race date, not a slot that can just move); swapping a
+  // long run asks for confirmation first since it's a bigger change to a
+  // week's shape than an easy/quality day moving.
+  function handleSwapDayClick(weekNumber, dow) {
+    if (!lastPlan) return;
+    if (!swapSelection) {
+      swapSelection = { week: weekNumber, dow };
+      reRenderWeek(weekNumber);
+      return;
+    }
+    const sourceWeek = swapSelection.week;
+    const sourceDow = swapSelection.dow;
+    if (sourceWeek === weekNumber && sourceDow === dow) {
+      swapSelection = null;
+      reRenderWeek(weekNumber);
+      return;
+    }
+    if (sourceWeek !== weekNumber) {
+      swapSelection = { week: weekNumber, dow };
+      reRenderWeek(sourceWeek);
+      reRenderWeek(weekNumber);
+      return;
+    }
+    const week = lastPlan.weeks.find(w => w.weekNumber === weekNumber);
+    const dayA = week?.days.find(d => d.dow === sourceDow);
+    const dayB = week?.days.find(d => d.dow === dow);
+    swapSelection = null;
+    if (!dayA || !dayB) { reRenderWeek(weekNumber); return; }
+    if (dayA.type === 'race' || dayB.type === 'race') {
+      alert('Race day nggak bisa dipindah — itu tanggal race sungguhan, bukan slot latihan.');
+      reRenderWeek(weekNumber);
+      return;
+    }
+    if (dayA.type === 'longRun' || dayB.type === 'longRun') {
+      if (!confirm('Ini bakal mindahin long run ke hari lain minggu ini. Lanjutkan?')) {
+        reRenderWeek(weekNumber);
+        return;
+      }
+    }
+    swapPlanDaySessions(dayA, dayB);
+    daySwaps.push({ week: weekNumber, dowA: sourceDow, dowB: dow });
+    reRenderWeek(weekNumber);
+    markCompletedSessionsFromStrava(lastPlan).catch(() => {});
+    if (REQUIRE_LOGIN && lastSettings) savePlanForCurrentUser(lastSettings);
+  }
+
   async function savePlanForCurrentUser(settings) {
     const payload = {
       settings: {
         ...settings,
         raceDate: settings.raceDate.toISOString().slice(0, 10),
         startDate: settings.startDate.toISOString().slice(0, 10),
+        // Carried inside settings (rather than a sibling payload field)
+        // so it flows through the existing dummy-mode localStorage blob
+        // and the real /api/plan settings jsonb column unchanged — both
+        // already treat settings as an opaque bag, and generatePlan()
+        // itself ignores keys it doesn't recognize, so this needed no
+        // schema or endpoint change on either path.
+        daySwaps,
       },
       user_notes: userNotesInput.value.trim(),
     };
@@ -788,6 +931,7 @@
       };
       applySettingsToForm(settings, data.user_notes || '');
       await generateAndShowPlan(settings, { restoring: true });
+      applySavedDaySwaps(data.settings.daySwaps);
       paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat (mode dummy — lokal).');
       return true;
     }
@@ -811,6 +955,7 @@
       };
       applySettingsToForm(settings, data.user_notes || '');
       await generateAndShowPlan(settings, { restoring: true });
+      applySavedDaySwaps(data.settings.daySwaps);
       paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat dari akunmu.');
       return true;
     } catch (err) {
@@ -1067,6 +1212,13 @@
   });
 
   document.getElementById('printBtn').addEventListener('click', downloadPlanAsPdf);
+  // Delegated (rows are rebuilt via innerHTML on every render/re-render,
+  // see renderPlan/reRenderWeek) rather than bound per-button.
+  planWeeksEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.swap-day-btn');
+    if (!btn) return;
+    handleSwapDayClick(Number(btn.dataset.week), Number(btn.dataset.dow));
+  });
   aiRetryBtn.addEventListener('click', async () => {
     aiRetryBtn.hidden = true;
     aiStatus.hidden = false;
@@ -1229,7 +1381,7 @@
               <tr><th>Hari</th><th>Tanggal</th><th>Sesi</th><th>Jarak</th><th>Pace Target</th></tr>
             </thead>
             <tbody>
-              ${week.days.map(renderDayRow).join('')}
+              ${week.days.map(day => renderDayRow(day, week.weekNumber)).join('')}
             </tbody>
           </table>
         </div>
@@ -1730,11 +1882,12 @@
     }
   }
 
-  function renderDayRow(day) {
+  function renderDayRow(day, weekNumber) {
     const { formatDate, TYPE_LABELS } = PaceForgeGenerator;
     const isRest = day.type === 'rest';
     const isRace = day.type === 'race';
-    const rowClass = isRest ? 'is-rest' : (isRace ? 'is-race' : '');
+    const isSwapSelected = !!swapSelection && swapSelection.week === weekNumber && swapSelection.dow === day.dow;
+    const rowClass = [isRest ? 'is-rest' : (isRace ? 'is-race' : ''), isSwapSelected ? 'is-swap-selected' : ''].filter(Boolean).join(' ');
     const label = (day.type === 'longRun' && day.isMarathonSpecific)
       ? `${TYPE_LABELS.longRun} (Pace ${day.structure?.paceLabel || 'Marathon'})`
       : (TYPE_LABELS[day.type] || day.type);
@@ -1758,13 +1911,19 @@
     // upfront (rather than only added when a match exists) so that lookup
     // never has to touch innerHTML/re-render the row itself.
     const analysisRow = isRest ? '' : `<tr class="completed-analysis-row" data-analysis-date="${dateKey(day.date)}" hidden><td colspan="5"><div class="completed-analysis"></div></td></tr>`;
+    // Race day is never swappable (see handleSwapDayClick) — no button at
+    // all rather than a disabled one, since there's nothing a click on it
+    // could ever do. The selected source day gets a "cancel" affordance
+    // (✕) in place of the swap icon (⇄) instead of a second button, so
+    // there's always exactly one control to reason about per row.
+    const swapBtn = isRace ? '' : `<button type="button" class="swap-day-btn" data-week="${weekNumber}" data-dow="${day.dow}" title="${isSwapSelected ? 'Batal tukar' : 'Tukar dengan hari lain'}" aria-label="${isSwapSelected ? 'Batalkan pemilihan tukar hari' : `Tukar sesi hari ${day.dayName} dengan hari lain`}">${isSwapSelected ? '✕' : '⇄'}</button>`;
     return `
       <tr class="${rowClass}" data-date="${dateKey(day.date)}">
         <td>${day.dayName}</td>
         <td>${day.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</td>
         <td><span class="type-badge" style="background:${color}">${label}</span><span class="completed-slot"></span></td>
         <td>${km}</td>
-        <td>${pace}</td>
+        <td>${pace}${swapBtn}</td>
       </tr>
       ${structureRow}
       ${analysisRow}
