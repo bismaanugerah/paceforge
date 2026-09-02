@@ -203,6 +203,7 @@
   const gateSection = document.getElementById('gateSection');
   const formSection = document.getElementById('formSection');
   const loadingSection = document.getElementById('loadingSection');
+  const loadingTitle = document.getElementById('loadingTitle');
   const resultSection = document.getElementById('resultSection');
   const resultWarning = document.getElementById('resultWarning');
   const summaryCards = document.getElementById('summaryCards');
@@ -629,13 +630,13 @@
   // loadingSection for the duration so that wait is never a frozen page,
   // regardless of where the caller found this function mid-flow (a fresh
   // form submit, or restoring a saved plan right after login).
-  async function generateAndShowPlan(settings) {
+  async function generateAndShowPlan(settings, { restoring = false } = {}) {
     const plan = PaceForgeGenerator.generatePlan(settings);
     lastPlan = plan;
     lastFitnessLevel = settings.fitnessLevel;
     lastConservativeMode = settings.conservativeMode;
 
-    showLoading();
+    showLoading(restoring ? 'Memuat training plan-mu...' : undefined);
     loadingSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     submitBtn.disabled = true;
@@ -668,11 +669,12 @@
   // a moment later used to flash the empty form for returning users with
   // one; showing this instead avoids that, falling back to showForm()
   // only once it's confirmed there's nothing saved to show.
-  function showLoading() {
+  function showLoading(title) {
     gateSection.hidden = true;
     formSection.hidden = true;
     resultSection.hidden = true;
     loadingSection.hidden = false;
+    if (loadingTitle) loadingTitle.textContent = title || 'Menyusun training plan-mu...';
   }
 
   // Flip in js/config.js once Strava login is actually wired up. While
@@ -737,7 +739,7 @@
         startDate: new Date((data.settings.startDate || new Date().toISOString().slice(0, 10)) + 'T00:00:00'),
       };
       applySettingsToForm(settings, data.user_notes || '');
-      await generateAndShowPlan(settings);
+      await generateAndShowPlan(settings, { restoring: true });
       paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat (mode dummy — lokal).');
       return true;
     }
@@ -760,7 +762,7 @@
         startDate: new Date((data.settings.startDate || new Date().toISOString().slice(0, 10)) + 'T00:00:00'),
       };
       applySettingsToForm(settings, data.user_notes || '');
-      await generateAndShowPlan(settings);
+      await generateAndShowPlan(settings, { restoring: true });
       paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat dari akunmu.');
       return true;
     } catch (err) {
@@ -945,7 +947,7 @@
         // a returning user with one goes straight from this to their
         // result, never seeing the empty form flash by first; showForm()
         // only runs once loadSavedPlanForUser confirms there isn't one.
-        showLoading();
+        showLoading('Memuat training plan-mu...');
         loadSavedPlanForUser(user).then((loaded) => {
           if (!loaded) {
             showForm();
