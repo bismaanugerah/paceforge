@@ -644,10 +644,28 @@ const PaceForgeGenerator = (() => {
       // sooner and plateau at the same number a 1-session plan reaches —
       // so the achievable gain itself scales with quality-session count.
       const qualityGainMultiplier = qualitySessionsForDays(daysPerWeek) >= 2 ? 1.3 : 1;
+      // Aerobic base (weekly volume) is its own driver of fitness gains,
+      // separate from quality-session stimulus — but with diminishing
+      // returns as it climbs, not a flat "more is better": recreational-
+      // runner data (Garmin population data + several training-volume
+      // studies) puts the steep-improvement zone under roughly 35-45km/
+      // week, tapering off by ~60km/week, where the improvement curve
+      // goes essentially flat. So this isn't "more growth = more gain"
+      // (that direction doesn't hold up — see the reverted first attempt
+      // at this) but "more *room below the plateau* = more gain": a
+      // runner already running near/above 60km/week has little headroom
+      // left for volume-driven gains regardless of qualityGainMultiplier,
+      // while one starting well under it does. Deliberately modest (up to
+      // +25% at currentWeeklyKm near 0, none at/above the plateau) so it
+      // nudges the projection rather than dominates it.
+      const VOLUME_GAIN_PLATEAU_KM = 60;
+      const volumeHeadroom = clamp(1 - currentWeeklyKm / VOLUME_GAIN_PLATEAU_KM, 0, 1);
+      const volumeGainMultiplier = 1 + volumeHeadroom * 0.25;
       const gainFraction = CONSERVATIVE_FITNESS_GAIN_PCT[fitnessLevel]
         * clamp(buildWeeks / profile.recWeeks, 0, 1)
         * (conservativeMode ? 0.5 : 1)
-        * qualityGainMultiplier;
+        * qualityGainMultiplier
+        * volumeGainMultiplier;
       goalPaceSec = currentEquivPaceSec * (1 - gainFraction);
       goalPaceSource = 'recentRace';
     } else {
