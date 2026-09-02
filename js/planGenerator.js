@@ -485,7 +485,7 @@ const PaceForgeGenerator = (() => {
     easy: 'Lari Santai',
     longRun: 'Lari Jarak Jauh',
     tempo: 'Tempo Run',
-    interval: 'Interval / Speedwork',
+    interval: 'Interval',
     repetition: 'Repetition',
     shakeout: 'Lari Ringan (Shakeout)',
     rest: 'Istirahat',
