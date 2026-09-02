@@ -30,26 +30,32 @@ const PaceForgeGenerator = (() => {
 
   // Recommended plan length / taper / peak long-run range per race type.
   // Values are generic heuristics (km), not sports-science guarantees.
+  //
+  // maxSupportKm: absolute ceiling for a single non-long-run session (easy/
+  // recovery/tempo/interval) at THIS race distance, regardless of what its
+  // weeklySplitForDays share would otherwise compute. The proportional
+  // split keeps every support session smaller than that week's long run,
+  // but weekKm itself has no upper bound of its own (it grows off
+  // currentWeeklyKm with no ceiling, while the long run gets clamped to
+  // longRunMin/Max above) — so on a high-volume plan the *other* sessions
+  // can still land at an unrealistic absolute distance even while staying
+  // smaller than the long run (a 17km "tempo run" is not a tempo run for a
+  // 5K plan no matter how big that week's long run is). Scaled per race
+  // distance rather than one flat number for every plan — a support
+  // session that's perfectly normal in a marathon block (real plans, e.g.
+  // Hal Higdon's Intermediate 1 Marathon and Pete Pfitzinger's
+  // "medium-long run", run midweek sessions up to ~15mi/24km at peak) would
+  // be a bizarrely long "easy run" on a 5K plan, where established plans
+  // (e.g. Hal Higdon's Intermediate 5K/10K) top out well under 10km. A
+  // tempo/interval session's actual hard-effort portion is smaller still
+  // once warmup/cooldown are subtracted (see buildTempoStructure/
+  // buildIntervalStructure).
   const RACE_PROFILES = {
-    '5k':   { recWeeks: 8,  taperWeeks: 1, longRunMin: 8,  longRunMax: 12 },
-    '10k':  { recWeeks: 10, taperWeeks: 1, longRunMin: 12, longRunMax: 16 },
-    'half': { recWeeks: 12, taperWeeks: 2, longRunMin: 16, longRunMax: 19 },
-    'full': { recWeeks: 16, taperWeeks: 3, longRunMin: 29, longRunMax: 32 },
+    '5k':   { recWeeks: 8,  taperWeeks: 1, longRunMin: 8,  longRunMax: 12, maxSupportKm: 9 },
+    '10k':  { recWeeks: 10, taperWeeks: 1, longRunMin: 12, longRunMax: 16, maxSupportKm: 10 },
+    'half': { recWeeks: 12, taperWeeks: 2, longRunMin: 16, longRunMax: 19, maxSupportKm: 12 },
+    'full': { recWeeks: 16, taperWeeks: 3, longRunMin: 29, longRunMax: 32, maxSupportKm: 24 },
   };
-
-  // Absolute ceiling for a single non-long-run session (easy/recovery/
-  // tempo/interval), in km, regardless of what its weeklySplitForDays share
-  // would otherwise compute. The proportional split keeps every support
-  // session smaller than that week's long run, but weekKm itself has no
-  // upper bound of its own (it grows off currentWeeklyKm with no ceiling,
-  // while the long run gets clamped to a race-appropriate absolute range —
-  // see peakLongRunKm below) — so on a high-volume plan the *other*
-  // sessions can still land at an unrealistic absolute distance even while
-  // staying smaller than the long run (a 17km "tempo run" is not a tempo
-  // run no matter how big that week's long run is). A tempo/interval
-  // session's actual hard-effort portion is smaller still once warmup/
-  // cooldown are subtracted (see buildTempoStructure/buildIntervalStructure).
-  const MAX_SUPPORT_SESSION_KM = 15;
 
   // Default goal pace (sec/km) by fitness level, used only when the user
   // doesn't provide a target finish time. Roughly tuned per level; the
@@ -473,7 +479,7 @@ const PaceForgeGenerator = (() => {
   }
 
   // Absolute ceiling for a repetition session specifically — tighter than
-  // MAX_SUPPORT_SESSION_KM (which still applies to every other non-long-run
+  // profile.maxSupportKm (which still applies to every other non-long-run
   // session type, tempo/interval included): real repetition workouts are
   // short bursts with lots of standing/jogging recovery, not a distance
   // session, so letting one scale up like a tempo run would misrepresent
@@ -697,7 +703,7 @@ const PaceForgeGenerator = (() => {
 
     // The REAL peak weekly volume this plan will ever schedule: peakLongRunKm
     // (above) plus whatever each support slot (easy/recovery/tempo/interval)
-    // actually caps out at — the same MAX_SUPPORT_SESSION_KM and
+    // actually caps out at — the same profile.maxSupportKm and
     // "never >= that week's long run" ceilings the per-day loop below
     // enforces, evaluated here up front. Ramping week-by-week progress
     // toward THIS (rather than the unbounded theoreticalPeakWeeklyKm) is
@@ -709,7 +715,7 @@ const PaceForgeGenerator = (() => {
     // of a 13-week build block and had nowhere further to go for the
     // remaining 8.
     const peakWeeklyKm = peakLongRunKm + baseSlotWeights.reduce(
-      (sum, w) => sum + Math.min(theoreticalPeakWeeklyKm * w, MAX_SUPPORT_SESSION_KM, peakLongRunKm * 0.95),
+      (sum, w) => sum + Math.min(theoreticalPeakWeeklyKm * w, profile.maxSupportKm, peakLongRunKm * 0.95),
       0
     );
 
@@ -951,7 +957,7 @@ const PaceForgeGenerator = (() => {
         // progression is bounded by peakWeeklyKm (which is itself derived
         // from these same caps — see its definition above), so under normal
         // progression no support session can land bigger than the long run
-        // or past MAX_SUPPORT_SESSION_KM. Two safety nets on top of that
+        // or past profile.maxSupportKm. Two safety nets on top of that
         // anyway, for edge cases (e.g. a currentWeeklyKm input that's
         // already high relative to daysPerWeek), neither of which
         // redistributes the trimmed volume elsewhere (a lower actual weekKm
@@ -960,10 +966,10 @@ const PaceForgeGenerator = (() => {
         //      progress-based target without shrinking the other slots to
         //      match — so clamp against the *actual* long run distance this
         //      week too.
-        //   2. Clamp at MAX_SUPPORT_SESSION_KM regardless, as a final
+        //   2. Clamp at profile.maxSupportKm regardless, as a final
         //      absolute backstop (tighter for repetition specifically —
         //      see MAX_REPETITION_SESSION_KM).
-        const sessionCap = type === 'repetition' ? MAX_REPETITION_SESSION_KM : MAX_SUPPORT_SESSION_KM;
+        const sessionCap = type === 'repetition' ? MAX_REPETITION_SESSION_KM : profile.maxSupportKm;
         let km = weekKm * (weightByDow[dow] ?? 0);
         if (longRunKmThisWeek > 0) km = Math.min(km, longRunKmThisWeek * 0.95);
         if (km > sessionCap) {
@@ -1001,7 +1007,7 @@ const PaceForgeGenerator = (() => {
       // shouldn't count toward "peak" — only build-phase weeks (Base/Build/
       // Peak/Cutback) do. Tracks what the schedule actually delivers, which
       // can still come in a bit under the peakWeeklyKm target on the rare
-      // week where a guardrail (ramp limit, MAX_SUPPORT_SESSION_KM) trims
+      // week where a guardrail (ramp limit, profile.maxSupportKm) trims
       // something — peakWeeklyKm itself is already the realistic figure
       // (see its definition above), not the unbounded theoretical one.
       if (!isTaperWeek) actualPeakWeeklyKm = Math.max(actualPeakWeeklyKm, totalKm);
@@ -1029,7 +1035,7 @@ const PaceForgeGenerator = (() => {
       warnings.push(`Long run puncak di jadwal ini (~${Math.round(actualPeakLongRunKm * 10) / 10} km) sengaja ditahan di bawah target ${Math.round(peakLongRunKm)} km, karena lari terjauhmu saat ini baru ${longestRecentRunKm} km — kenaikan jarak long run dinaikkan bertahap per minggu (maks ~20%) supaya aman dari cedera. Kalau waktu persiapanmu masih cukup panjang, ini normal dan long run akan terus naik mendekati race day.`);
     }
     if (supportSessionCapped) {
-      warnings.push(`Beberapa sesi lari santai/tempo/interval/repetition di jadwal ini dibatasi maksimal ${MAX_SUPPORT_SESSION_KM} km (repetition: ${MAX_REPETITION_SESSION_KM} km) — dengan volume mingguanmu yang cukup tinggi, porsi proporsionalnya bisa lebih jauh dari itu, tapi sesi selain long run sebaiknya tidak sejauh itu. Total mingguan jadi sedikit lebih rendah dari target sebagai konsekuensinya — lebih aman begitu daripada memaksakan sesi harian yang kepanjangan.`);
+      warnings.push(`Beberapa sesi lari santai/tempo/interval/repetition di jadwal ini dibatasi maksimal ${profile.maxSupportKm} km (repetition: ${MAX_REPETITION_SESSION_KM} km) — dengan volume mingguanmu yang cukup tinggi, porsi proporsionalnya bisa lebih jauh dari itu, tapi sesi selain long run sebaiknya tidak sejauh itu. Total mingguan jadi sedikit lebih rendah dari target sebagai konsekuensinya — lebih aman begitu daripada memaksakan sesi harian yang kepanjangan.`);
     }
     if (Math.abs(currentFitnessPaceSec - goalPaceSec) >= 3) {
       warnings.push(`Pace target di sesi tempo/interval/long run dimulai lebih santai (${formatPace(currentFitnessPaceSec)}, sesuai kemampuanmu saat ini) lalu naik bertahap tiap minggu menuju goal pace ${formatPace(goalPaceSec)} di puncak training block — bukan langsung dipatok di goal pace dari minggu 1.`);
@@ -1055,6 +1061,11 @@ const PaceForgeGenerator = (() => {
         predictedRaceTimeSec,
         planStart: firstWeekStart,
         weeksAvailable,
+        // Exposed so js/app.js's applyAiAdjustments can clamp an AI-
+        // suggested distance tweak to the same race-appropriate ceiling
+        // this file itself enforces (see profile.maxSupportKm above)
+        // without needing to re-resolve the race profile itself.
+        maxSupportKm: profile.maxSupportKm,
       },
       warnings,
       weeks,
@@ -1074,8 +1085,11 @@ const PaceForgeGenerator = (() => {
     // Exported so js/app.js can recompute a day's workout-structure bar
     // after applying an AI-suggested distance adjustment (see
     // applyAiAdjustments), and clamp against the same absolute ceiling
-    // this file itself enforces, without duplicating either.
+    // this file itself enforces, without duplicating either. The support-
+    // session ceiling itself is per-race-profile now (see
+    // RACE_PROFILES[key].maxSupportKm above) rather than one flat export —
+    // js/app.js reads it off plan.meta.maxSupportKm instead.
     buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure,
-    MAX_SUPPORT_SESSION_KM, MAX_REPETITION_SESSION_KM,
+    MAX_REPETITION_SESSION_KM,
   };
 })();

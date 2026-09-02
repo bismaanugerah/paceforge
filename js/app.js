@@ -1582,10 +1582,12 @@
   // within ~20% of its original rule-based distance and to the same
   // absolute ceiling the generator itself enforces for that type
   // (PaceForgeGenerator.MAX_REPETITION_SESSION_KM for repetition,
-  // MAX_SUPPORT_SESSION_KM for everything else) either way.
+  // plan.meta.maxSupportKm — this plan's race-appropriate ceiling, see
+  // RACE_PROFILES in planGenerator.js — for everything else) either way.
   function applyAiAdjustments(plan, adjustments) {
     if (!Array.isArray(adjustments) || !adjustments.length) return;
-    const { buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure, MAX_SUPPORT_SESSION_KM, MAX_REPETITION_SESSION_KM } = PaceForgeGenerator;
+    const { buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure, MAX_REPETITION_SESSION_KM } = PaceForgeGenerator;
+    const maxSupportKm = plan.meta.maxSupportKm;
 
     let appliedCount = 0;
     const touchedWeeks = new Set();
@@ -1599,7 +1601,7 @@
 
       const suggested = Number(adj.suggestedKm);
       if (!Number.isFinite(suggested) || suggested <= 0) continue;
-      const sessionCap = day.type === 'repetition' ? MAX_REPETITION_SESSION_KM : MAX_SUPPORT_SESSION_KM;
+      const sessionCap = day.type === 'repetition' ? MAX_REPETITION_SESSION_KM : maxSupportKm;
       const clamped = Math.min(Math.max(suggested, day.km * 0.8), day.km * 1.2, sessionCap);
       const rounded = Math.round(clamped * 2) / 2;
       if (rounded === day.km) continue;

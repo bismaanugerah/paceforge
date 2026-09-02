@@ -11,8 +11,9 @@
  * look unrealistic, and (b) write qualitative coaching notes. Claude's
  * suggested adjustments are advisory only: js/app.js validates and clamps
  * every one (±20% of the original, never touching long run/race day, capped
- * at MAX_SUPPORT_SESSION_KM) before applying anything — this endpoint and
- * the prompt below just ask nicely, they don't enforce it.
+ * at that plan's race-appropriate maxSupportKm — see RACE_PROFILES in
+ * js/planGenerator.js) before applying anything — this endpoint and the
+ * prompt below just ask nicely, they don't enforce it.
  */
 
 const AI_SYSTEM_PROMPT = `Kamu pelatih lari berpengalaman, menulis singkat dalam Bahasa Indonesia.
