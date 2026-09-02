@@ -554,6 +554,20 @@ input[type="radio"]:focus-visible {
   font-variant-numeric: tabular-nums;
   color: var(--color-primary-dark);
 }
+/* .week-block is a <details> element (see js/app.js renderPlan) so each
+   week collapses to just this header — cursor + the two marker-removal
+   rules below strip the browser's own disclosure triangle so the custom
+   .week-toggle-icon (which rotates on [open], see below) is the only one
+   shown, consistently across browsers. */
+summary.week-header { cursor: pointer; list-style: none; }
+summary.week-header::-webkit-details-marker { display: none; }
+.week-toggle-icon {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.week-block[open] > summary .week-toggle-icon { transform: rotate(180deg); }
 .week-vdot {
   padding: 8px 16px 0;
   font-size: 0.78rem;
@@ -698,6 +712,11 @@ input[type="radio"]:focus-visible {
   body { background: #fff; color: #1c2230; }
   .card { box-shadow: none; padding: 0; border: none; }
   .week-block { break-inside: avoid; }
+  /* The accordion (see .week-block[open] above) is a screen-only reading
+     aid — printing should always show every week's full schedule
+     regardless of which one happens to be open on screen. */
+  .week-block:not([open]) > *:not(summary) { display: block !important; }
+  .week-toggle-icon { display: none; }
 }
 
 /* ---------- Responsive ---------- */
