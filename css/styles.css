@@ -575,11 +575,15 @@ input[type="radio"]:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Colored per phase (see PHASE_COLORS in js/app.js) so Base/Build/Peak/
+   Cutback/Taper/Race Week reads apart at a glance instead of all six
+   sitting in the same muted gray as the date range next to it. */
+.week-header .phase-label { font-weight: 700; }
 .week-header .week-total {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--color-primary-dark);
-  text-align: right;
+  text-align: left;
 }
 /* .week-block is a <details> element (see js/app.js renderPlan) so each
    week collapses to just this header — cursor + the two marker-removal

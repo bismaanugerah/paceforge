@@ -22,6 +22,23 @@
     race: 'var(--type-race)',
   };
 
+  // Distinguishes a week's training phase at a glance in the accordion
+  // header (see renderPlan) — reuses colors already meaning something else
+  // elsewhere in the plan rather than inventing an unrelated palette:
+  // Base/Peak/Taper borrow the Easy/Interval/Tempo session-type colors
+  // (roughly matching that phase's dominant effort — Base is mostly easy
+  // running, Peak leans hardest, Taper backs off like tempo work would),
+  // Cutback its own muted recovery color, and Race Week the same indigo
+  // already used for the race day badge itself.
+  const PHASE_COLORS = {
+    Base: 'var(--type-easy)',
+    Build: 'var(--color-accent)',
+    Peak: 'var(--type-interval)',
+    Cutback: 'var(--type-recovery)',
+    Taper: 'var(--type-tempo)',
+    'Race Week': 'var(--type-race)',
+  };
+
   // Hex twins of the CSS custom properties above / the exertion colors in
   // styles.css — the PDF export draws with jsPDF's own vector primitives
   // (no DOM, so no access to CSS variables), so it needs the raw values.
@@ -1200,7 +1217,7 @@
             <span class="week-title">Minggu ${week.weekNumber}</span>
             ${currentWeekBadge}
           </span>
-          <span class="week-phase">${week.phase} • ${formatDate(week.startDate)} – ${formatDate(week.endDate)}</span>
+          <span class="week-phase"><span class="phase-label" style="color:${PHASE_COLORS[week.phase] || 'inherit'}">${week.phase}</span> • ${formatDate(week.startDate)} – ${formatDate(week.endDate)}</span>
           <span class="week-total">Total: ${week.totalKm} km</span>
           <span class="week-toggle-icon" aria-hidden="true">▾</span>
         </summary>
