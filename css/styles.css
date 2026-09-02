@@ -651,6 +651,12 @@ summary.week-header::-webkit-details-marker { display: none; }
 /* Highlights a row picked as a day-swap's first side while its second
    click is still pending — see handleSwapDayClick in js/app.js. */
 .day-table tr.is-swap-selected { background: var(--color-primary-light); box-shadow: inset 3px 0 0 var(--color-primary); }
+/* Drag-and-drop day swap (desktop mouse only — see handleDayDragStart's
+   comment in js/app.js): the row being dragged fades out, a row it's
+   currently hovering over gets a dashed outline as a valid-drop cue. */
+.day-table tr[draggable="true"] { cursor: grab; }
+.day-table tr.is-dragging { opacity: 0.4; }
+.day-table tr.is-drag-over { outline: 2px dashed var(--color-primary); outline-offset: -2px; }
 .swap-day-btn {
   float: right;
   border: 1px solid var(--color-border);

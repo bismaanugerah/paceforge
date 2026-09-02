@@ -830,6 +830,38 @@
   // real-world race date, not a slot that can just move); swapping a
   // long run asks for confirmation first since it's a bigger change to a
   // week's shape than an easy/quality day moving.
+  // Does the actual swap (same guardrails and persistence either
+  // interaction path needs) between two days in the same week — shared by
+  // the click-click flow (handleSwapDayClick) and drag-and-drop
+  // (handleDayDrop below), so the rules can't drift between the two ways
+  // of doing the same thing. Cross-week swaps aren't supported by either
+  // caller (handleSwapDayClick re-targets instead of attempting one;
+  // handleDayDrop just no-ops), so this rejects one outright rather than
+  // leaving that decision to each caller. Re-renders the week and
+  // persists on success; callers are responsible for re-rendering on
+  // their own to clear whatever selection/drag-over state they were
+  // tracking when this returns false.
+  function attemptDaySwap(weekNumber, dowA, dowB) {
+    if (!lastPlan || dowA === dowB) return false;
+    const week = lastPlan.weeks.find(w => w.weekNumber === weekNumber);
+    const dayA = week?.days.find(d => d.dow === dowA);
+    const dayB = week?.days.find(d => d.dow === dowB);
+    if (!dayA || !dayB) return false;
+    if (dayA.type === 'race' || dayB.type === 'race') {
+      alert('Race day nggak bisa dipindah — itu tanggal race sungguhan, bukan slot latihan.');
+      return false;
+    }
+    if (dayA.type === 'longRun' || dayB.type === 'longRun') {
+      if (!confirm('Ini bakal mindahin long run ke hari lain minggu ini. Lanjutkan?')) return false;
+    }
+    swapPlanDaySessions(dayA, dayB);
+    daySwaps.push({ week: weekNumber, dowA, dowB });
+    reRenderWeek(weekNumber);
+    markCompletedSessionsFromStrava(lastPlan).catch(() => {});
+    if (REQUIRE_LOGIN && lastSettings) savePlanForCurrentUser(lastSettings);
+    return true;
+  }
+
   function handleSwapDayClick(weekNumber, dow) {
     if (!lastPlan) return;
     if (!swapSelection) {
@@ -850,27 +882,36 @@
       reRenderWeek(weekNumber);
       return;
     }
-    const week = lastPlan.weeks.find(w => w.weekNumber === weekNumber);
-    const dayA = week?.days.find(d => d.dow === sourceDow);
-    const dayB = week?.days.find(d => d.dow === dow);
     swapSelection = null;
-    if (!dayA || !dayB) { reRenderWeek(weekNumber); return; }
-    if (dayA.type === 'race' || dayB.type === 'race') {
-      alert('Race day nggak bisa dipindah — itu tanggal race sungguhan, bukan slot latihan.');
-      reRenderWeek(weekNumber);
-      return;
+    if (!attemptDaySwap(weekNumber, sourceDow, dow)) reRenderWeek(weekNumber);
+  }
+
+  // Drag-and-drop is the desktop-mouse path to the same swap the ⇄ button
+  // (handleSwapDayClick) already does — HTML5 drag events don't fire on
+  // touch at all, so the button stays as the interaction every device can
+  // actually use; this is additive, not a replacement. dragWeek/dragDow
+  // track the row currently being dragged (module-scoped so dragover/drop,
+  // fired on a *different* row, can read what dragstart recorded — the
+  // dataTransfer payload alone would work too, but reading it back
+  // requires the 'drop' event specifically, and dragover needs to already
+  // know whether to show a valid-drop-target style before that fires).
+  let dragWeek = null;
+  let dragDow = null;
+  function handleDayDragStart(e, weekNumber, dow) {
+    dragWeek = weekNumber;
+    dragDow = dow;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', `${weekNumber}:${dow}`);
+    e.currentTarget.classList.add('is-dragging');
+  }
+  function handleDayDrop(e, weekNumber, dow) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('is-drag-over');
+    if (dragWeek === weekNumber && dragDow !== null && dragDow !== dow) {
+      attemptDaySwap(weekNumber, dragDow, dow);
     }
-    if (dayA.type === 'longRun' || dayB.type === 'longRun') {
-      if (!confirm('Ini bakal mindahin long run ke hari lain minggu ini. Lanjutkan?')) {
-        reRenderWeek(weekNumber);
-        return;
-      }
-    }
-    swapPlanDaySessions(dayA, dayB);
-    daySwaps.push({ week: weekNumber, dowA: sourceDow, dowB: dow });
-    reRenderWeek(weekNumber);
-    markCompletedSessionsFromStrava(lastPlan).catch(() => {});
-    if (REQUIRE_LOGIN && lastSettings) savePlanForCurrentUser(lastSettings);
+    dragWeek = null;
+    dragDow = null;
   }
 
   async function savePlanForCurrentUser(settings) {
@@ -1218,6 +1259,34 @@
     const btn = e.target.closest('.swap-day-btn');
     if (!btn) return;
     handleSwapDayClick(Number(btn.dataset.week), Number(btn.dataset.dow));
+  });
+  // Drag-and-drop day swap (desktop mouse only — see handleDayDragStart's
+  // comment) — delegated the same way the click handler above is, since
+  // every row is rebuilt via innerHTML on each render/re-render.
+  planWeeksEl.addEventListener('dragstart', (e) => {
+    const row = e.target.closest('tr[data-week]');
+    if (!row) return;
+    handleDayDragStart(e, Number(row.dataset.week), Number(row.dataset.dow));
+  });
+  planWeeksEl.addEventListener('dragend', (e) => {
+    e.target.closest('tr[data-week]')?.classList.remove('is-dragging');
+    planWeeksEl.querySelectorAll('.is-drag-over').forEach(el => el.classList.remove('is-drag-over'));
+    dragWeek = null;
+    dragDow = null;
+  });
+  planWeeksEl.addEventListener('dragover', (e) => {
+    const row = e.target.closest('tr[data-week]');
+    if (!row || dragWeek === null) return;
+    e.preventDefault(); // required for 'drop' to fire on this element at all
+    if (Number(row.dataset.week) === dragWeek) row.classList.add('is-drag-over');
+  });
+  planWeeksEl.addEventListener('dragleave', (e) => {
+    e.target.closest('tr[data-week]')?.classList.remove('is-drag-over');
+  });
+  planWeeksEl.addEventListener('drop', (e) => {
+    const row = e.target.closest('tr[data-week]');
+    if (!row) return;
+    handleDayDrop(e, Number(row.dataset.week), Number(row.dataset.dow));
   });
   aiRetryBtn.addEventListener('click', async () => {
     aiRetryBtn.hidden = true;
@@ -1917,8 +1986,13 @@
     // (✕) in place of the swap icon (⇄) instead of a second button, so
     // there's always exactly one control to reason about per row.
     const swapBtn = isRace ? '' : `<button type="button" class="swap-day-btn" data-week="${weekNumber}" data-dow="${day.dow}" title="${isSwapSelected ? 'Batal tukar' : 'Tukar dengan hari lain'}" aria-label="${isSwapSelected ? 'Batalkan pemilihan tukar hari' : `Tukar sesi hari ${day.dayName} dengan hari lain`}">${isSwapSelected ? '✕' : '⇄'}</button>`;
+    // draggable is left off entirely for race day (matching swapBtn above
+    // — nothing a drag could ever do there either), rather than draggable
+    // plus a drop handler that just rejects it: HTML5 drag events don't
+    // fire at all on an element without the attribute, so this is the one
+    // place that guard needs to exist instead of three.
     return `
-      <tr class="${rowClass}" data-date="${dateKey(day.date)}">
+      <tr class="${rowClass}" data-date="${dateKey(day.date)}" data-week="${weekNumber}" data-dow="${day.dow}"${isRace ? '' : ' draggable="true"'}>
         <td>${day.dayName}</td>
         <td>${day.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</td>
         <td><span class="type-badge" style="background:${color}">${label}</span><span class="completed-slot"></span></td>
