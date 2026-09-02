@@ -460,6 +460,24 @@ input[type="radio"]:focus-visible {
 }
 .week-ai-note::before { content: "✨ "; font-style: normal; }
 
+/* Race-day pacing/nutrition/mental tips — same visual language as .ai-tips
+   (it's the same kind of AI-written advice), but appended straight into
+   the race week's own <details> block (see applyPendingAiReviewToDom in
+   js/app.js) instead of floating in a separate card below the whole
+   schedule, so it reads as part of that week rather than disconnected
+   from it. Margin trimmed to sit flush against the block's own padded
+   edges instead of .ai-tips's free-floating 16px 0. */
+.week-race-tips {
+  background: var(--color-accent-light);
+  border: 1px solid var(--color-accent);
+  border-radius: 10px;
+  padding: 14px 16px;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  margin: 12px 16px 16px;
+}
+.week-race-tips::before { content: "🏁 "; }
+
 /* ---------- Results ---------- */
 .result-header {
   display: flex;

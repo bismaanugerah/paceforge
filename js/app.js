@@ -261,7 +261,6 @@
   const aiStatus = document.getElementById('aiStatus');
   const aiRetryBtn = document.getElementById('aiRetryBtn');
   const aiIntro = document.getElementById('aiIntro');
-  const aiRaceDayTips = document.getElementById('aiRaceDayTips');
 
   // Kept around so the AI review step can send the currently-generated plan
   // (and retry on demand) without recomputing anything.
@@ -1159,8 +1158,10 @@
     aiRetryBtn.hidden = true;
     aiIntro.hidden = true;
     aiIntro.textContent = '';
-    aiRaceDayTips.hidden = true;
-    aiRaceDayTips.innerHTML = '';
+    // No separate reset for race-day tips (or the per-week AI notes further
+    // below) needed — both get appended straight into a week-block's own
+    // markup (see applyPendingAiReviewToDom), and planWeeksEl.innerHTML is
+    // about to be fully rebuilt below anyway.
 
     // Warnings
     if (warnings.length) {
@@ -1702,9 +1703,19 @@
           block.appendChild(noteEl);
         });
       }
-      if (data.raceDayTips) {
-        aiRaceDayTips.innerHTML = `<span class="ai-tips-title">Tips Race Day</span>${data.raceDayTips}`;
-        aiRaceDayTips.hidden = false;
+      // Appended into the race week's own block (last in lastPlan.weeks) —
+      // race-day pacing/nutrition/mental advice belongs with race week
+      // itself, not floating in its own card below the entire schedule
+      // where it reads as disconnected from the week it's actually about.
+      if (data.raceDayTips && lastPlan?.weeks.length) {
+        const raceWeekNumber = lastPlan.weeks[lastPlan.weeks.length - 1].weekNumber;
+        const block = planWeeksEl.querySelector(`.week-block[data-week-number="${raceWeekNumber}"]`);
+        if (block) {
+          const tipsEl = document.createElement('div');
+          tipsEl.className = 'week-race-tips';
+          tipsEl.innerHTML = `<span class="ai-tips-title">Tips Race Day</span>${data.raceDayTips}`;
+          block.appendChild(tipsEl);
+        }
       }
       aiStatus.hidden = false;
       aiStatus.classList.remove('is-error');
