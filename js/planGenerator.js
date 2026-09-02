@@ -520,18 +520,20 @@ const PaceForgeGenerator = (() => {
     const usesRaceSpecificLongRun = profile === RACE_PROFILES.full || profile === RACE_PROFILES.half;
     const raceSpecificPaceLabel = isFullMarathonPlan ? 'Marathon' : 'Half Marathon';
 
-    // Weeks are counted (and later laid out — see firstWeekStart below) as
-    // 7-day blocks that start on the same weekday as planStartAnchor, not
-    // forced to Monday. Both anchors then share that weekday, so the gap
-    // between them is always a whole number of weeks — no fractional
-    // leftover week to round away. Rounding to Monday instead (the
-    // previous behaviour) silently dropped however many leading days sat
-    // between planStartAnchor and the next Monday whenever the runner's
-    // chosen start date wasn't itself a Monday (e.g. starting Wednesday
-    // lost up to 5 days off the front of week 1, with no explanation).
-    const startDow = planStartAnchor.getDay();
-    const raceWeekStart = addDays(race, -((race.getDay() - startDow + 7) % 7));
-    const weeksAvailable = Math.max(1, Math.floor((raceWeekStart - planStartAnchor) / MS_PER_DAY / 7) + 1);
+    // Weeks always run Monday-Sunday (the conventional training-plan grid,
+    // and what lets every week's "phase" and taper logic line up with a
+    // calendar week) — counted here as whole Monday-anchored weeks between
+    // planStartAnchor's own week and race week, inclusive. When
+    // planStartAnchor isn't itself a Monday, its week still counts as one
+    // available week even though only part of it is actually usable — see
+    // firstMonday/the days-array filter below, which trims week 1 down to
+    // just planStartAnchor onward instead of either (a) silently dropping
+    // those leading days by rounding the whole plan forward to the next
+    // Monday, or (b) scheduling sessions on days before the runner said
+    // they'd start.
+    const raceWeekMonday = addDays(race, -(race.getDay() === 0 ? 6 : race.getDay() - 1));
+    const startWeekMonday = addDays(planStartAnchor, -(planStartAnchor.getDay() === 0 ? 6 : planStartAnchor.getDay() - 1));
+    const weeksAvailable = Math.max(1, Math.floor((raceWeekMonday - startWeekMonday) / MS_PER_DAY / 7) + 1);
 
     let planWeeks = Math.min(weeksAvailable, profile.recWeeks);
     let taperWeeks = Math.min(profile.taperWeeks, Math.max(planWeeks - 1, 0));
@@ -725,11 +727,13 @@ const PaceForgeGenerator = (() => {
     const TAPER_FACTORS = { 1: [0.55], 2: [0.75, 0.5], 3: [0.75, 0.6, 0.4] };
     const taperFactors = TAPER_FACTORS[taperWeeks] || [];
 
-    // Start date of the detailed plan: walk backwards planWeeks full weeks
-    // from raceWeekStart (see weeksAvailable above). When the full lead
-    // time is used (planWeeks === weeksAvailable, the common case) this
-    // lands exactly on planStartAnchor itself.
-    const firstWeekStart = addDays(raceWeekStart, -(planWeeks - 1) * 7);
+    // Monday of the detailed plan's first week: walk backwards planWeeks
+    // full Monday-Sunday weeks from raceWeekMonday (see weeksAvailable
+    // above). When the full lead time is used (planWeeks === weeksAvailable,
+    // the common case) this lands on planStartAnchor's own week — its
+    // days-array gets trimmed to planStartAnchor onward below rather than
+    // scheduling anything before it.
+    const firstWeekStart = addDays(raceWeekMonday, -(planWeeks - 1) * 7);
 
     const sortedPreferredDays = [...preferredDays].sort((a, b) => {
       const na = a === 0 ? 7 : a;
@@ -810,9 +814,20 @@ const PaceForgeGenerator = (() => {
         ? buildRaceWeekTemplate(daysPerWeek)
         : workoutTemplate(daysPerWeek, qualityPrimary.type, qualitySecondary.type);
 
+      // Week 1 only, and only when the full lead time is being used
+      // (firstWeekStart landed before planStartAnchor — see above): drop
+      // the days before planStartAnchor instead of showing them as
+      // scheduled-but-blank "Istirahat" rows the runner never actually
+      // had training-wise, or session slots landing on a date before
+      // they said they'd start. The per-day assignment loop below already
+      // no-ops when a preferred day's dayObj isn't found (see `if
+      // (!dayObj) return;`), so a slot that would've landed on a trimmed
+      // day is simply left unscheduled that week rather than needing any
+      // special-casing here.
       const days = [];
       for (let d = 0; d < 7; d++) {
         const date = addDays(weekStart, d);
+        if (w === 0 && date < planStartAnchor) continue;
         const dow = date.getDay();
         days.push({ date, dayName: DAY_NAMES[dow], dow, type: 'rest', km: 0 });
       }
@@ -993,8 +1008,12 @@ const PaceForgeGenerator = (() => {
 
       weeks.push({
         weekNumber: w + 1,
-        startDate: weekStart,
-        endDate: addDays(weekStart, 6),
+        // Week 1's days array may be trimmed to start after weekStart (see
+        // above) — report its actual first/last rendered day rather than
+        // the raw Monday-Sunday bounds, so the header date range shown
+        // alongside the days table always matches what's actually in it.
+        startDate: days[0].date,
+        endDate: days[days.length - 1].date,
         phase,
         totalKm,
         // This week's own interpolated goal pace (see weekPaces.goal above)
