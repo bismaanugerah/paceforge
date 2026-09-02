@@ -87,6 +87,27 @@
     return TYPE_COLORS[ZONE_TYPE_COLOR_KEY[zone]] || TYPE_COLORS.easy;
   }
 
+  // Resolves a workout-structure segment's `role` (see structureToSegments)
+  // to an actual color: 'work' segments (reps, tempo block) use the day's
+  // own zone color; 'easy' segments (warm up/cool down — genuinely easy-
+  // pace running) use the Easy zone's green; 'recovery' segments (the jog
+  // between hard reps) get their own fixed gray — the same
+  // --type-recovery color already used for "Lari Pemulihan" days
+  // elsewhere, since a recovery jog isn't really "Easy zone" pace so much
+  // as its own thing, and reads more clearly as a visually distinct gray
+  // than folded into the same green as warm up/cool down.
+  function roleColorCss(role, zone) {
+    if (role === 'work') return zoneColorCss(zone);
+    if (role === 'recovery') return TYPE_COLORS.recovery;
+    return zoneColorCss('easy');
+  }
+
+  function roleColorHex(role, zone) {
+    if (role === 'work') return zoneColorHex(zone);
+    if (role === 'recovery') return TYPE_HEX.recovery;
+    return zoneColorHex('easy');
+  }
+
   // "2 September 2026" style — day + full month name + year, no weekday
   // (PaceForgeGenerator.formatDate includes a weekday, which reads as
   // clutter repeated on every "Zona Pace (VDOT ...) per ..." line: the top
@@ -1284,9 +1305,8 @@
   // Draws the warm up / work / recovery / cool down bar for one structured
   // workout directly inside its autoTable cell, proportional to distance —
   // the PDF equivalent of renderWorkoutStructure()'s HTML bar. Colored by
-  // `zone` (this day's VDOT zone, see zoneForDay) the same way: 'work'
-  // segments in the zone's own color, 'easy' segments (warm up/recovery/
-  // cool down) in the Easy zone's color.
+  // `zone` (this day's VDOT zone, see zoneForDay) via roleColorHex the same
+  // way the HTML bar uses roleColorCss.
   function drawStructureBar(doc, cell, segments, caption, zone, mutedColor) {
     const padX = 6;
     const barX = cell.x + padX;
@@ -1299,7 +1319,7 @@
     let x = barX;
     segments.forEach((seg, i) => {
       const w = Math.max((Math.max(seg.km, 0.05) / total) * (barWidth - gap * (n - 1)), 1.5);
-      doc.setFillColor(...hexToRgb(seg.role === 'work' ? zoneColorHex(zone) : zoneColorHex('easy')));
+      doc.setFillColor(...hexToRgb(roleColorHex(seg.role, zone)));
       doc.roundedRect(x, barY, w, barHeight, 1.5, 1.5, 'F');
       x += w + gap;
     });
@@ -1350,13 +1370,14 @@
       if (rounded === day.km) continue;
 
       day.km = rounded;
-      // day.workoutVariant (set by the generator for interval/tempo — see
-      // planGenerator.js) is preserved as-is here so an AI distance tweak
-      // doesn't silently reset e.g. a "short reps" interval week back to
-      // the default variant.
-      if (day.type === 'interval') day.structure = buildIntervalStructure(day.km, lastFitnessLevel, lastConservativeMode, day.workoutVariant);
-      else if (day.type === 'tempo') day.structure = buildTempoStructure(day.km, day.workoutVariant);
-      else if (day.type === 'repetition') day.structure = buildRepetitionStructure(day.km);
+      // day.workoutVariant and day.recoveryPaceSecPerKm (both set by the
+      // generator for interval/tempo/repetition — see planGenerator.js)
+      // are preserved as-is here so an AI distance tweak doesn't silently
+      // reset e.g. a "short reps" interval week back to the default
+      // variant, or its recovery jog back to a different week's pace.
+      if (day.type === 'interval') day.structure = buildIntervalStructure(day.km, lastFitnessLevel, lastConservativeMode, day.workoutVariant, day.recoveryPaceSecPerKm);
+      else if (day.type === 'tempo') day.structure = buildTempoStructure(day.km, day.workoutVariant, day.recoveryPaceSecPerKm);
+      else if (day.type === 'repetition') day.structure = buildRepetitionStructure(day.km, day.recoveryPaceSecPerKm);
       else day.structure = buildSimpleStructure(day.km);
 
       appliedCount++;
@@ -1499,15 +1520,16 @@
   // Renders the warm up / work / recovery / cool down breakdown for a
   // workout as a proportional segmented bar, sized by DISTANCE (km) so it
   // lines up with the "Jarak" column — visual shorthand for "what does this
-  // session actually feel like". Colored by VDOT zone (see zoneColorFor
-  // below), not a separate low/moderate/high effort scale: a session's
-  // "hard" segments (reps, tempo block) are colored by its own zone
-  // (Tempo/Interval/Repetition), its warm up/recovery/cool down segments by
-  // the Easy zone — matching the Zona Pace table's colors and the Pace
-  // Target column's zone name, one consistent color language throughout.
-  // A plain continuous run (easy/recovery/long run/shakeout) renders as a
-  // single solid block in its own zone's color; interval/tempo sessions
-  // break down into their segments.
+  // session actually feel like". Colored by role (see roleColorCss above),
+  // not a separate low/moderate/high effort scale: a session's "hard"
+  // segments (reps, tempo block) are colored by its own VDOT zone (Tempo/
+  // Interval/Repetition/Marathon — matching the Zona Pace table's colors
+  // and the Pace Target column's zone name), its warm up/cool down by the
+  // Easy zone (green), and the jog-recovery between reps by its own fixed
+  // gray (same as the "Lari Pemulihan" session-type color) rather than
+  // folded into either. A plain continuous run (easy/recovery/long run/
+  // shakeout) renders as a single solid block in its own zone's color;
+  // interval/tempo sessions break down into their segments.
   function formatKm(km) {
     return km < 1 ? `${Math.round(km * 1000)} m` : `${Math.round(km * 10) / 10} km`;
   }
@@ -1515,21 +1537,30 @@
   // Turns a day.structure object into plain { segments, caption } data —
   // shared by the HTML bar (renderWorkoutStructure, below) and the PDF bar
   // (drawStructureBar) so the two never drift apart. Each segment carries a
-  // `role` ('work' or 'easy') rather than a literal color, since the two
-  // renderers need different color formats (CSS var vs. hex for jsPDF) —
-  // each resolves role -> color itself, using the day's own zone (see
-  // zoneForDay) for 'work' segments and the Easy zone for 'easy' ones.
+  // `role` ('work' | 'easy' | 'recovery') rather than a literal color,
+  // since the two renderers need different color formats (CSS var vs. hex
+  // for jsPDF) — each resolves role -> color itself via roleColorCss/
+  // roleColorHex, using the day's own zone (see zoneForDay) for 'work'.
+  // Recovery segments show their DURATION (recoverySec), not distance —
+  // real interval recoveries are jogged/walked for a set time, not a set
+  // distance (see buildRepsStructure in planGenerator.js for how
+  // recoverySec still gets a km equivalent purely for the bar's width).
+  function formatRecoveryDuration(sec) {
+    return `${Math.round(sec)} detik`;
+  }
+
   function structureToSegments(structure) {
     let segments;
     let caption = '';
     if (structure.kind === 'interval') {
+      const recoveryLabel = formatRecoveryDuration(structure.recoverySec);
       segments = [{ label: 'Warm Up', km: structure.warmupKm, role: 'easy' }];
       for (let i = 0; i < structure.reps; i++) {
         segments.push({ label: `Set ${i + 1}`, km: structure.workKm, role: 'work' });
-        segments.push({ label: 'Recovery', km: structure.recoveryKm, role: 'easy' });
+        segments.push({ label: 'Recovery', km: structure.recoveryKm, role: 'recovery', durationLabel: recoveryLabel });
       }
       segments.push({ label: 'Cool Down', km: structure.cooldownKm, role: 'easy' });
-      caption = `Warm up ${formatKm(structure.warmupKm)} → ${structure.reps}× (${formatKm(structure.workKm)} keras + ${formatKm(structure.recoveryKm)} pemulihan) → Cool down ${formatKm(structure.cooldownKm)}`;
+      caption = `Warm up ${formatKm(structure.warmupKm)} → ${structure.reps}× (${formatKm(structure.workKm)} keras + ${recoveryLabel} pemulihan) → Cool down ${formatKm(structure.cooldownKm)}`;
     } else if (structure.kind === 'tempo') {
       segments = [
         { label: 'Warm Up', km: structure.warmupKm, role: 'easy' },
@@ -1548,8 +1579,9 @@
     const { segments, caption } = structureToSegments(structure);
 
     const bar = segments.map(seg => {
-      const color = seg.role === 'work' ? zoneColorCss(zone) : zoneColorCss('easy');
-      return `<span class="structure-seg" style="flex-grow:${Math.max(seg.km, 0.05).toFixed(2)};background:${color}" title="${seg.label} • ${formatKm(seg.km)}"></span>`;
+      const color = roleColorCss(seg.role, zone);
+      const durationText = seg.durationLabel || formatKm(seg.km);
+      return `<span class="structure-seg" style="flex-grow:${Math.max(seg.km, 0.05).toFixed(2)};background:${color}" title="${seg.label} • ${durationText}"></span>`;
     }).join('');
 
     return `

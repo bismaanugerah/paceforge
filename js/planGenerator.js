@@ -355,49 +355,60 @@ const PaceForgeGenerator = (() => {
 
   // Shared builder behind every "warm up -> N reps (work + recovery) -> cool
   // down" workout — real intervals, cruise-style tempo, and repetition all
-  // have this exact shape, just with different rep/recovery distances and
-  // effort (see INTERVAL_VARIANT_PROFILES / TEMPO_CRUISE_PROFILE /
-  // REPETITION_PROFILE below). `profile` supplies repKm/recoveryKm/minReps/
-  // maxReps/workExertion plus the warmup/cooldown sizing (as a fraction of
-  // sessionKm, clamped to a sensible absolute range).
+  // have this exact shape, just with different rep distances/recovery
+  // durations and effort (see INTERVAL_VARIANT_PROFILES /
+  // TEMPO_CRUISE_PROFILE / REPETITION_PROFILE below). `profile` supplies
+  // repKm/recoverySec/minReps/maxReps/workExertion plus the warmup/cooldown
+  // sizing (as a fraction of sessionKm, clamped to a sensible absolute
+  // range). Recovery is defined by DURATION (recoverySec), not distance —
+  // real interval recoveries are jogged/walked for a set time, not to a
+  // set distance, since pace during recovery isn't the point — converted
+  // to an equivalent recoveryKm via `recoveryPaceSecPerKm` (this week's own
+  // recovery-zone pace, see weekPaces.recovery in generatePlan below) only
+  // so it can share the same km-based rep-count math and bar-width sizing
+  // as every other segment; recoverySec itself is what's actually shown.
   function buildRepsStructure(sessionKm, profile) {
-    const { repKm, recoveryKm, minReps, maxReps, workExertion, warmupFrac, warmupMin, warmupMax, cooldownFrac, cooldownMin, cooldownMax } = profile;
+    const { repKm, recoverySec, recoveryPaceSecPerKm, minReps, maxReps, workExertion, warmupFrac, warmupMin, warmupMax, cooldownFrac, cooldownMin, cooldownMax } = profile;
+    const recoveryKm = recoverySec / recoveryPaceSecPerKm;
     const warmupKm = clamp(sessionKm * warmupFrac, warmupMin, warmupMax);
     const cooldownKm = clamp(sessionKm * cooldownFrac, cooldownMin, cooldownMax);
     const workoutKm = Math.max(sessionKm - warmupKm - cooldownKm, repKm + recoveryKm);
     const reps = clamp(Math.round(workoutKm / (repKm + recoveryKm)), minReps, maxReps);
-    return { kind: 'interval', warmupKm, cooldownKm, reps, workKm: repKm, workExertion, recoveryKm };
+    return { kind: 'interval', warmupKm, cooldownKm, reps, workKm: repKm, workExertion, recoveryKm, recoverySec };
   }
 
   // Interval (I-pace) rep-distance variants — see QUALITY_ROTATION above for
-  // why/when each one gets picked. repKm/recoveryKm approximate common
-  // track-workout distances; minReps/maxReps keep the rep count realistic
-  // for that distance (more short reps fit in a session than long ones).
+  // why/when each one gets picked. repKm approximates common track-workout
+  // distances; recoverySec is the jog-recovery duration commonly prescribed
+  // for that rep length (shorter reps get shorter recoveries); minReps/
+  // maxReps keep the rep count realistic for that distance (more short reps
+  // fit in a session than long ones).
   const INTERVAL_VARIANT_PROFILES = {
-    short: { repKm: 0.4, recoveryKm: 0.25, minReps: 5, maxReps: 12 }, // ~400m
-    mid:   { repKm: 0.8, recoveryKm: 0.4,  minReps: 4, maxReps: 8 },  // ~800m
-    long:  { repKm: 1.2, recoveryKm: 0.5,  minReps: 3, maxReps: 6 },  // ~1000-1200m
+    short: { repKm: 0.4, recoverySec: 60,  minReps: 5, maxReps: 12 }, // ~400m, ~60s jog
+    mid:   { repKm: 0.8, recoverySec: 90,  minReps: 4, maxReps: 8 },  // ~800m, ~90s jog
+    long:  { repKm: 1.2, recoverySec: 120, minReps: 3, maxReps: 6 },  // ~1000-1200m, ~2min jog
   };
 
-  function buildIntervalStructure(sessionKm, fitnessLevel, conservativeMode, variant) {
+  function buildIntervalStructure(sessionKm, fitnessLevel, conservativeMode, variant, recoveryPaceSecPerKm) {
     const repProfile = INTERVAL_VARIANT_PROFILES[variant] || INTERVAL_VARIANT_PROFILES.mid;
     const workExertion = conservativeMode ? 'moderate' : (fitnessLevel === 'beginner' ? 'moderate' : 'high');
     return buildRepsStructure(sessionKm, {
-      ...repProfile, workExertion,
+      ...repProfile, workExertion, recoveryPaceSecPerKm,
       warmupFrac: 0.2, warmupMin: 1, warmupMax: 2.5,
       cooldownFrac: 0.15, cooldownMin: 1, cooldownMax: 2,
     });
   }
 
-  // Cruise intervals: ~1 mile (1.6km) T-pace segments with a short jog
-  // recovery between — Daniels' own preferred way to accumulate T-pace
-  // volume for most runners (see QUALITY_ROTATION above).
-  const TEMPO_CRUISE_PROFILE = { repKm: 1.6, recoveryKm: 0.3, minReps: 2, maxReps: 4 };
+  // Cruise intervals: ~1 mile (1.6km) T-pace segments with a short (~60s)
+  // jog recovery between — Daniels' own preferred way to accumulate T-pace
+  // volume for most runners (see QUALITY_ROTATION above); recovery here is
+  // deliberately shorter than a real interval's, by design.
+  const TEMPO_CRUISE_PROFILE = { repKm: 1.6, recoverySec: 60, minReps: 2, maxReps: 4 };
 
-  function buildTempoStructure(sessionKm, variant) {
+  function buildTempoStructure(sessionKm, variant, recoveryPaceSecPerKm) {
     if (variant === 'cruise') {
       return buildRepsStructure(sessionKm, {
-        ...TEMPO_CRUISE_PROFILE, workExertion: 'moderate',
+        ...TEMPO_CRUISE_PROFILE, workExertion: 'moderate', recoveryPaceSecPerKm,
         warmupFrac: 0.2, warmupMin: 1, warmupMax: 2,
         cooldownFrac: 0.15, cooldownMin: 1, cooldownMax: 1.5,
       });
@@ -408,18 +419,19 @@ const PaceForgeGenerator = (() => {
     return { kind: 'tempo', warmupKm, cooldownKm, tempoKm };
   }
 
-  // Repetition (R-pace): short (~200m) reps with generous, full recovery —
-  // speed/running-economy work, always high-exertion per rep regardless of
-  // fitness level or conservative mode (conservative mode instead skips
-  // repetition entirely — see qualityPick above — rather than watering this
-  // down, since a slow 200m isn't really repetition work any more).
-  const REPETITION_PROFILE = { repKm: 0.2, recoveryKm: 0.3, minReps: 4, maxReps: 10 };
+  // Repetition (R-pace): short (~200m) reps with generous, full recovery
+  // (~90s) — speed/running-economy work, always high-exertion per rep
+  // regardless of fitness level or conservative mode (conservative mode
+  // instead skips repetition entirely — see qualityPick above — rather
+  // than watering this down, since a slow 200m isn't really repetition
+  // work any more).
+  const REPETITION_PROFILE = { repKm: 0.2, recoverySec: 90, minReps: 4, maxReps: 10 };
 
   // Kept deliberately short overall (see MAX_REPETITION_SESSION_KM below) —
   // real repetition sessions are brief-but-intense, not a distance workout.
-  function buildRepetitionStructure(sessionKm) {
+  function buildRepetitionStructure(sessionKm, recoveryPaceSecPerKm) {
     return buildRepsStructure(sessionKm, {
-      ...REPETITION_PROFILE, workExertion: 'high',
+      ...REPETITION_PROFILE, workExertion: 'high', recoveryPaceSecPerKm,
       warmupFrac: 0.35, warmupMin: 1, warmupMax: 1.5,
       cooldownFrac: 0.25, cooldownMin: 0.5, cooldownMax: 1,
     });
@@ -879,13 +891,16 @@ const PaceForgeGenerator = (() => {
         if (type === 'interval' && dayObj.km > 0) {
           const variant = (qualityPrimary.type === 'interval' ? qualityPrimary : qualitySecondary).variant;
           dayObj.workoutVariant = variant;
-          dayObj.structure = buildIntervalStructure(dayObj.km, fitnessLevel, conservativeMode, variant);
+          dayObj.recoveryPaceSecPerKm = weekPaces.recovery;
+          dayObj.structure = buildIntervalStructure(dayObj.km, fitnessLevel, conservativeMode, variant, weekPaces.recovery);
         } else if (type === 'tempo' && dayObj.km > 0) {
           const variant = (qualityPrimary.type === 'tempo' ? qualityPrimary : qualitySecondary).variant;
           dayObj.workoutVariant = variant;
-          dayObj.structure = buildTempoStructure(dayObj.km, variant);
+          dayObj.recoveryPaceSecPerKm = weekPaces.recovery;
+          dayObj.structure = buildTempoStructure(dayObj.km, variant, weekPaces.recovery);
         } else if (type === 'repetition' && dayObj.km > 0) {
-          dayObj.structure = buildRepetitionStructure(dayObj.km);
+          dayObj.recoveryPaceSecPerKm = weekPaces.recovery;
+          dayObj.structure = buildRepetitionStructure(dayObj.km, weekPaces.recovery);
         } else if (dayObj.km > 0) {
           dayObj.structure = buildSimpleStructure(dayObj.km);
         }
