@@ -1,5 +1,5 @@
 $root = Split-Path -Parent $PSScriptRoot
-$port = 5173
+$port = if ($env:PORT) { $env:PORT } else { 5173 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://localhost:$port/")
