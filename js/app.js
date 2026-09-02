@@ -138,23 +138,34 @@
     return PaceForgeVDOT.vdotFromGoalPace(meta.raceDistanceKm, week.weekGoalPaceSec);
   }
 
-  // Which week's accordion (see renderPlan) should start open: whichever
-  // one today actually falls inside. If the plan hasn't started yet
-  // (generated ahead of time), that's week 1 — the one about to begin,
-  // not some arbitrary later week. If it's already over (an old saved
-  // plan reopened after race day), it's the last one, so what's shown by
-  // default is always "the week the runner would actually want to check
-  // right now" rather than always defaulting to one end of the plan.
-  function pickDefaultOpenWeek(weeks) {
-    if (!weeks.length) return null;
+  // The week today actually falls inside, if any — null when the plan
+  // hasn't started yet or is already over. Used both to pick which
+  // accordion (see renderPlan) starts open and to show the "Minggu saat
+  // ini" badge, which should only ever label a week that's genuinely
+  // running right now, not whichever week the open-by-default fallback
+  // below happens to land on.
+  function findCurrentWeek(weeks) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const current = weeks.find(w => {
+    return weeks.find(w => {
       const start = new Date(w.startDate); start.setHours(0, 0, 0, 0);
       const end = new Date(w.endDate); end.setHours(0, 0, 0, 0);
       return today >= start && today <= end;
-    });
-    if (current) return current.weekNumber;
+    }) || null;
+  }
+
+  // Which week's accordion (see renderPlan) should start open. Prefers the
+  // current week (see findCurrentWeek); if the plan hasn't started yet
+  // (generated ahead of time), that's week 1 — the one about to begin, not
+  // some arbitrary later week. If it's already over (an old saved plan
+  // reopened after race day), it's the last one — so what's shown by
+  // default is always "the week the runner would actually want to check
+  // right now" rather than always defaulting to one end of the plan.
+  function pickDefaultOpenWeek(weeks, currentWeek) {
+    if (currentWeek) return currentWeek.weekNumber;
+    if (!weeks.length) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const upcoming = weeks.find(w => new Date(w.startDate) > today);
     return (upcoming || weeks[weeks.length - 1]).weekNumber;
   }
@@ -1171,17 +1182,24 @@
     // analysis card per day) doesn't dump its entire length on screen at
     // once. Only the week most relevant right now starts open; see
     // defaultOpenWeekNumber below for which one that is.
-    const defaultOpenWeekNumber = pickDefaultOpenWeek(weeks);
+    const currentWeek = findCurrentWeek(weeks);
+    const defaultOpenWeekNumber = pickDefaultOpenWeek(weeks, currentWeek);
     planWeeksEl.innerHTML = weeks.map(week => {
       const vdot = weekVdot(meta, week);
       const vdotLine = vdot
         ? `<div class="week-vdot">🎯 Zona Pace (VDOT ${vdot.toFixed(1)}) per ${formatLongDate(week.startDate)}</div>`
         : '';
       const isOpen = week.weekNumber === defaultOpenWeekNumber;
+      const currentWeekBadge = currentWeek && week.weekNumber === currentWeek.weekNumber
+        ? '<span class="week-current-badge">Minggu saat ini</span>'
+        : '';
       return `
       <details class="week-block" data-week-number="${week.weekNumber}"${isOpen ? ' open' : ''}>
         <summary class="week-header">
-          <span class="week-title">Minggu ${week.weekNumber}</span>
+          <span class="week-title-group">
+            <span class="week-title">Minggu ${week.weekNumber}</span>
+            ${currentWeekBadge}
+          </span>
           <span class="week-phase">${week.phase} • ${formatDate(week.startDate)} – ${formatDate(week.endDate)}</span>
           <span class="week-total">Total: ${week.totalKm} km</span>
           <span class="week-toggle-icon" aria-hidden="true">▾</span>

@@ -542,7 +542,23 @@ input[type="radio"]:focus-visible {
   gap: 8px;
   align-items: center;
 }
+.week-title-group { display: flex; align-items: center; gap: 8px; }
 .week-header .week-title { font-family: var(--font-display); font-weight: 700; letter-spacing: -0.01em; }
+/* Labels whichever week findCurrentWeek (js/app.js) says today falls
+   inside — the same week that starts open by default, but shown even if
+   the runner later collapses it, so it's still obvious at a glance which
+   one that was. */
+.week-current-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-primary-dark);
+  background: var(--color-primary-light);
+  border: 1px solid var(--color-primary);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
 .week-header .week-phase {
   font-size: 0.75rem;
   text-transform: uppercase;
@@ -629,7 +645,7 @@ summary.week-header::-webkit-details-marker { display: none; }
   display: inline-flex;
   align-items: center;
   margin-left: 6px;
-  font-size: 0.85rem;
+  font-size: 1.25rem;
   cursor: default;
 }
 
