@@ -520,8 +520,18 @@ const PaceForgeGenerator = (() => {
     const usesRaceSpecificLongRun = profile === RACE_PROFILES.full || profile === RACE_PROFILES.half;
     const raceSpecificPaceLabel = isFullMarathonPlan ? 'Marathon' : 'Half Marathon';
 
-    const daysUntilRace = Math.round((race - planStartAnchor) / MS_PER_DAY);
-    const weeksAvailable = Math.max(1, Math.floor(daysUntilRace / 7));
+    // Weeks are counted (and later laid out — see firstWeekStart below) as
+    // 7-day blocks that start on the same weekday as planStartAnchor, not
+    // forced to Monday. Both anchors then share that weekday, so the gap
+    // between them is always a whole number of weeks — no fractional
+    // leftover week to round away. Rounding to Monday instead (the
+    // previous behaviour) silently dropped however many leading days sat
+    // between planStartAnchor and the next Monday whenever the runner's
+    // chosen start date wasn't itself a Monday (e.g. starting Wednesday
+    // lost up to 5 days off the front of week 1, with no explanation).
+    const startDow = planStartAnchor.getDay();
+    const raceWeekStart = addDays(race, -((race.getDay() - startDow + 7) % 7));
+    const weeksAvailable = Math.max(1, Math.floor((raceWeekStart - planStartAnchor) / MS_PER_DAY / 7) + 1);
 
     let planWeeks = Math.min(weeksAvailable, profile.recWeeks);
     let taperWeeks = Math.min(profile.taperWeeks, Math.max(planWeeks - 1, 0));
@@ -716,9 +726,10 @@ const PaceForgeGenerator = (() => {
     const taperFactors = TAPER_FACTORS[taperWeeks] || [];
 
     // Start date of the detailed plan: walk backwards planWeeks full weeks
-    // from the Monday on/before race date.
-    const raceWeekMonday = addDays(race, -(race.getDay() === 0 ? 6 : race.getDay() - 1));
-    const firstMonday = addDays(raceWeekMonday, -(planWeeks - 1) * 7);
+    // from raceWeekStart (see weeksAvailable above). When the full lead
+    // time is used (planWeeks === weeksAvailable, the common case) this
+    // lands exactly on planStartAnchor itself.
+    const firstWeekStart = addDays(raceWeekStart, -(planWeeks - 1) * 7);
 
     const sortedPreferredDays = [...preferredDays].sort((a, b) => {
       const na = a === 0 ? 7 : a;
@@ -733,7 +744,7 @@ const PaceForgeGenerator = (() => {
     let actualPeakWeeklyKm = 0;
 
     for (let w = 0; w < planWeeks; w++) {
-      const weekMonday = addDays(firstMonday, w * 7);
+      const weekStart = addDays(firstWeekStart, w * 7);
       const isTaperWeek = w >= buildWeeks;
       const isRaceWeek = w === planWeeks - 1;
 
@@ -801,7 +812,7 @@ const PaceForgeGenerator = (() => {
 
       const days = [];
       for (let d = 0; d < 7; d++) {
-        const date = addDays(weekMonday, d);
+        const date = addDays(weekStart, d);
         const dow = date.getDay();
         days.push({ date, dayName: DAY_NAMES[dow], dow, type: 'rest', km: 0 });
       }
@@ -982,8 +993,8 @@ const PaceForgeGenerator = (() => {
 
       weeks.push({
         weekNumber: w + 1,
-        startDate: weekMonday,
-        endDate: addDays(weekMonday, 6),
+        startDate: weekStart,
+        endDate: addDays(weekStart, 6),
         phase,
         totalKm,
         // This week's own interpolated goal pace (see weekPaces.goal above)
@@ -1023,7 +1034,7 @@ const PaceForgeGenerator = (() => {
         recentRaceTimeSec: recentRaceTimeSec || null,
         recentRaceDistanceKm: recentRaceDistanceKm || null,
         predictedRaceTimeSec,
-        planStart: firstMonday,
+        planStart: firstWeekStart,
         weeksAvailable,
       },
       warnings,
