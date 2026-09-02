@@ -87,6 +87,23 @@
     return TYPE_COLORS[ZONE_TYPE_COLOR_KEY[zone]] || TYPE_COLORS.easy;
   }
 
+  // "2 September 2026" style — day + full month name + year, no weekday
+  // (PaceForgeGenerator.formatDate includes a weekday, which reads as
+  // clutter repeated on every "Zona Pace (VDOT ...) per ..." line: the top
+  // card's own generation date, and each week's date below).
+  function formatLongDate(date) {
+    return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+  }
+
+  // This week's own VDOT — derived the same way as the top Zona Pace card
+  // (see renderPaceZones), just from week.weekGoalPaceSec (that week's own
+  // interpolated goal pace, see planGenerator.js) instead of the overall
+  // plan's goalPaceSec — so the figure climbs week to week alongside the
+  // schedule instead of staying fixed at the plan's single snapshot.
+  function weekVdot(meta, week) {
+    return PaceForgeVDOT.vdotFromGoalPace(meta.raceDistanceKm, week.weekGoalPaceSec);
+  }
+
   // Section "5. Target Waktu Finish" is hidden in index.html for now (the
   // pace-target ramp needs it paired with a current-fitness baseline that
   // isn't wired up yet — see the comment there). Gate reading it here on
@@ -838,13 +855,19 @@
     if (REQUIRE_LOGIN) prefillFromStrava();
   });
 
-  // Renders the 5-zone VDOT pace table into #paceLegend. VDOT is derived
-  // from the runner's actual recent-race result when the form has one
-  // (most accurate — a real performance), falling back to the generator's
-  // own goal pace at the target race distance otherwise (see
-  // PaceForgeVDOT.vdotFromGoalPace) so the table always has something to
-  // show. Silently renders nothing if both are somehow unavailable/invalid
-  // rather than showing a broken table.
+  // Renders the 5-zone VDOT pace table into #paceLegend, using the
+  // runner's CURRENT fitness (week 1's VDOT) — the per-week progression
+  // itself (VDOT climbing as training advances, same endpoints
+  // currentFitnessPaceSec -> goalPaceSec that weekPaces interpolates
+  // between in planGenerator.js) is shown per week in the schedule below
+  // instead (see the "Zona Pace (VDOT ...)" line rendered under each
+  // week's header — weekVdot()), so this card doesn't need to try to
+  // encode a start/end range itself. vdot comes from the runner's actual
+  // recent-race result when the form has one (most accurate — a real
+  // performance), falling back to the generator's own current-fitness pace
+  // estimate otherwise (see PaceForgeVDOT.vdotFromGoalPace). Silently
+  // renders nothing if that's somehow unavailable/invalid rather than
+  // showing a broken table.
   function renderPaceZones(meta) {
     const { formatDuration } = PaceForgeGenerator;
     const { vdotFromPerformance, vdotFromGoalPace, paceZonesFromVDOT, formatPaceRange, ZONE_ORDER, ZONE_LABELS, ZONE_PCT_RANGES } = PaceForgeVDOT;
@@ -855,17 +878,18 @@
       vdot = vdotFromPerformance(meta.recentRaceDistanceKm, meta.recentRaceTimeSec);
       sourceLabel = `dari waktu race terakhirmu (${formatDuration(meta.recentRaceTimeSec)} / ${meta.recentRaceDistanceKm} km)`;
     } else {
-      vdot = vdotFromGoalPace(meta.raceDistanceKm, meta.goalPaceSec);
+      vdot = vdotFromGoalPace(meta.raceDistanceKm, meta.currentFitnessPaceSec);
       sourceLabel = 'dari estimasi goal pace (belum ada data race terakhir)';
     }
-
     const zones = vdot ? paceZonesFromVDOT(vdot) : null;
     if (!zones) { paceLegend.innerHTML = ''; return; }
+
+    const generatedDate = formatLongDate(new Date());
 
     paceLegend.innerHTML = `
       <div class="pace-zone-header">
         <span class="pace-zone-title">🎯 Zona Pace (VDOT ${vdot.toFixed(1)})</span>
-        <span class="pace-zone-source">${sourceLabel}</span>
+        <span class="pace-zone-source">${sourceLabel} • per ${generatedDate}</span>
       </div>
       <div class="table-scroll">
         <table class="pace-zone-table">
@@ -873,20 +897,20 @@
           <tbody>
             ${ZONE_ORDER.map(key => {
               const [lo, hi] = ZONE_PCT_RANGES[key];
-              const { fastSec, slowSec } = zones[key];
               const color = TYPE_COLORS[ZONE_TYPE_COLOR_KEY[key]] || TYPE_COLORS.easy;
+              const paceText = formatPaceRange(zones[key].fastSec, zones[key].slowSec);
               return `
                 <tr>
                   <td><span class="zone-name"><span class="zone-dot" style="background:${color}"></span>${ZONE_LABELS[key]}</span></td>
                   <td>${Math.round(lo * 100)}–${Math.round(hi * 100)}%</td>
-                  <td><strong>${formatPaceRange(fastSec, slowSec)}</strong></td>
+                  <td><strong>${paceText}</strong></td>
                 </tr>
               `;
             }).join('')}
           </tbody>
         </table>
       </div>
-      <p class="pace-zone-note">Dihitung pakai formula VDOT Jack Daniels (metodologi yang sama dipakai kalkulator seperti vdoto2.com) — bukan tebakan level kebugaran generik. Beda dari pace target di jadwal mingguan di bawah, yang naik bertahap tiap minggu menuju goal pace; tabel ini pace zona berdasar kebugaranmu saat ini.</p>
+      <p class="pace-zone-note">Dihitung pakai formula VDOT Jack Daniels (metodologi yang sama dipakai kalkulator seperti vdoto2.com)</p>
     `;
   }
 
@@ -937,13 +961,19 @@
     renderPaceZones(meta);
 
     // Weeks
-    planWeeksEl.innerHTML = weeks.map(week => `
+    planWeeksEl.innerHTML = weeks.map(week => {
+      const vdot = weekVdot(meta, week);
+      const vdotLine = vdot
+        ? `<div class="week-vdot">🎯 Zona Pace (VDOT ${vdot.toFixed(1)}) per ${formatLongDate(week.startDate)}</div>`
+        : '';
+      return `
       <div class="week-block" data-week-number="${week.weekNumber}">
         <div class="week-header">
           <span class="week-title">Minggu ${week.weekNumber}</span>
           <span class="week-phase">${week.phase} • ${formatDate(week.startDate)} – ${formatDate(week.endDate)}</span>
           <span class="week-total">Total: ${week.totalKm} km</span>
         </div>
+        ${vdotLine}
         <div class="table-scroll">
           <table class="day-table">
             <thead>
@@ -955,7 +985,8 @@
           </table>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     resultSection.hidden = false;
     formSection.hidden = true;
@@ -1088,11 +1119,13 @@
           vdot = vdotFromPerformance(meta.recentRaceDistanceKm, meta.recentRaceTimeSec);
           zoneSourceLabel = `dari waktu race terakhir (${PaceForgeGenerator.formatDuration(meta.recentRaceTimeSec)} / ${meta.recentRaceDistanceKm} km)`;
         } else {
-          vdot = vdotFromGoalPace(meta.raceDistanceKm, meta.goalPaceSec);
+          vdot = vdotFromGoalPace(meta.raceDistanceKm, meta.currentFitnessPaceSec);
           zoneSourceLabel = 'dari estimasi goal pace (belum ada data race terakhir)';
         }
         const zones = vdot ? paceZonesFromVDOT(vdot) : null;
         if (zones) {
+          const generatedDate = formatLongDate(new Date());
+
           doc.setFont('helvetica', 'bold');
           doc.setFontSize(11);
           doc.setTextColor(...inkColor);
@@ -1100,7 +1133,7 @@
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(8);
           doc.setTextColor(...mutedColor);
-          doc.text(pdfSafeText(zoneSourceLabel), margin, y + 12);
+          doc.text(pdfSafeText(`${zoneSourceLabel} • per ${generatedDate}`), margin, y + 12);
           y += 18;
 
           // Zone name cells get a left inset (see columnStyles below) so
@@ -1114,8 +1147,8 @@
             head: [['Zona', '% VO2max', 'Pace /km']],
             body: zoneRowOrder.map(key => {
               const [lo, hi] = ZONE_PCT_RANGES[key];
-              const { fastSec, slowSec } = zones[key];
-              return [ZONE_LABELS[key], `${Math.round(lo * 100)}–${Math.round(hi * 100)}%`, formatPaceRange(fastSec, slowSec)];
+              const paceText = formatPaceRange(zones[key].fastSec, zones[key].slowSec);
+              return [ZONE_LABELS[key], `${Math.round(lo * 100)}–${Math.round(hi * 100)}%`, paceText];
             }),
             theme: 'grid',
             styles: { font: 'helvetica', fontSize: 8.3, cellPadding: 5, textColor: inkColor, lineColor: [225, 228, 236], lineWidth: 0.5 },
@@ -1135,7 +1168,7 @@
           doc.setFontSize(7.3);
           doc.setTextColor(...mutedColor);
           const noteLines = doc.splitTextToSize(
-            'Dihitung pakai formula VDOT Jack Daniels (metodologi yang sama dipakai kalkulator seperti vdoto2.com). Beda dari pace target di jadwal mingguan di bawah, yang naik bertahap tiap minggu menuju goal pace.',
+            'Dihitung pakai formula VDOT Jack Daniels (metodologi yang sama dipakai kalkulator seperti vdoto2.com)',
             usableWidth
           );
           doc.text(noteLines, margin, y);
@@ -1160,7 +1193,18 @@
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...hexToRgb('#6366f1'));
         doc.text(`Total: ${week.totalKm} km`, pageWidth - margin, y, { align: 'right' });
-        y += 8;
+        y += 14;
+
+        // Same per-week "Zona Pace (VDOT ...)" line as the on-screen
+        // result (see weekVdot()) — the VDOT figure climbing week to week.
+        const vdot = weekVdot(meta, week);
+        if (vdot) {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(7.6);
+          doc.setTextColor(...mutedColor);
+          doc.text(pdfSafeText(`Zona Pace (VDOT ${vdot.toFixed(1)}) per ${formatLongDate(week.startDate)}`), margin, y);
+          y += 12;
+        }
 
         const rowMeta = [];
         const body = [];

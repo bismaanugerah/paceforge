@@ -536,6 +536,11 @@ input[type="radio"]:focus-visible {
   font-variant-numeric: tabular-nums;
   color: var(--color-primary-dark);
 }
+.week-vdot {
+  padding: 8px 16px 0;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
 
 /* Lets the table scroll horizontally on its own if it's ever too wide for
    the screen (long labels, very small phones) instead of silently clipping

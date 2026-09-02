@@ -907,6 +907,11 @@ const PaceForgeGenerator = (() => {
         endDate: addDays(weekMonday, 6),
         phase,
         totalKm,
+        // This week's own interpolated goal pace (see weekPaces.goal above)
+        // — exposed per-week so js/app.js can show a "VDOT X.X" figure that
+        // climbs week to week alongside the schedule, instead of only a
+        // single static VDOT snapshot.
+        weekGoalPaceSec: weekPaces.goal,
         days,
       });
     }
@@ -928,6 +933,13 @@ const PaceForgeGenerator = (() => {
         peakWeeklyKm: Math.round(actualPeakWeeklyKm * 10) / 10,
         peakLongRunKm: Math.round(actualPeakLongRunKm * 10) / 10,
         goalPaceSec, paces,
+        // Week-1 (current-fitness) pace, alongside goalPaceSec (peak/race
+        // pace) above — the same two endpoints weekPaces interpolates
+        // between across the build block (see paceProgress). Exposed here
+        // so js/app.js's Zona Pace (VDOT) table can show the same
+        // start -> peak progression the daily "Pace Target" already
+        // reflects, instead of a single static VDOT snapshot.
+        currentFitnessPaceSec,
         goalPaceSource,
         recentRaceTimeSec: recentRaceTimeSec || null,
         recentRaceDistanceKm: recentRaceDistanceKm || null,
