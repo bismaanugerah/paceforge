@@ -40,21 +40,26 @@ const PaceForgeGenerator = (() => {
   // longRunMin/Max above) — so on a high-volume plan the *other* sessions
   // can still land at an unrealistic absolute distance even while staying
   // smaller than the long run (a 17km "tempo run" is not a tempo run for a
-  // 5K plan no matter how big that week's long run is). Scaled per race
-  // distance rather than one flat number for every plan — a support
-  // session that's perfectly normal in a marathon block (real plans, e.g.
-  // Hal Higdon's Intermediate 1 Marathon and Pete Pfitzinger's
-  // "medium-long run", run midweek sessions up to ~15mi/24km at peak) would
-  // be a bizarrely long "easy run" on a 5K plan, where established plans
-  // (e.g. Hal Higdon's Intermediate 5K/10K) top out well under 10km. A
-  // tempo/interval session's actual hard-effort portion is smaller still
-  // once warmup/cooldown are subtracted (see buildTempoStructure/
-  // buildIntervalStructure).
+  // 5K plan no matter how big that week's long run is).
+  //
+  // Sourced from Hal Higdon's Intermediate 1 plans specifically (a
+  // recreational/non-elite tier, unlike e.g. Pete Pfitzinger's 55-70+
+  // mile/week "medium-long run" plans, which run considerably higher) —
+  // the longest non-long-run session in each plan's own peak week, read
+  // directly off its published weekly schedule table:
+  //   5K:    Sat "fast" 5mi  (8km)   at peak long run 7mi  (11.3km)
+  //   10K:   Tue 6mi         (9.7km) at peak long run 8mi  (12.9km)
+  //   Half:  Wed 6mi         (9.7km) at peak long run 12mi (19.3km)
+  //   Full:  Wed 8mi         (12.9km) at peak long run 20mi (32.2km)
+  // All four of these plans run 5 days/week, but this ceiling is applied
+  // as-is regardless of daysPerWeek — see the comment where it's read
+  // (generatePlan, below) for why a day-based scaling factor was tried and
+  // then dropped.
   const RACE_PROFILES = {
-    '5k':   { recWeeks: 8,  taperWeeks: 1, longRunMin: 8,  longRunMax: 12, maxSupportKm: 9 },
+    '5k':   { recWeeks: 8,  taperWeeks: 1, longRunMin: 8,  longRunMax: 12, maxSupportKm: 8 },
     '10k':  { recWeeks: 10, taperWeeks: 1, longRunMin: 12, longRunMax: 16, maxSupportKm: 10 },
-    'half': { recWeeks: 12, taperWeeks: 2, longRunMin: 16, longRunMax: 19, maxSupportKm: 12 },
-    'full': { recWeeks: 16, taperWeeks: 3, longRunMin: 29, longRunMax: 32, maxSupportKm: 24 },
+    'half': { recWeeks: 12, taperWeeks: 2, longRunMin: 16, longRunMax: 19, maxSupportKm: 10 },
+    'full': { recWeeks: 16, taperWeeks: 3, longRunMin: 29, longRunMax: 32, maxSupportKm: 13 },
   };
 
   // Default goal pace (sec/km) by fitness level, used only when the user
@@ -512,22 +517,20 @@ const PaceForgeGenerator = (() => {
     const planStartAnchor = startOfDay(startDate || new Date());
     const race = startOfDay(raceDate);
     const profile = resolveRaceProfile(raceDistanceKm, raceKey);
-    // profile.maxSupportKm on its own assumes a plan spread across enough
-    // days that no single non-long-run session has to carry a big share of
-    // the week — true of the real plans it's sourced from (Pfitzinger's
-    // "medium-long run", Hal Higdon's marathon block), which run 5-6 days a
-    // week. At fewer training days, weeklySplitForDays hands relatively
-    // more of the week to each remaining slot (see its own comment — a
-    // 4-day week's second easy slot alone gets 25%, more than the quality
-    // slot), so the same weekly total concentrates into fewer, bigger
-    // sessions — a 90km/week marathon block run on just 4 days a week can
-    // otherwise still produce a ~24km "easy run" that's realistic in
-    // absolute terms but not in the sparser context it's actually
-    // scheduled into. Scaled down at lower day counts so the ceiling
-    // reflects how much room there actually is to spread that volume
-    // across the week, not just the race distance.
-    const MAX_SUPPORT_KM_DAYS_SCALE = { 3: 0.7, 4: 0.7, 5: 0.85, 6: 1 };
-    const maxSupportKm = profile.maxSupportKm * (MAX_SUPPORT_KM_DAYS_SCALE[daysPerWeek] ?? 1);
+    // profile.maxSupportKm is used as-is regardless of daysPerWeek — no
+    // per-day scaling. That was tried (scaling it down at 3-4 days, up at
+    // 6) to stop a low-day plan's one remaining easy slot from ballooning
+    // on a high-volume week, but it fought the more basic relationship a
+    // flat cap + longRunClampDeltaKm's redistribution (below) already
+    // gets right on its own: for the *same* weekly total, spreading it
+    // across more sessions naturally makes each one smaller, not bigger —
+    // scaling the ceiling *up* at higher day counts was backwards from
+    // that. A flat ceiling this file's day-agnostic proportional split
+    // already respects (each slot's raw share only shrinks as
+    // weeklySplitForDays divides the week's non-long-run budget across
+    // more slots) is what actually prevents the original ballooning
+    // symptom, without needing a day-based multiplier on top of it.
+    const maxSupportKm = profile.maxSupportKm;
     const isFullMarathonPlan = profile === RACE_PROFILES.full;
     // Race-specific long run (MSL, or its half-marathon equivalent): a
     // long run partly held at goal race pace (see
@@ -717,11 +720,34 @@ const PaceForgeGenerator = (() => {
     // clamped to the race-appropriate absolute range.
     const peakLongRunKm = clamp(theoreticalPeakWeeklyKm * longRunShare, profile.longRunMin, profile.longRunMax);
 
+    // theoreticalPeakWeeklyKm * longRunShare (the long run's raw, nominal
+    // slice of the week) almost never survives peakLongRunKm's own
+    // longRunMin/Max clamp untouched — fewer training days give the long
+    // run a bigger nominal share (50% at 3 days/week vs 27% at 6), so the
+    // same currentWeeklyKm input pushes that raw slice PAST longRunMax on
+    // a low-day plan (clamped down — the long run "gives back" the
+    // excess), while at 6 days the smaller 27% share undershoots even
+    // longRunMin (clamped up — the long run "borrows" a deficit just to
+    // reach a sane minimum). Left unaccounted for, both directions warp
+    // the non-long-run sessions relative to one another across day counts
+    // even for the exact same currentWeeklyKm: excess that just vanishes
+    // makes a low-day plan's *total* look artificially small, and an
+    // unaccounted-for deficit makes a high-day plan's total look
+    // artificially big — the opposite of what more training days spread
+    // across should do to any one session. Net-ing this delta across the
+    // non-long-run slots below (proportional to their own weights, still
+    // subject to the same maxSupportKm/95%-of-long-run caps every support
+    // session already respects) keeps the week's total anchored to
+    // theoreticalPeakWeeklyKm regardless of daysPerWeek, without touching
+    // the long run's own number (peakLongRunKm) at all either way.
+    const longRunClampDeltaKm = theoreticalPeakWeeklyKm * longRunShare - peakLongRunKm;
+    const supportWeightSum = baseSlotWeights.reduce((s, w) => s + w, 0) || 1;
+
     // The REAL peak weekly volume this plan will ever schedule: peakLongRunKm
     // (above) plus whatever each support slot (easy/recovery/tempo/interval)
-    // actually caps out at — the same maxSupportKm (already scaled for
-    // daysPerWeek above) and "never >= that week's long run" ceilings the
-    // per-day loop below enforces, evaluated here up front. Ramping
+    // actually caps out at — the same maxSupportKm and "never >= that
+    // week's long run" ceilings the per-day loop below enforces, evaluated
+    // here up front. Ramping
     // week-by-week progress toward THIS (rather than the unbounded
     // theoreticalPeakWeeklyKm) is what makes the plan actually climb
     // gradually across the whole build block and peak only in its final
@@ -731,7 +757,11 @@ const PaceForgeGenerator = (() => {
     // schedule hit its ceiling in, say, week 5 of a 13-week build block and
     // had nowhere further to go for the remaining 8.
     const peakWeeklyKm = peakLongRunKm + baseSlotWeights.reduce(
-      (sum, w) => sum + Math.min(theoreticalPeakWeeklyKm * w, maxSupportKm, peakLongRunKm * 0.95),
+      (sum, w) => sum + Math.max(0, Math.min(
+        theoreticalPeakWeeklyKm * w + longRunClampDeltaKm * (w / supportWeightSum),
+        maxSupportKm,
+        peakLongRunKm * 0.95
+      )),
       0
     );
 
@@ -1094,8 +1124,7 @@ const PaceForgeGenerator = (() => {
         weeksAvailable,
         // Exposed so js/app.js's applyAiAdjustments can clamp an AI-
         // suggested distance tweak to the same ceiling this file itself
-        // enforces (see maxSupportKm above — already scaled for
-        // daysPerWeek) without needing to re-derive it.
+        // enforces (see maxSupportKm above) without needing to re-derive it.
         maxSupportKm,
       },
       warnings,
