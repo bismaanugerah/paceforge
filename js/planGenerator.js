@@ -721,12 +721,23 @@ const PaceForgeGenerator = (() => {
 
     // Safe long-run ramp: don't let the scheduled long run jump up from the
     // runner's actual longest recent run any faster than a sensible weekly
-    // increment (~20%, or 1.5km for very short current long runs, whichever
+    // increment (~10%, or 1.5km for very short current long runs, whichever
     // is bigger). The ramp base only ever grows (tracks the highest long run
     // scheduled so far) so a cutback week doesn't reset the allowance.
+    //
+    // 10%/8% (not the previous 20%/15%) per a large 2023-24 cohort study
+    // (BJSM, 5,205 runners, 18 months, 588k GPS-tracked sessions — see
+    // https://www.researchgate.net/publication/393493797): unlike total
+    // weekly mileage growth (which the same study found NOT predictive of
+    // injury, undermining the old blanket "10% rule" for that metric),
+    // injury risk rose sharply specifically when a single run exceeded
+    // 110% of the runner's longest run in the prior 30 days — a 30% jump
+    // raised injury risk 64%, doubling it more than doubled the risk. The
+    // long run is exactly that "single longest run" growing week to week
+    // in a plan, so it's this ratio the finding actually applies to.
     const longRunStartKm = Math.max(longestRecentRunKm || 0, 2);
     let longRunRampBase = longRunStartKm;
-    const MAX_LONG_RUN_JUMP_RATIO = conservativeMode ? 0.15 : 0.2;
+    const MAX_LONG_RUN_JUMP_RATIO = conservativeMode ? 0.08 : 0.10;
     const MIN_LONG_RUN_JUMP_KM = conservativeMode ? 1 : 1.5;
 
     // Taper factors applied to peakWeeklyKm, last entry = race week.
@@ -1032,7 +1043,7 @@ const PaceForgeGenerator = (() => {
     }
 
     if (rampLimited) {
-      warnings.push(`Long run puncak di jadwal ini (~${Math.round(actualPeakLongRunKm * 10) / 10} km) sengaja ditahan di bawah target ${Math.round(peakLongRunKm)} km, karena lari terjauhmu saat ini baru ${longestRecentRunKm} km — kenaikan jarak long run dinaikkan bertahap per minggu (maks ~20%) supaya aman dari cedera. Kalau waktu persiapanmu masih cukup panjang, ini normal dan long run akan terus naik mendekati race day.`);
+      warnings.push(`Long run puncak di jadwal ini (~${Math.round(actualPeakLongRunKm * 10) / 10} km) sengaja ditahan di bawah target ${Math.round(peakLongRunKm)} km, karena lari terjauhmu saat ini baru ${longestRecentRunKm} km — kenaikan jarak long run dinaikkan bertahap per minggu (maks ~${Math.round(MAX_LONG_RUN_JUMP_RATIO * 100)}%) supaya aman dari cedera. Kalau waktu persiapanmu masih cukup panjang, ini normal dan long run akan terus naik mendekati race day.`);
     }
     if (supportSessionCapped) {
       warnings.push(`Beberapa sesi lari santai/tempo/interval/repetition di jadwal ini dibatasi maksimal ${profile.maxSupportKm} km (repetition: ${MAX_REPETITION_SESSION_KM} km) — dengan volume mingguanmu yang cukup tinggi, porsi proporsionalnya bisa lebih jauh dari itu, tapi sesi selain long run sebaiknya tidak sejauh itu. Total mingguan jadi sedikit lebih rendah dari target sebagai konsekuensinya — lebih aman begitu daripada memaksakan sesi harian yang kepanjangan.`);
