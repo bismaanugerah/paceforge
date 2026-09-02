@@ -262,6 +262,38 @@ const PaceForgeGenerator = (() => {
     return Math.max(1, Math.floor((daysPerWeek - 1) / 2));
   }
 
+  // Below-neutral leg of the goal-pace paceLevelMultiplier curve (see
+  // generatePlan) — piecewise-linear through explicitly hand-picked
+  // points rather than the single straight line the underlying
+  // running-economy research would imply, because that research's own
+  // slope was measured across an elite-only pace range this app's
+  // recreational audience will never occupy: the curve needs to fall off
+  // much faster than that slope in the 6:00-3:00/km range real users are
+  // actually in. Sorted slowest (lowest sec/km factor... actually highest
+  // sec/km) to fastest; flat above the first point and below the last.
+  const PACE_LEVEL_FAST_CURVE = [
+    { sec: 360, factor: 1.0 },  // 6:00/km — neutral point
+    { sec: 300, factor: 0.75 }, // 5:00/km
+    { sec: 270, factor: 0.65 }, // 4:30/km
+    { sec: 240, factor: 0.5 },  // 4:00/km
+    { sec: 180, factor: 0.4 },  // 3:00/km — floor
+  ];
+  function paceLevelFastFactor(paceSecPerKm) {
+    const first = PACE_LEVEL_FAST_CURVE[0];
+    const last = PACE_LEVEL_FAST_CURVE[PACE_LEVEL_FAST_CURVE.length - 1];
+    if (paceSecPerKm >= first.sec) return first.factor;
+    if (paceSecPerKm <= last.sec) return last.factor;
+    for (let i = 0; i < PACE_LEVEL_FAST_CURVE.length - 1; i++) {
+      const a = PACE_LEVEL_FAST_CURVE[i];
+      const b = PACE_LEVEL_FAST_CURVE[i + 1];
+      if (paceSecPerKm <= a.sec && paceSecPerKm >= b.sec) {
+        const t = (a.sec - paceSecPerKm) / (a.sec - b.sec);
+        return a.factor + (b.factor - a.factor) * t;
+      }
+    }
+    return last.factor; // unreachable given the bounds checks above
+  }
+
   // Shared by workoutTemplate's day-assignment (prioritize these onto
   // weekdays — see below) and applyConservativeAdjustment (shift weight
   // off these onto easy/recovery slots).
@@ -662,36 +694,29 @@ const PaceForgeGenerator = (() => {
       const volumeHeadroom = clamp(1 - currentWeeklyKm / VOLUME_GAIN_PLATEAU_KM, 0, 1);
       const volumeGainMultiplier = 1 + volumeHeadroom * 0.25;
       // Runners already at a fast pace have less room left to get faster
-      // for the same training stimulus — running-economy research
-      // ("Extrapolating Metabolic Savings in Running", PMC6378703) found a
-      // 1% economy improvement bought a 4:30:00 marathoner (~6:24/km, 384
-      // sec/km) 1.17% more pace, but only 0.65% for a 2:03:00 marathoner
-      // (~2:55/km, 175 sec/km) — the same effort buys much less speed the
-      // faster you already are.
+      // for the same training stimulus. Above the 6:00/km neutral point
+      // (currentEquivPaceSec slower than that — plenty of room, multiplier
+      // >1), the slope is the one running-economy research measured
+      // ("Extrapolating Metabolic Savings in Running", PMC6378703: a 1%
+      // economy improvement bought a 4:30:00 marathoner, ~6:24/km/384
+      // sec/km, 1.17% more pace vs only 0.65% for a 2:03:00 marathoner,
+      // ~2:55/km/175 sec/km), re-anchored to cross exactly 1.0 at 6:00/km
+      // instead of the study's own ~5:16/km crossing point — capped at
+      // the same 1.17 ceiling that slope reaches by ~7:08/km.
       //
-      // The 175 sec/km anchor itself is near-unreachable for this app's
-      // recreational audience, so extrapolating the multiplier's floor
-      // all the way down to it would spend most of the curve's range on
-      // paces nobody here actually has. The floor is clamped at 4:00/km
-      // (240 sec/km — a strong but realistic fast pace for this app's
-      // users) instead, using the same slope the study measured, just
-      // evaluated there rather than at 175: anyone at or faster than that
-      // gets the same (already fairly reduced) multiplier rather than a
-      // further-shrinking one calibrated for elite-only paces.
-      const PACE_LEVEL_SLOW_ANCHOR_SEC = 384; // 6:24/km — 4:30:00 marathon pace
-      const PACE_LEVEL_SLOW_ANCHOR_FACTOR = 1.17;
-      const PACE_LEVEL_STUDY_FAST_ANCHOR_SEC = 175; // 2:55/km — 2:03:00 marathon pace (the study's own anchor)
-      const PACE_LEVEL_STUDY_FAST_ANCHOR_FACTOR = 0.65;
-      const paceLevelSlope = (PACE_LEVEL_SLOW_ANCHOR_FACTOR - PACE_LEVEL_STUDY_FAST_ANCHOR_FACTOR)
-        / (PACE_LEVEL_SLOW_ANCHOR_SEC - PACE_LEVEL_STUDY_FAST_ANCHOR_SEC);
-      const PACE_LEVEL_PRACTICAL_FLOOR_SEC = 240; // 4:00/km — realistic fast end for this app's audience
-      const paceLevelFloorFactor = PACE_LEVEL_STUDY_FAST_ANCHOR_FACTOR
-        + (PACE_LEVEL_PRACTICAL_FLOOR_SEC - PACE_LEVEL_STUDY_FAST_ANCHOR_SEC) * paceLevelSlope;
-      const paceLevelMultiplier = clamp(
-        PACE_LEVEL_STUDY_FAST_ANCHOR_FACTOR + (currentEquivPaceSec - PACE_LEVEL_STUDY_FAST_ANCHOR_SEC) * paceLevelSlope,
-        paceLevelFloorFactor,
-        PACE_LEVEL_SLOW_ANCHOR_FACTOR
-      );
+      // Below 6:00/km, the falloff is deliberately steeper than that
+      // measured slope would give (see paceLevelFastFactor above) — the
+      // study's own slope was measured across an elite-only range this
+      // app's recreational audience won't occupy, and within the
+      // 6:00-3:00/km range real users actually span, the harder-to-improve
+      // effect is judged to bite sooner and harder than a straight
+      // extrapolation of that slope would show.
+      const PACE_LEVEL_NEUTRAL_SEC = 360; // 6:00/km
+      const PACE_LEVEL_SLOW_SLOPE = (1.17 - 0.65) / (384 - 175); // per sec/km, from the study
+      const PACE_LEVEL_CEILING_FACTOR = 1.17;
+      const paceLevelMultiplier = currentEquivPaceSec >= PACE_LEVEL_NEUTRAL_SEC
+        ? Math.min(PACE_LEVEL_CEILING_FACTOR, 1 + (currentEquivPaceSec - PACE_LEVEL_NEUTRAL_SEC) * PACE_LEVEL_SLOW_SLOPE)
+        : paceLevelFastFactor(currentEquivPaceSec);
       const gainFraction = CONSERVATIVE_FITNESS_GAIN_PCT[fitnessLevel]
         * clamp(buildWeeks / profile.recWeeks, 0, 1)
         * (conservativeMode ? 0.5 : 1)
