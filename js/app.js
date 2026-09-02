@@ -37,13 +37,11 @@
     rest: '#8b93a3',
     race: '#6366f1',
   };
-  const EXERTION_HEX = { low: '#74b358', moderate: '#e0b93a', high: '#de5b4c' };
-
   // Maps each VDOT pace zone (js/vdot.js's ZONE_ORDER) onto the closest
-  // matching session type, so the Zona Pace table's row dots reuse the same
+  // matching session type, so the Zona Pace table's row dots — and, below,
+  // the workout-structure bars and Pace Target column — all reuse the same
   // colors already meaning that intensity everywhere else in the plan
-  // (session-type badges, PDF) instead of introducing a separate palette
-  // just for this table.
+  // (session-type badges, PDF) instead of introducing a separate palette.
   const ZONE_TYPE_COLOR_KEY = {
     easy: 'easy',
     marathon: 'longRun',
@@ -51,6 +49,43 @@
     interval: 'interval',
     repetition: 'repetition',
   };
+
+  // Reverse of the above: which VDOT zone a given session TYPE trains at.
+  // Drives the workout-structure bar's colors (a session's "hard" segments
+  // are colored by its own zone, its warm up/recovery/cool down segments by
+  // the Easy zone — see zoneColorFor/structureToSegments below) and the
+  // Pace Target column (names the zone instead of a specific week's pace
+  // number, which ramps week to week and is less useful to internalize
+  // than "this is an Interval day"). A marathon-specific long run (MSL)
+  // overrides 'longRun' -> 'marathon' per-day — see zoneForDay.
+  const TYPE_TO_ZONE = {
+    recovery: 'easy',
+    easy: 'easy',
+    shakeout: 'easy',
+    longRun: 'easy',
+    tempo: 'threshold',
+    interval: 'interval',
+    repetition: 'repetition',
+  };
+
+  // Short zone labels for the Pace Target column / bar tooltips — the same
+  // 5 zones as PaceForgeVDOT.ZONE_LABELS but without that table's
+  // parenthetical explainer ("(Santai)"/"(Tempo)"), which would just repeat
+  // on every single row here instead of appearing once.
+  const ZONE_SHORT_LABEL = { easy: 'Easy', marathon: 'Marathon', threshold: 'Tempo', interval: 'Interval', repetition: 'Repetition' };
+
+  function zoneForDay(day) {
+    if (day.type === 'longRun' && day.isMarathonSpecific) return 'marathon';
+    return TYPE_TO_ZONE[day.type] || null;
+  }
+
+  function zoneColorHex(zone) {
+    return TYPE_HEX[ZONE_TYPE_COLOR_KEY[zone]] || TYPE_HEX.easy;
+  }
+
+  function zoneColorCss(zone) {
+    return TYPE_COLORS[ZONE_TYPE_COLOR_KEY[zone]] || TYPE_COLORS.easy;
+  }
 
   // Section "5. Target Waktu Finish" is hidden in index.html for now (the
   // pace-target ramp needs it paired with a current-fitness baseline that
@@ -1134,14 +1169,16 @@
             ? `${TYPE_LABELS.longRun} (Pace Marathon)`
             : (TYPE_LABELS[day.type] || day.type));
           const km = day.km ? `${day.km} km` : '—';
-          const showPace = PACE_TARGET_TYPES.has(day.type) || (day.type === 'longRun' && day.isMarathonSpecific);
-          const pace = (showPace && day.paceSecPerKm) ? formatPace(day.paceSecPerKm) : '—';
+          // Same zone-name logic as renderDayRow (see there for why) so the
+          // PDF's Pace Target column matches the on-screen result exactly.
+          const zone = zoneForDay(day);
+          const pace = day.type === 'race' ? 'Race Pace' : (zone ? ZONE_SHORT_LABEL[zone] : '—');
           body.push([day.dayName, day.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }), label, km, pace]);
           rowMeta.push({ kind: 'day', type: day.type });
           if (day.structure) {
             const { segments, caption } = structureToSegments(day.structure);
             body.push([{ content: '', colSpan: 5, styles: { minCellHeight: 30, fillColor: [255, 255, 255] } }]);
-            rowMeta.push({ kind: 'structure', segments, caption });
+            rowMeta.push({ kind: 'structure', segments, caption, zone });
           }
         });
 
@@ -1173,7 +1210,7 @@
             if (data.section !== 'body') return;
             const rowInfo = rowMeta[data.row.index];
             if (!rowInfo || rowInfo.kind !== 'structure') return;
-            drawStructureBar(doc, data.cell, rowInfo.segments, rowInfo.caption, mutedColor);
+            drawStructureBar(doc, data.cell, rowInfo.segments, rowInfo.caption, rowInfo.zone, mutedColor);
           },
         });
 
@@ -1202,8 +1239,11 @@
 
   // Draws the warm up / work / recovery / cool down bar for one structured
   // workout directly inside its autoTable cell, proportional to distance —
-  // the PDF equivalent of renderWorkoutStructure()'s HTML bar.
-  function drawStructureBar(doc, cell, segments, caption, mutedColor) {
+  // the PDF equivalent of renderWorkoutStructure()'s HTML bar. Colored by
+  // `zone` (this day's VDOT zone, see zoneForDay) the same way: 'work'
+  // segments in the zone's own color, 'easy' segments (warm up/recovery/
+  // cool down) in the Easy zone's color.
+  function drawStructureBar(doc, cell, segments, caption, zone, mutedColor) {
     const padX = 6;
     const barX = cell.x + padX;
     const barY = cell.y + 6;
@@ -1215,7 +1255,7 @@
     let x = barX;
     segments.forEach((seg, i) => {
       const w = Math.max((Math.max(seg.km, 0.05) / total) * (barWidth - gap * (n - 1)), 1.5);
-      doc.setFillColor(...hexToRgb(EXERTION_HEX[seg.exertion] || EXERTION_HEX.low));
+      doc.setFillColor(...hexToRgb(seg.role === 'work' ? zoneColorHex(zone) : zoneColorHex('easy')));
       doc.roundedRect(x, barY, w, barHeight, 1.5, 1.5, 'F');
       x += w + gap;
     });
@@ -1378,16 +1418,8 @@
     }
   }
 
-  // Pace targets are only meaningful for effort levels a runner actually
-  // paces to: tempo, interval sets, race day, and — for full-marathon plans
-  // — the marathon-specific long run (goal-pace long run during the Peak
-  // phase). Every other "easy effort" session (easy/recovery/shakeout/a
-  // regular long run) is run by feel, not by the watch, so no pace target
-  // is shown for those.
-  const PACE_TARGET_TYPES = new Set(['tempo', 'interval', 'repetition', 'race']);
-
   function renderDayRow(day) {
-    const { formatPace, formatDate, TYPE_LABELS } = PaceForgeGenerator;
+    const { formatDate, TYPE_LABELS } = PaceForgeGenerator;
     const isRest = day.type === 'rest';
     const isRace = day.type === 'race';
     const rowClass = isRest ? 'is-rest' : (isRace ? 'is-race' : '');
@@ -1395,11 +1427,18 @@
       ? `${TYPE_LABELS.longRun} (Pace Marathon)`
       : (TYPE_LABELS[day.type] || day.type);
     const km = day.km ? `${day.km} km` : '—';
-    const showPace = PACE_TARGET_TYPES.has(day.type) || (day.type === 'longRun' && day.isMarathonSpecific);
-    const pace = (showPace && day.paceSecPerKm) ? formatPace(day.paceSecPerKm) : '—';
+    // Pace Target names the VDOT zone this session trains at (Easy, Tempo,
+    // Interval, Repetition, Marathon) instead of that week's specific pace
+    // number — the number ramps week to week (see planGenerator.js's
+    // weekPaces) and changes for every plan anyway, while the zone itself
+    // is the stable, memorable thing to internalize ("today is an Interval
+    // day"). Race day gets its own label since goal race pace doesn't
+    // cleanly belong to one of the 5 training zones.
+    const zone = zoneForDay(day);
+    const pace = isRace ? 'Race Pace' : (zone ? ZONE_SHORT_LABEL[zone] : '—');
     const color = TYPE_COLORS[day.type] || 'var(--type-rest)';
     const structureRow = day.structure
-      ? `<tr class="structure-row ${rowClass}"><td colspan="5">${renderWorkoutStructure(day.structure)}</td></tr>`
+      ? `<tr class="structure-row ${rowClass}"><td colspan="5">${renderWorkoutStructure(day.structure, zone)}</td></tr>`
       : '';
     return `
       <tr class="${rowClass}">
@@ -1416,48 +1455,58 @@
   // Renders the warm up / work / recovery / cool down breakdown for a
   // workout as a proportional segmented bar, sized by DISTANCE (km) so it
   // lines up with the "Jarak" column — visual shorthand for "what does this
-  // session actually feel like", similar to the low/moderate/max-exertion
-  // interval charts runners are used to seeing. A plain continuous run
-  // (easy/recovery/long run/shakeout) renders as a single solid low-exertion
-  // block; interval/tempo sessions break down into their segments.
+  // session actually feel like". Colored by VDOT zone (see zoneColorFor
+  // below), not a separate low/moderate/high effort scale: a session's
+  // "hard" segments (reps, tempo block) are colored by its own zone
+  // (Tempo/Interval/Repetition), its warm up/recovery/cool down segments by
+  // the Easy zone — matching the Zona Pace table's colors and the Pace
+  // Target column's zone name, one consistent color language throughout.
+  // A plain continuous run (easy/recovery/long run/shakeout) renders as a
+  // single solid block in its own zone's color; interval/tempo sessions
+  // break down into their segments.
   function formatKm(km) {
     return km < 1 ? `${Math.round(km * 1000)} m` : `${Math.round(km * 10) / 10} km`;
   }
 
   // Turns a day.structure object into plain { segments, caption } data —
   // shared by the HTML bar (renderWorkoutStructure, below) and the PDF bar
-  // (drawStructureBar) so the two never drift apart.
+  // (drawStructureBar) so the two never drift apart. Each segment carries a
+  // `role` ('work' or 'easy') rather than a literal color, since the two
+  // renderers need different color formats (CSS var vs. hex for jsPDF) —
+  // each resolves role -> color itself, using the day's own zone (see
+  // zoneForDay) for 'work' segments and the Easy zone for 'easy' ones.
   function structureToSegments(structure) {
     let segments;
     let caption = '';
     if (structure.kind === 'interval') {
-      segments = [{ label: 'Warm Up', km: structure.warmupKm, exertion: 'low' }];
+      segments = [{ label: 'Warm Up', km: structure.warmupKm, role: 'easy' }];
       for (let i = 0; i < structure.reps; i++) {
-        segments.push({ label: `Set ${i + 1}`, km: structure.workKm, exertion: structure.workExertion });
-        segments.push({ label: 'Recovery', km: structure.recoveryKm, exertion: 'low' });
+        segments.push({ label: `Set ${i + 1}`, km: structure.workKm, role: 'work' });
+        segments.push({ label: 'Recovery', km: structure.recoveryKm, role: 'easy' });
       }
-      segments.push({ label: 'Cool Down', km: structure.cooldownKm, exertion: 'low' });
+      segments.push({ label: 'Cool Down', km: structure.cooldownKm, role: 'easy' });
       caption = `Warm up ${formatKm(structure.warmupKm)} → ${structure.reps}× (${formatKm(structure.workKm)} keras + ${formatKm(structure.recoveryKm)} pemulihan) → Cool down ${formatKm(structure.cooldownKm)}`;
     } else if (structure.kind === 'tempo') {
       segments = [
-        { label: 'Warm Up', km: structure.warmupKm, exertion: 'low' },
-        { label: 'Tempo', km: structure.tempoKm, exertion: 'moderate' },
-        { label: 'Cool Down', km: structure.cooldownKm, exertion: 'low' },
+        { label: 'Warm Up', km: structure.warmupKm, role: 'easy' },
+        { label: 'Tempo', km: structure.tempoKm, role: 'work' },
+        { label: 'Cool Down', km: structure.cooldownKm, role: 'easy' },
       ];
       caption = `Warm up ${formatKm(structure.warmupKm)} → Tempo ${formatKm(structure.tempoKm)} → Cool down ${formatKm(structure.cooldownKm)}`;
     } else {
       // 'simple' — a single continuous block, no warm up/cool down split.
-      segments = [{ label: 'Lari', km: structure.km, exertion: structure.exertion }];
+      segments = [{ label: 'Lari', km: structure.km, role: 'work' }];
     }
     return { segments, caption };
   }
 
-  function renderWorkoutStructure(structure) {
+  function renderWorkoutStructure(structure, zone) {
     const { segments, caption } = structureToSegments(structure);
 
-    const bar = segments.map(seg => `
-      <span class="structure-seg exertion-${seg.exertion}" style="flex-grow:${Math.max(seg.km, 0.05).toFixed(2)}" title="${seg.label} • ${formatKm(seg.km)}"></span>
-    `).join('');
+    const bar = segments.map(seg => {
+      const color = seg.role === 'work' ? zoneColorCss(zone) : zoneColorCss('easy');
+      return `<span class="structure-seg" style="flex-grow:${Math.max(seg.km, 0.05).toFixed(2)};background:${color}" title="${seg.label} • ${formatKm(seg.km)}"></span>`;
+    }).join('');
 
     return `
       <div class="workout-structure">

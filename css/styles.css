@@ -21,10 +21,6 @@
   --type-rest: #8b93a3;
   --type-race: var(--color-primary);
 
-  --exertion-low: #74b358;
-  --exertion-moderate: #e0b93a;
-  --exertion-high: #de5b4c;
-
   --radius: 12px;
   --shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
   --font-body: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -592,10 +588,7 @@ input[type="radio"]:focus-visible {
   gap: 2px;
   background: var(--color-border);
 }
-.structure-seg { flex: 0 0 auto; min-width: 3px; }
-.structure-seg.exertion-low { background: var(--exertion-low); }
-.structure-seg.exertion-moderate { background: var(--exertion-moderate); }
-.structure-seg.exertion-high { background: var(--exertion-high); }
+.structure-seg { flex: 0 0 auto; min-width: 3px; } /* color set inline per segment — see renderWorkoutStructure in js/app.js */
 .structure-caption {
   font-size: 0.78rem;
   color: var(--color-text-muted);
