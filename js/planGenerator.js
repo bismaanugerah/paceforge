@@ -661,11 +661,43 @@ const PaceForgeGenerator = (() => {
       const VOLUME_GAIN_PLATEAU_KM = 60;
       const volumeHeadroom = clamp(1 - currentWeeklyKm / VOLUME_GAIN_PLATEAU_KM, 0, 1);
       const volumeGainMultiplier = 1 + volumeHeadroom * 0.25;
+      // Runners already at a fast pace have less room left to get faster
+      // for the same training stimulus — running-economy research
+      // ("Extrapolating Metabolic Savings in Running", PMC6378703) found a
+      // 1% economy improvement bought a 4:30:00 marathoner (~6:24/km, 384
+      // sec/km) 1.17% more pace, but only 0.65% for a 2:03:00 marathoner
+      // (~2:55/km, 175 sec/km) — the same effort buys much less speed the
+      // faster you already are.
+      //
+      // The 175 sec/km anchor itself is near-unreachable for this app's
+      // recreational audience, so extrapolating the multiplier's floor
+      // all the way down to it would spend most of the curve's range on
+      // paces nobody here actually has. The floor is clamped at 4:00/km
+      // (240 sec/km — a strong but realistic fast pace for this app's
+      // users) instead, using the same slope the study measured, just
+      // evaluated there rather than at 175: anyone at or faster than that
+      // gets the same (already fairly reduced) multiplier rather than a
+      // further-shrinking one calibrated for elite-only paces.
+      const PACE_LEVEL_SLOW_ANCHOR_SEC = 384; // 6:24/km — 4:30:00 marathon pace
+      const PACE_LEVEL_SLOW_ANCHOR_FACTOR = 1.17;
+      const PACE_LEVEL_STUDY_FAST_ANCHOR_SEC = 175; // 2:55/km — 2:03:00 marathon pace (the study's own anchor)
+      const PACE_LEVEL_STUDY_FAST_ANCHOR_FACTOR = 0.65;
+      const paceLevelSlope = (PACE_LEVEL_SLOW_ANCHOR_FACTOR - PACE_LEVEL_STUDY_FAST_ANCHOR_FACTOR)
+        / (PACE_LEVEL_SLOW_ANCHOR_SEC - PACE_LEVEL_STUDY_FAST_ANCHOR_SEC);
+      const PACE_LEVEL_PRACTICAL_FLOOR_SEC = 240; // 4:00/km — realistic fast end for this app's audience
+      const paceLevelFloorFactor = PACE_LEVEL_STUDY_FAST_ANCHOR_FACTOR
+        + (PACE_LEVEL_PRACTICAL_FLOOR_SEC - PACE_LEVEL_STUDY_FAST_ANCHOR_SEC) * paceLevelSlope;
+      const paceLevelMultiplier = clamp(
+        PACE_LEVEL_STUDY_FAST_ANCHOR_FACTOR + (currentEquivPaceSec - PACE_LEVEL_STUDY_FAST_ANCHOR_SEC) * paceLevelSlope,
+        paceLevelFloorFactor,
+        PACE_LEVEL_SLOW_ANCHOR_FACTOR
+      );
       const gainFraction = CONSERVATIVE_FITNESS_GAIN_PCT[fitnessLevel]
         * clamp(buildWeeks / profile.recWeeks, 0, 1)
         * (conservativeMode ? 0.5 : 1)
         * qualityGainMultiplier
-        * volumeGainMultiplier;
+        * volumeGainMultiplier
+        * paceLevelMultiplier;
       goalPaceSec = currentEquivPaceSec * (1 - gainFraction);
       goalPaceSource = 'recentRace';
     } else {
