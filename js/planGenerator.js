@@ -211,6 +211,19 @@ const PaceForgeGenerator = (() => {
     return 'Peak';
   }
 
+  // The Peak phase's own start (same boundary buildPhaseForWeek computes
+  // internally) — exposed so generatePlan can figure out a given Peak
+  // week's position *within* Peak (1st Peak week, 2nd, ...) without
+  // re-deriving the boundary inline. Used to progressively ramp the
+  // race-pace share of a race-specific long run across the Peak phase —
+  // see MSL_PACE_FRACTION_START/END below.
+  function peakPhaseStartWeek(buildWeeks) {
+    if (buildWeeks <= 1) return 0;
+    if (buildWeeks === 2) return 1;
+    const baseEnd = Math.max(1, Math.round(buildWeeks / 3));
+    return Math.max(baseEnd + 1, Math.round(buildWeeks * 2 / 3));
+  }
+
   // How many "quality" (tempo/interval/repetition — see QUALITY_TYPES)
   // sessions to schedule per week, by
   // total running days/week — researched against real coaching guidance
@@ -437,6 +450,28 @@ const PaceForgeGenerator = (() => {
     });
   }
 
+  // Race-specific long run (MSL for a full marathon, the same idea at
+  // half-marathon goal pace for a half plan — see usesRaceSpecificLongRun
+  // in generatePlan): an easy-pace buildup FIRST, then a goal-race-pace
+  // segment to FINISH — not the whole run at race pace. Mirrors how real
+  // marathon plans structure this (e.g. Pete Pfitzinger's "Advanced
+  // Marathoning": long runs like "16km with the last 10km at marathon
+  // pace", the MP-mileage share growing across the build — his plans
+  // range roughly 25-45% of the run at MP early in this block, up to
+  // ~60% in the final one or two MSL sessions before taper). Race pace at
+  // the END (not the start or middle) is deliberate: it's meant to
+  // rehearse holding goal pace on already-tired legs, the same demand as
+  // the race's own closing kilometers — the whole reason to do this
+  // session instead of just another easy long run.
+  const MSL_PACE_FRACTION_START = 0.30; // share of the long run at race pace, this block's 1st Peak week
+  const MSL_PACE_FRACTION_END = 0.55;   // ...growing to this share by the last Peak week (pre-taper)
+
+  function buildRaceSpecificLongRunStructure(sessionKm, paceFraction, paceLabel) {
+    const paceKm = Math.round(sessionKm * paceFraction * 2) / 2;
+    const easyKm = Math.max(Math.round((sessionKm - paceKm) * 2) / 2, 0);
+    return { kind: 'racePace', easyKm, paceKm, paceLabel };
+  }
+
   // Absolute ceiling for a repetition session specifically — tighter than
   // MAX_SUPPORT_SESSION_KM (which still applies to every other non-long-run
   // session type, tempo/interval included): real repetition workouts are
@@ -471,11 +506,19 @@ const PaceForgeGenerator = (() => {
     const planStartAnchor = startOfDay(startDate || new Date());
     const race = startOfDay(raceDate);
     const profile = resolveRaceProfile(raceDistanceKm, raceKey);
-    // Marathon-specific long run (MSL): a long run carrying goal marathon
-    // pace, only meaningful for full-marathon plans, and only scheduled
-    // during the Peak phase — the block of build weeks with the highest
-    // long-run distances, right before taper (see buildPhaseForWeek).
     const isFullMarathonPlan = profile === RACE_PROFILES.full;
+    // Race-specific long run (MSL, or its half-marathon equivalent): a
+    // long run partly held at goal race pace (see
+    // buildRaceSpecificLongRunStructure above) — only meaningful when the
+    // race distance itself is close enough to typical long-run distances
+    // for race-pace practice within one to make sense (marathon and half
+    // marathon; a 5K/10K's long run is far longer than the race itself,
+    // so there's no equivalent "race-pace long run" concept for those),
+    // and only scheduled during the Peak phase — the block of build weeks
+    // with the highest long-run distances, right before taper (see
+    // buildPhaseForWeek).
+    const usesRaceSpecificLongRun = profile === RACE_PROFILES.full || profile === RACE_PROFILES.half;
+    const raceSpecificPaceLabel = isFullMarathonPlan ? 'Marathon' : 'Half Marathon';
 
     const daysUntilRace = Math.round((race - planStartAnchor) / MS_PER_DAY);
     const weeksAvailable = Math.max(1, Math.floor(daysUntilRace / 7));
@@ -483,6 +526,15 @@ const PaceForgeGenerator = (() => {
     let planWeeks = Math.min(weeksAvailable, profile.recWeeks);
     let taperWeeks = Math.min(profile.taperWeeks, Math.max(planWeeks - 1, 0));
     let buildWeeks = Math.max(planWeeks - taperWeeks, 1);
+
+    // Where the Peak phase starts within the build block, and how many
+    // Peak weeks it spans — used below to progressively ramp the
+    // race-pace share of each race-specific long run (MSL_PACE_FRACTION_
+    // START/END) across those weeks, rather than jumping straight to one
+    // fixed fraction. Computed once here since it only depends on
+    // buildWeeks, not on any individual week.
+    const peakStartWeek = peakPhaseStartWeek(buildWeeks);
+    const peakWeeksTotal = Math.max(1, buildWeeks - peakStartWeek);
 
     // Same safe compounding weekly rate used for the race-specific block's
     // own volume ramp below (peakWeeklyKm) — reused here for the pre-block
@@ -839,12 +891,24 @@ const PaceForgeGenerator = (() => {
           return;
         }
         if (type === 'longRun') {
-          const isMSL = isFullMarathonPlan && phase === 'Peak';
+          const isMSL = usesRaceSpecificLongRun && phase === 'Peak';
           dayObj.type = 'longRun';
           dayObj.km = Math.round(longRunKmThisWeek * 2) / 2;
           dayObj.paceSecPerKm = isMSL ? weekPaces.goal : weekPaces.longRun;
           dayObj.isMarathonSpecific = isMSL;
-          if (dayObj.km > 0) dayObj.structure = buildSimpleStructure(dayObj.km);
+          if (dayObj.km > 0) {
+            if (isMSL) {
+              // Race-pace share ramps from MSL_PACE_FRACTION_START (this
+              // block's 1st Peak week) to _END (its last, right before
+              // taper) — see buildRaceSpecificLongRunStructure above.
+              const peakWeekIndex = clamp(w - peakStartWeek, 0, peakWeeksTotal - 1);
+              const paceFraction = MSL_PACE_FRACTION_START
+                + (MSL_PACE_FRACTION_END - MSL_PACE_FRACTION_START) * (peakWeekIndex / Math.max(peakWeeksTotal - 1, 1));
+              dayObj.structure = buildRaceSpecificLongRunStructure(dayObj.km, paceFraction, raceSpecificPaceLabel);
+            } else {
+              dayObj.structure = buildSimpleStructure(dayObj.km);
+            }
+          }
           return;
         }
         if (type === 'shakeout') {

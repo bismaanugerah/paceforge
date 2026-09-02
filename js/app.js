@@ -1231,7 +1231,7 @@
         const body = [];
         week.days.forEach(day => {
           const label = pdfSafeText((day.type === 'longRun' && day.isMarathonSpecific)
-            ? `${TYPE_LABELS.longRun} (Pace Marathon)`
+            ? `${TYPE_LABELS.longRun} (Pace ${day.structure?.paceLabel || 'Marathon'})`
             : (TYPE_LABELS[day.type] || day.type));
           const km = day.km ? `${day.km} km` : '—';
           // Same zone-name logic as renderDayRow (see there for why) so the
@@ -1489,7 +1489,7 @@
     const isRace = day.type === 'race';
     const rowClass = isRest ? 'is-rest' : (isRace ? 'is-race' : '');
     const label = (day.type === 'longRun' && day.isMarathonSpecific)
-      ? `${TYPE_LABELS.longRun} (Pace Marathon)`
+      ? `${TYPE_LABELS.longRun} (Pace ${day.structure?.paceLabel || 'Marathon'})`
       : (TYPE_LABELS[day.type] || day.type);
     const km = day.km ? `${day.km} km` : '—';
     // Pace Target names the VDOT zone this session trains at (Easy, Tempo,
@@ -1568,6 +1568,16 @@
         { label: 'Cool Down', km: structure.cooldownKm, role: 'easy' },
       ];
       caption = `Warm up ${formatKm(structure.warmupKm)} → Tempo ${formatKm(structure.tempoKm)} → Cool down ${formatKm(structure.cooldownKm)}`;
+    } else if (structure.kind === 'racePace') {
+      // Race-specific long run (MSL / its half-marathon equivalent) — easy
+      // buildup FIRST, race pace to FINISH, see
+      // buildRaceSpecificLongRunStructure in planGenerator.js for why that
+      // order specifically.
+      segments = [
+        { label: 'Santai', km: structure.easyKm, role: 'easy' },
+        { label: `Pace ${structure.paceLabel}`, km: structure.paceKm, role: 'work' },
+      ];
+      caption = `${formatKm(structure.easyKm)} santai → ${formatKm(structure.paceKm)} pace ${structure.paceLabel}`;
     } else {
       // 'simple' — a single continuous block, no warm up/cool down split.
       segments = [{ label: 'Lari', km: structure.km, role: 'work' }];
