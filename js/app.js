@@ -900,6 +900,15 @@
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    const { formatPace, formatDuration } = PaceForgeGenerator;
+    // The overall average pace of an interval/repetition activity is
+    // dragged slow by its jogged recovery segments — comparing it against
+    // day.paceSecPerKm (the fast, work-segment target pace for that zone)
+    // would read as "way slower than target" even on a well-executed
+    // session, so those two types skip the vs.-target comparison below and
+    // just report the plain average instead.
+    const NON_COMPARABLE_PACE_TYPES = new Set(['interval', 'repetition']);
+
     plan.weeks.forEach(week => {
       week.days.forEach(day => {
         if (day.type === 'rest' || !day.km) return;
@@ -924,6 +933,40 @@
         const slot = row.querySelector('.completed-slot');
         if (slot) {
           slot.innerHTML = `<span class="completed-badge" title="Selesai — tercatat ${best.km} km di Strava">✅</span>`;
+        }
+
+        // Richer per-session analysis — actual distance/pace/duration from
+        // the matched Strava activity, plus how that pace compares to what
+        // this session was targeting — rendered into the placeholder row
+        // renderDayRow already left right below this one (see analysisRow
+        // there) rather than just leaving the ✅ badge to speak for itself.
+        const analysisRow = planWeeksEl.querySelector(`tr.completed-analysis-row[data-analysis-date="${key}"]`);
+        // The structure bar (interval/tempo breakdown), when present, is its
+        // own sibling <tr> between the day row and the analysis row above —
+        // tag it too so the whole session block (not just the day row
+        // itself) picks up the completed styling, instead of the tint
+        // stopping right at the structure bar underneath it.
+        const structureRow = row.nextElementSibling?.classList.contains('structure-row') ? row.nextElementSibling : null;
+        if (structureRow) structureRow.classList.add('is-completed');
+        if (analysisRow) analysisRow.classList.add('is-completed');
+        const analysisEl = analysisRow?.querySelector('.completed-analysis');
+        if (analysisEl && best.km > 0 && best.movingTimeSec > 0) {
+          const actualPaceSecPerKm = best.movingTimeSec / best.km;
+          const kmDiff = Math.round((best.km - day.km) * 100) / 100;
+          const kmDiffLabel = kmDiff === 0 ? '' : ` (${kmDiff > 0 ? '+' : ''}${kmDiff} km dari rencana)`;
+
+          let paceLabel = `Pace rata-rata ${formatPace(actualPaceSecPerKm)}`;
+          if (NON_COMPARABLE_PACE_TYPES.has(day.type)) {
+            paceLabel += ' (termasuk jeda recovery, bukan pace repetisinya sendiri)';
+          } else if (day.paceSecPerKm) {
+            const paceDiffSec = Math.round(actualPaceSecPerKm - day.paceSecPerKm);
+            paceLabel += Math.abs(paceDiffSec) < 3
+              ? ' — pas di target'
+              : ` (target ${formatPace(day.paceSecPerKm)}, ${Math.abs(paceDiffSec)} detik/km ${paceDiffSec < 0 ? 'lebih cepat' : 'lebih lambat'})`;
+          }
+
+          analysisEl.innerHTML = `📊 ${best.km} km${kmDiffLabel} &middot; ${paceLabel} &middot; ${formatDuration(best.movingTimeSec)}`;
+          analysisRow.hidden = false;
         }
       });
     });
@@ -1632,6 +1675,12 @@
     const structureRow = day.structure
       ? `<tr class="structure-row ${rowClass}"><td colspan="5">${renderWorkoutStructure(day.structure, zone)}</td></tr>`
       : '';
+    // Populated (and unhidden) after the fact by markCompletedSessionsFromStrava
+    // once it finds a matching Strava activity for this date — see there for
+    // what actually goes in .completed-analysis. Rendered empty/hidden
+    // upfront (rather than only added when a match exists) so that lookup
+    // never has to touch innerHTML/re-render the row itself.
+    const analysisRow = isRest ? '' : `<tr class="completed-analysis-row" data-analysis-date="${dateKey(day.date)}" hidden><td colspan="5"><div class="completed-analysis"></div></td></tr>`;
     return `
       <tr class="${rowClass}" data-date="${dateKey(day.date)}">
         <td>${day.dayName}</td>
@@ -1641,6 +1690,7 @@
         <td>${pace}</td>
       </tr>
       ${structureRow}
+      ${analysisRow}
     `;
   }
 

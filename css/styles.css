@@ -599,14 +599,37 @@ input[type="radio"]:focus-visible {
 /* Marks a day whose scheduled session has a matching completed Strava
    activity — added after the fact by markCompletedSessionsFromStrava in
    js/app.js, not part of the initial render, so this stays a lightweight
-   overlay rather than a distinct row variant baked into day-table styles. */
-.day-table tr.is-completed { background: var(--color-accent-light); }
+   overlay rather than a distinct row variant baked into day-table styles.
+   Applied to the day row itself plus its structure-bar/analysis sibling
+   rows (see markCompletedSessionsFromStrava) so the tint + left stripe
+   reads as one continuous "done" block, not just the top row of it. A
+   left border (rather than relying on the background tint alone, which a
+   colored type-badge/structure-bar can wash out) is what actually makes a
+   completed session distinguishable from a merely-scheduled one at a
+   glance. */
+.day-table tr.is-completed {
+  background: var(--color-accent-light);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
 .completed-badge {
   display: inline-flex;
   align-items: center;
   margin-left: 6px;
   font-size: 0.85rem;
   cursor: default;
+}
+
+/* Per-session analysis (actual distance/pace/duration vs. what was
+   planned) — filled in and unhidden alongside the ✅ badge above, once a
+   matching Strava activity is found; see markCompletedSessionsFromStrava. */
+.completed-analysis-row td { padding: 0 16px 12px; border-bottom: 1px solid var(--color-border); }
+.completed-analysis {
+  font-size: 0.85rem;
+  color: var(--color-accent);
+  background: var(--color-accent-light);
+  border-radius: 8px;
+  padding: 6px 10px;
+  display: inline-block;
 }
 
 /* Workout-structure bar: warm up / work / recovery / cool down, proportional
