@@ -533,16 +533,23 @@ input[type="radio"]:focus-visible {
   margin-top: 16px;
   overflow: hidden;
 }
+/* A CSS grid, not flex — each .week-header is its own independent flex
+   container (one per <details>, no shared row context across weeks), so
+   with flexbox alone the "Total"/phase columns drift left-right between
+   weeks depending on how wide that week's own title/badge/phase text
+   happens to be (e.g. the "Minggu saat ini" badge only on one week,
+   "BASE" vs "RACE WEEK" varying in length). Fixed track widths on the
+   title and total columns keep both lined up in a straight column down
+   the page regardless of any single week's own content width. */
 .week-header {
   background: var(--color-bg);
   padding: 12px 16px;
-  display: flex;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 230px) 1fr minmax(0, 110px) auto;
   align-items: center;
+  gap: 8px;
 }
-.week-title-group { display: flex; align-items: center; gap: 8px; }
+.week-title-group { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .week-header .week-title { font-family: var(--font-display); font-weight: 700; letter-spacing: -0.01em; }
 /* Labels whichever week findCurrentWeek (js/app.js) says today falls
    inside — the same week that starts open by default, but shown even if
@@ -564,11 +571,15 @@ input[type="radio"]:focus-visible {
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .week-header .week-total {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--color-primary-dark);
+  text-align: right;
 }
 /* .week-block is a <details> element (see js/app.js renderPlan) so each
    week collapses to just this header — cursor + the two marker-removal
@@ -747,5 +758,19 @@ summary.week-header::-webkit-details-marker { display: none; }
   .type-badge { padding: 3px 7px; font-size: 0.72rem; }
   .structure-row td { padding: 2px 6px 12px; }
   .structure-caption { font-size: 0.72rem; }
-  .week-header { padding: 10px 12px; }
+  /* The fixed-width title/total columns (see .week-header above) are
+     sized for desktop — on a narrow phone screen they'd squeeze the phase
+     text down to almost nothing, so stack title / phase / (total +
+     chevron) as their own full-width rows instead of forcing 4 columns
+     into too little space. */
+  .week-header {
+    padding: 10px 12px;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "title title" "phase phase" "total chevron";
+    row-gap: 4px;
+  }
+  .week-title-group { grid-area: title; }
+  .week-header .week-phase { grid-area: phase; white-space: normal; }
+  .week-header .week-total { grid-area: total; }
+  .week-toggle-icon { grid-area: chevron; }
 }
