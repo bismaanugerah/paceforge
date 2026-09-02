@@ -262,6 +262,52 @@ const PaceForgeGenerator = (() => {
     return Math.max(1, Math.floor((daysPerWeek - 1) / 2));
   }
 
+  // Monday=1..Saturday=6, Sunday=7 — a plain ascending week position, used
+  // wherever days-of-week need to be compared/sorted/subtracted correctly
+  // (dow's own 0=Sunday would otherwise sort Sunday before Monday and,
+  // worse, make a Sunday-involving gap subtraction come out negative).
+  function chronoRank(dow) { return dow === 0 ? 7 : dow; }
+
+  // Which of `candidates` (day-of-week numbers, ANY order) should host
+  // `count` quality (tempo/interval/repetition) sessions — chosen to
+  // maximize the smallest gap between any two, rather than just the first
+  // `count` chronologically. Back-to-back hard efforts don't give VO2max/
+  // lactate-threshold adaptations the ~48-72h they need to actually
+  // absorb the training (RunnersConnect; Peregrune "Back-To-Back Running
+  // Workouts") — common structured plans place 2 quality sessions on
+  // Tuesday/Thursday specifically because a weekend long run anchors one
+  // end of the week and that split maximizes the gap on both sides.
+  // `count` only reaches 2 with the current QUALITY_TYPES rotation (see
+  // workoutTemplate) — small enough that brute-forcing every combination
+  // is cheap and always finds the true optimum, not just a good guess.
+  function pickSpacedQualityDays(candidates, count) {
+    const sorted = [...candidates].sort((a, b) => chronoRank(a) - chronoRank(b));
+    if (count >= sorted.length) return sorted;
+    if (count <= 1) return sorted.slice(0, count);
+    let best = sorted.slice(0, count);
+    let bestMinGap = -1;
+    const combo = [];
+    (function search(start) {
+      if (combo.length === count) {
+        let minGap = Infinity;
+        for (let i = 1; i < combo.length; i++) {
+          minGap = Math.min(minGap, chronoRank(combo[i]) - chronoRank(combo[i - 1]));
+        }
+        if (minGap > bestMinGap) {
+          bestMinGap = minGap;
+          best = combo.slice();
+        }
+        return;
+      }
+      for (let i = start; i < sorted.length; i++) {
+        combo.push(sorted[i]);
+        search(i + 1);
+        combo.pop();
+      }
+    })(0);
+    return best;
+  }
+
   // Below-neutral leg of the goal-pace paceLevelMultiplier curve (see
   // generatePlan) — piecewise-linear through explicitly hand-picked
   // points rather than the single straight line the underlying
@@ -883,11 +929,7 @@ const PaceForgeGenerator = (() => {
     // scheduling anything before it.
     const firstWeekStart = addDays(raceWeekMonday, -(planWeeks - 1) * 7);
 
-    const sortedPreferredDays = [...preferredDays].sort((a, b) => {
-      const na = a === 0 ? 7 : a;
-      const nb = b === 0 ? 7 : b;
-      return na - nb;
-    });
+    const sortedPreferredDays = [...preferredDays].sort((a, b) => chronoRank(a) - chronoRank(b));
 
     // Pace (VDOT) progress speed: more quality (tempo/interval/repetition)
     // sessions per week is more actual fitness-improving stimulus, so a
@@ -1015,14 +1057,21 @@ const PaceForgeGenerator = (() => {
           ? applyConservativeAdjustment(restTemplate, baseSlotWeights)
           : baseSlotWeights;
 
-        // Quality (tempo/interval) sessions get first claim on weekday
-        // (Mon-Fri) slots wherever there's a choice — long run (and often
-        // an easy/recovery day) already anchors the weekend, and a hard
-        // effort fits a normal weekday routine better than competing with
-        // weekend long-run recovery. Only spills onto a weekend day if
-        // there aren't enough weekday slots this week to hold every
-        // quality session (e.g. daysPerWeek=5 with just 2 weekdays picked).
-        // Non-quality slots (easy/recovery) fill whatever's left over, kept
+        // Quality (tempo/interval/repetition) sessions get first claim on
+        // weekday (Mon-Fri) slots wherever there's a choice — long run
+        // (and often an easy/recovery day) already anchors the weekend,
+        // and a hard effort fits a normal weekday routine better than
+        // competing with weekend long-run recovery. Only spills onto a
+        // weekend day if there aren't enough weekday slots this week to
+        // hold every quality session (e.g. daysPerWeek=5 with just 2
+        // weekdays picked). Within whichever pool they're drawn from,
+        // pickSpacedQualityDays chooses the widest-spaced combination
+        // (e.g. Tuesday+Thursday around a Saturday long run, not
+        // Monday+Tuesday back to back) rather than just the first slots
+        // in the pool — VO2max/lactate-threshold adaptations need
+        // ~48-72h to actually absorb a hard session (see its own comment
+        // for sources), which two adjacent hard days don't give. Non-
+        // quality slots (easy/recovery) fill whatever's left over, kept
         // in their original template order to preserve which slot carries
         // which weeklySplitForDays weight (see restWeights above).
         const nonLongRunDaysChrono = slotDays.filter(dow => dow !== longRunDow);
@@ -1032,16 +1081,15 @@ const PaceForgeGenerator = (() => {
         const qualityIdx = restTemplate.map((t, i) => i).filter(i => QUALITY_TYPES.has(restTemplate[i]));
         const nonQualityIdx = restTemplate.map((t, i) => i).filter(i => !QUALITY_TYPES.has(restTemplate[i]));
 
-        const usedWeekdayForQuality = Math.min(qualityIdx.length, weekdayDays.length);
         const usedWeekendForQuality = Math.max(0, qualityIdx.length - weekdayDays.length);
-        const qualityDays = [
-          ...weekdayDays.slice(0, usedWeekdayForQuality),
-          ...weekendDays.slice(0, usedWeekendForQuality),
-        ];
+        const qualityCandidatePool = [...weekdayDays, ...weekendDays.slice(0, usedWeekendForQuality)];
+        const qualityDays = pickSpacedQualityDays(qualityCandidatePool, qualityIdx.length);
         // Restore chronological (Mon..Sun) order among whatever's left for
         // the non-quality slots, same ordering rule used for sortedPreferredDays.
-        const leftoverDays = [...weekdayDays.slice(usedWeekdayForQuality), ...weekendDays.slice(usedWeekendForQuality)]
-          .sort((a, b) => (a === 0 ? 7 : a) - (b === 0 ? 7 : b));
+        const qualityDaysSet = new Set(qualityDays);
+        const leftoverDays = qualityCandidatePool
+          .filter(dow => !qualityDaysSet.has(dow))
+          .sort((a, b) => chronoRank(a) - chronoRank(b));
 
         typeByDow[longRunDow] = 'longRun';
         qualityIdx.forEach((templateIdx, i) => {
