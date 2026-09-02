@@ -635,9 +635,19 @@ const PaceForgeGenerator = (() => {
     } else if (recentRaceTimeSec && recentRaceDistanceKm) {
       predictedRaceTimeSec = predictRaceTime(recentRaceTimeSec, recentRaceDistanceKm, raceDistanceKm);
       const currentEquivPaceSec = predictedRaceTimeSec / raceDistanceKm;
+      // 2 quality (tempo/interval/repetition) sessions a week is more
+      // actual fitness-improving stimulus than 1 — earlier this app only
+      // reflected that in how fast weekly pace targets *ramped toward* the
+      // goal (see paceProgress below), leaving the goal itself, and so the
+      // final VDOT, identical either way. A runner training harder should
+      // be projected to land at a faster goal pace too, not just get there
+      // sooner and plateau at the same number a 1-session plan reaches —
+      // so the achievable gain itself scales with quality-session count.
+      const qualityGainMultiplier = qualitySessionsForDays(daysPerWeek) >= 2 ? 1.3 : 1;
       const gainFraction = CONSERVATIVE_FITNESS_GAIN_PCT[fitnessLevel]
         * clamp(buildWeeks / profile.recWeeks, 0, 1)
-        * (conservativeMode ? 0.5 : 1);
+        * (conservativeMode ? 0.5 : 1)
+        * qualityGainMultiplier;
       goalPaceSec = currentEquivPaceSec * (1 - gainFraction);
       goalPaceSource = 'recentRace';
     } else {
