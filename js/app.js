@@ -622,10 +622,7 @@
     lastFitnessLevel = settings.fitnessLevel;
     lastConservativeMode = settings.conservativeMode;
 
-    gateSection.hidden = true;
-    formSection.hidden = true;
-    resultSection.hidden = true;
-    loadingSection.hidden = false;
+    showLoading();
     loadingSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     submitBtn.disabled = true;
@@ -652,6 +649,17 @@
     formSection.hidden = false;
     loadingSection.hidden = true;
     resultSection.hidden = true;
+  }
+  // Used while checking for a saved plan right after login (see
+  // onAuthChange below) — showForm() first, then swapping to a saved plan
+  // a moment later used to flash the empty form for returning users with
+  // one; showing this instead avoids that, falling back to showForm()
+  // only once it's confirmed there's nothing saved to show.
+  function showLoading() {
+    gateSection.hidden = true;
+    formSection.hidden = true;
+    resultSection.hidden = true;
+    loadingSection.hidden = false;
   }
 
   // Flip in js/config.js once Strava login is actually wired up. While
@@ -841,9 +849,16 @@
   } else if (paceforgeAuth) {
     paceforgeAuth.onAuthChange((user) => {
       if (user) {
-        showForm();
+        // Show loading (not the form) while checking for a saved plan —
+        // a returning user with one goes straight from this to their
+        // result, never seeing the empty form flash by first; showForm()
+        // only runs once loadSavedPlanForUser confirms there isn't one.
+        showLoading();
         loadSavedPlanForUser(user).then((loaded) => {
-          if (!loaded) prefillFromStrava();
+          if (!loaded) {
+            showForm();
+            prefillFromStrava();
+          }
         });
       } else {
         showGate();
