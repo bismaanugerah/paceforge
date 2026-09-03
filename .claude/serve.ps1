@@ -53,12 +53,15 @@ sama sekali -- atau "nonRace") dan "nonRaceStyle" ("baseBuilding" atau
   asli. JANGAN sebut nama/jarak race itu (mis. "half marathon", "5K")
   sebagai tujuan pelari di "intro" atau "weeklyNotes" -- sebut sebagai
   "training block" atau "blok latihan" saja, tanpa embel-embel nama race.
-- "baseBuilding": tujuan pelari menaikkan aerobic base/volume bertahap,
-  belum ada race spesifik di depan mata. Sesi quality-nya BUKAN tempo/
-  interval/repetition seperti mode race -- mayoritas easy run ditambah 1
-  sesi "marathonPace" (lari kontinu santai di pace marathon) per minggu.
-  JANGAN tulis catatan seolah dia sedang latihan speed/interval -- fokusnya
-  murni menaikkan mileage & daya tahan aerobik.
+- "baseBuilding": tujuan pelari menaikkan MILEAGE (volume mingguan) secara
+  bertahap, belum ada race spesifik di depan mata. Sesi quality-nya BUKAN
+  tempo/interval/repetition seperti mode race -- mayoritas easy run
+  ditambah 1 sesi "marathonPace" (lari kontinu santai di pace marathon)
+  per minggu. Pace-nya SENGAJA nyaris tidak naik sepanjang blok (beda dari
+  mode race yang pace-nya diproyeksikan naik signifikan) -- JANGAN tulis
+  catatan seolah dia sedang latihan speed/interval atau "mengejar pace
+  lebih cepat". Fokusnya murni menaikkan volume & daya tahan aerobik,
+  bukan kecepatan.
 - "maintenance": tujuan pelari MENJAGA fitness (volume mingguannya sengaja
   flat, bukan naik) -- jangan tulis catatan seolah-olah dia sedang
   "membangun" menuju puncak, karena memang tidak ada puncak yang dikejar.

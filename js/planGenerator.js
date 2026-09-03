@@ -102,18 +102,20 @@ const PaceForgeGenerator = (() => {
     advanced: 0.03,
   };
 
-  // Maintenance mode's own (much smaller, flat-across-levels) version of
-  // the gain fraction above. Maintenance has no race/goal distance to
-  // project toward — the point isn't "ramp toward a faster target" the way
-  // Base Building/race mode do, just a small, honest nod to the fact that
-  // consistent training still produces some fitness gain even without one.
-  // Deliberately flat regardless of fitnessLevel (unlike
+  // Non-race modes' own (much smaller, flat-across-levels) version of the
+  // gain fraction above — used by BOTH Base Building and Maintenance, not
+  // just Maintenance (see isNonRace below, not isMaintenance). Neither has
+  // a race/goal distance to project toward, and Base Building specifically
+  // is meant to raise mileage, not pace — its whole point is volume growth
+  // (WEEKLY_GROWTH_RATE, untouched) while VDOT stays nearly flat, the same
+  // as Maintenance, not the aggressive multi-factor projection Race mode
+  // uses. Deliberately flat regardless of fitnessLevel (unlike
   // CONSERVATIVE_FITNESS_GAIN_PCT, which scales 3-8% by level) and roughly
   // a quarter of that table's smallest entry — small enough that even a
-  // stale VDOT input (a maintenance user is exactly the kind of runner
-  // likely to not have a recent race) can't compound into an unrealistic
-  // target, since the target itself barely moves from where it started.
-  const MAINTENANCE_FITNESS_GAIN_PCT = 0.02;
+  // stale VDOT input (a non-race user is exactly the kind of runner likely
+  // to not have a recent race) can't compound into an unrealistic target,
+  // since the target itself barely moves from where it started.
+  const NON_RACE_FITNESS_GAIN_PCT = 0.02;
 
   // Absolute floor for any pace this generator will ever schedule or treat
   // as a goal, in sec/km — well under the current marathon world record
@@ -1108,13 +1110,15 @@ const PaceForgeGenerator = (() => {
       // not all three simultaneously.
       const STIMULUS_MULTIPLIER_CAP = 1.3;
       const stimulusMultiplier = Math.min(STIMULUS_MULTIPLIER_CAP, qualityGainMultiplier * volumeGainMultiplier * paceLevelMultiplier);
-      // Maintenance mode skips this whole multi-factor stack (quality-
+      // Non-race modes (both Base Building and Maintenance — see
+      // NON_RACE_FITNESS_GAIN_PCT's own comment for why Base Building is
+      // included here too) skip this whole multi-factor stack (quality-
       // session count, volume headroom, current pace level) and its
       // per-fitness-level base rate — none of that "how much room is there
       // to chase a goal" reasoning applies when there's no goal being
-      // chased, just a token improvement (see MAINTENANCE_FITNESS_GAIN_PCT).
-      const gainFraction = isMaintenance
-        ? MAINTENANCE_FITNESS_GAIN_PCT
+      // chased, just a token improvement.
+      const gainFraction = isNonRace
+        ? NON_RACE_FITNESS_GAIN_PCT
         : CONSERVATIVE_FITNESS_GAIN_PCT[fitnessLevel]
           * clamp(buildWeeks / profile.recWeeks, 0, 1)
           * (conservativeMode ? 0.5 : 1)
