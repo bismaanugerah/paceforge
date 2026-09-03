@@ -102,13 +102,15 @@ const PaceForgeGenerator = (() => {
   // that ramp look "extreme": the real defect is the target, not the ramp.
   const MIN_PLAUSIBLE_PACE_SEC_PER_KM = 2 * 60; // 2:00 /km
 
-  // Training-zone pace = goalPaceSec * multiplier. Ordered slow -> fast.
-  // repetition sits faster than interval, mirroring Daniels' R-pace <
-  // I-pace < T-pace ordering (see js/vdot.js's ZONE_PCT_RANGES, which
-  // orders the same 5 zones by %VO2max) — these multipliers are a much
-  // rougher approximation than the VDOT table's (relative to *this race's*
-  // goal pace rather than %VO2max), but the ordering matters more than the
-  // exact value for how sessions feel relative to each other.
+  // Training-zone pace = goalPaceSec * multiplier. Ordered slow -> fast,
+  // repetition faster than interval, mirroring Daniels' R-pace < I-pace <
+  // T-pace ordering (see js/vdot.js's ZONE_PCT_RANGES, which orders the
+  // same zones by %VO2max) — NOT used to schedule sessions any more (see
+  // weekPaces in generatePlan below, which derives each week's zone paces
+  // from the real VDOT %VO2max formulas instead, so the schedule and the
+  // separately-displayed "Zona Pace" reference table agree with each
+  // other). Kept only as generatePlan's defensive fallback for the rare
+  // case PaceForgeVDOT can't produce a zone table for some input.
   const PACE_MULTIPLIERS = {
     recovery: 1.25,
     easy: 1.15,
@@ -1155,19 +1157,55 @@ const PaceForgeGenerator = (() => {
       }
       weekKm = Math.round(weekKm * 10) / 10;
 
-      // This week's zone paces — interpolated between currentPaces (week 1
-      // of the build block) and paces/goalPaceSec (peak/race pace), by
-      // paceProgress above. Ramping this alongside the volume ramp is what
-      // makes early-week quality sessions (interval/tempo/long run) run at
-      // a pace the runner can actually hold right now, tightening toward
-      // race-goal pace as the block progresses — rather than every week's
-      // "Pace Target" column showing the same number from week 1 through
-      // race day.
+      // This week's zone paces — derived from THIS week's own ramping
+      // "goal" pace (weekPaces.goal, interpolated currentFitnessPaceSec ->
+      // goalPaceSec by paceProgress, same as always) run back through the
+      // real Daniels/Gilbert VDOT formulas (js/vdot.js) — the same ones
+      // already used to render the "Zona Pace" reference table shown
+      // alongside the plan — rather than the old flat PACE_MULTIPLIERS
+      // approximation, which was tuned relative to goal pace directly and
+      // could land noticeably outside the %VO2max-correct zone (e.g. a
+      // tempo target outside Threshold's real 83-88% VO2max range) — the
+      // exact mismatch a runner comparing this table against their own
+      // Zona Pace card would notice. Ramping weekPaces.goal itself is
+      // unchanged — only how the OTHER zones get derived FROM it changed —
+      // so early-week quality sessions still target a pace the runner can
+      // actually hold right now, tightening toward race-goal pace as the
+      // block progresses, exactly as before.
       const weekPaces = {};
-      Object.keys(PACE_MULTIPLIERS).forEach(zone => {
-        weekPaces[zone] = currentPaces[zone] + (paces[zone] - currentPaces[zone]) * paceProgress;
-      });
       weekPaces.goal = currentFitnessPaceSec + (goalPaceSec - currentFitnessPaceSec) * paceProgress;
+      const weekVdotScore = PaceForgeVDOT.vdotFromGoalPace(raceDistanceKm, weekPaces.goal);
+      const weekZones = weekVdotScore ? PaceForgeVDOT.paceZonesFromVDOT(weekVdotScore) : null;
+      if (weekZones) {
+        // Single-number target = each zone's own midpoint — Daniels
+        // publishes these as ranges, not points, but a session's own
+        // schedule/structure needs one pace to build around; the full
+        // range stays visible in the separate Zona Pace table for context.
+        const midpoint = z => (z.fastSec + z.slowSec) / 2;
+        weekPaces.easy = midpoint(weekZones.easy);
+        weekPaces.tempo = midpoint(weekZones.threshold);
+        weekPaces.interval = midpoint(weekZones.interval);
+        weekPaces.repetition = midpoint(weekZones.repetition);
+        // Daniels doesn't publish separate zones for these two: a long run
+        // is run at E-pace by his own guidance (a race-specific long run's
+        // marathon-pace segment is handled separately, by
+        // buildRaceSpecificLongRunStructure — not here), and "recovery" is
+        // only ever described qualitatively as slower than Easy, with no
+        // %VO2max range of its own. Recovery uses Easy's own slow boundary
+        // rather than an arbitrary extra multiplier on top — still
+        // Daniels-grounded, just anchored to the loose end of a zone he did
+        // publish instead of inventing a number he didn't.
+        weekPaces.longRun = weekPaces.easy;
+        weekPaces.recovery = weekZones.easy.slowSec;
+      } else {
+        // Defensive fallback only — shouldn't occur given the pace floors
+        // enforced above (MIN_PLAUSIBLE_PACE_SEC_PER_KM etc.), but the old
+        // flat-multiplier approximation is a safer fallback than leaving a
+        // week's zones undefined.
+        Object.keys(PACE_MULTIPLIERS).forEach(zone => {
+          weekPaces[zone] = currentPaces[zone] + (paces[zone] - currentPaces[zone]) * paceProgress;
+        });
+      }
 
       // Which specific workout (type + variant) fills this week's 1st/2nd
       // quality slot — resolved once here so workoutTemplate (deciding
