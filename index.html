@@ -100,9 +100,17 @@
             <select id="raceDistance" name="raceDistance">
               <option value="5k">5K</option>
               <option value="10k">10K</option>
+              <!-- Only shown for non-race modes (see updateGoalTypeUI in
+                   app.js, which also relabels these 4 options entirely for
+                   Race mode) — a blended template between 10K's and Half's
+                   own RACE_PROFILES/QUALITY_ROTATIONS entries in
+                   planGenerator.js, hidden here by default since Race mode
+                   is the page's default goal type. -->
+              <option value="medium" hidden>Medium Distance</option>
               <option value="half" selected>Half Marathon (21.1K)</option>
               <option value="full">Full Marathon (42.2K)</option>
             </select>
+            <p class="field-hint" id="raceDistanceHint"></p>
           </div>
 
           <div class="field" id="customDistanceField" hidden>

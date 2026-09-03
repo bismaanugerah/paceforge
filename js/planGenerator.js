@@ -58,6 +58,17 @@ const PaceForgeGenerator = (() => {
   const RACE_PROFILES = {
     '5k':   { recWeeks: 8,  taperWeeks: 1, longRunMin: 8,  longRunMax: 12, maxSupportKm: 8 },
     '10k':  { recWeeks: 10, taperWeeks: 1, longRunMin: 12, longRunMax: 16, maxSupportKm: 10 },
+    // Non-race-only "Medium Distance" template (see index.html's
+    // #raceDistance — Race mode never offers this value): the plain
+    // arithmetic average of 10k's and half's own numbers below, so a
+    // Base Building/Maintenance runner who doesn't want either the 5K
+    // template's short long runs or the full-marathon-scale volume of
+    // Long Distance gets something genuinely in between rather than
+    // having to just pick one of the two. taperWeeks is moot here —
+    // generatePlan forces non-race taper to 1 week regardless (see
+    // isNonRace below) — kept only so this entry has the same shape as
+    // every other RACE_PROFILES entry.
+    medium: { recWeeks: 11, taperWeeks: 2, longRunMin: 14, longRunMax: 17, maxSupportKm: 10 },
     'half': { recWeeks: 12, taperWeeks: 2, longRunMin: 16, longRunMax: 19, maxSupportKm: 10 },
     'full': { recWeeks: 16, taperWeeks: 3, longRunMin: 29, longRunMax: 32, maxSupportKm: 13 },
   };
@@ -451,6 +462,26 @@ const PaceForgeGenerator = (() => {
       { type: 'tempo', variant: 'cruise' },
       { type: 'tempo', variant: 'continuous' },
       { type: 'repetition', variant: 'mid' },
+    ],
+    // Non-race-only "Medium Distance" template (see RACE_PROFILES.medium
+    // above for why this exists) — a hand-authored blend landing close to
+    // the arithmetic average of 10k's (interval 33%/tempo 56%/repetition
+    // 11%) and half's (interval 17%/tempo 75%/repetition 8%) own mixes
+    // above/below, rather than literally interleaving those two arrays
+    // (which would bias early cycle weeks toward one flavor and later ones
+    // toward the other instead of reading as blended week to week).
+    medium: [ // interval 27% / tempo 64% / repetition 9%
+      { type: 'tempo', variant: 'continuous' },
+      { type: 'interval', variant: 'mid' },
+      { type: 'tempo', variant: 'cruise' },
+      { type: 'tempo', variant: 'continuous' },
+      { type: 'interval', variant: 'short' },
+      { type: 'tempo', variant: 'cruise' },
+      { type: 'tempo', variant: 'continuous' },
+      { type: 'interval', variant: 'mid' },
+      { type: 'tempo', variant: 'cruise' },
+      { type: 'tempo', variant: 'continuous' },
+      { type: 'repetition', variant: 'short' },
     ],
     half: [ // interval 17% / tempo 75% / repetition 8%
       { type: 'tempo', variant: 'continuous' },

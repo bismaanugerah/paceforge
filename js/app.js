@@ -6,6 +6,11 @@
   const RACE_META = {
     '5k': { km: 5, label: '5K' },
     '10k': { km: 10, label: '10K' },
+    // Non-race-only value (see planGenerator.js's RACE_PROFILES.medium) —
+    // km is a representative distance for pace-projection math only
+    // (predictRaceTime/vdotFromGoalPace etc. still need *a* number), the
+    // arithmetic midpoint between 10k's and half's own km below.
+    medium: { km: 15.5, label: 'Medium Distance' },
     'half': { km: 21.1, label: 'Half Marathon' },
     'full': { km: 42.2, label: 'Full Marathon' },
   };
@@ -252,6 +257,7 @@
   const distanceModeToggle = document.getElementById('distanceModeToggle');
   const presetDistanceField = document.getElementById('presetDistanceField');
   const raceDistanceSel = document.getElementById('raceDistance');
+  const raceDistanceHint = document.getElementById('raceDistanceHint');
   const customDistanceField = document.getElementById('customDistanceField');
   const customDistanceKm = document.getElementById('customDistanceKm');
   const raceDateInput = document.getElementById('raceDate');
@@ -397,16 +403,34 @@
     return goalTypeToggle.querySelector('input[name="goalType"]:checked').value;
   }
 
-  // #raceDistance's <option> text swaps with goal type — race mode shows
-  // the real race distances (what they've always been); non-race modes
-  // show a qualitative distance/volume label instead, since "Full Marathon
-  // (42.2K)" reads as "you're running a marathon" even though this value
-  // is only ever used as a template for long-run range/quality-session mix
-  // (see resolveRaceProfile in planGenerator.js) — nobody training without
-  // a race should be picking from a list of race names. `value`s (and so
-  // raceKey/raceDistanceKm downstream) are untouched either way.
+  // #raceDistance's <option>s swap with goal type — race mode shows the
+  // real race distances (what they've always been, 4 options: 5k/10k/
+  // half/full); non-race modes show 3 English, qualitative-only labels
+  // instead (Short/Medium/Long Distance, no "5K"/"Half Marathon"/km
+  // anywhere) since this value is only ever used as a long-run-range/
+  // quality-session-mix template (see resolveRaceProfile in
+  // planGenerator.js) — nobody training without a race should be picking
+  // from a list of race names. Medium is a genuinely blended template
+  // (planGenerator.js's RACE_PROFILES.medium/QUALITY_ROTATIONS.medium)
+  // between 10k's and half's own entries, not just a relabeling of one of
+  // them — see NON_RACE_STYLE_VALUES below, which is why race mode's 10k/
+  // half options get hidden entirely for non-race rather than reused.
+  // `value`s for 5k/full (and so raceKey/raceDistanceKm downstream) are
+  // untouched either way.
   const RACE_OPTION_LABELS = { '5k': '5K', '10k': '10K', half: 'Half Marathon (21.1K)', full: 'Full Marathon (42.2K)' };
-  const NON_RACE_OPTION_LABELS = { '5k': 'Jarak Pendek', '10k': 'Jarak Menengah', half: 'Jarak Panjang', full: 'Jarak Sangat Panjang' };
+  const NON_RACE_OPTION_LABELS = { '5k': 'Short Distance', medium: 'Medium Distance', full: 'Long Distance' };
+  const RACE_STYLE_VALUES = ['5k', '10k', 'half', 'full'];
+  const NON_RACE_STYLE_VALUES = ['5k', 'medium', 'full'];
+  // Shown in #raceDistanceHint below the select, updated whenever the
+  // selection or goal type changes — describes what each non-race style
+  // actually trains WITHOUT naming the race distance it's templated off
+  // (per the user's explicit request), since a runner in this mode isn't
+  // running any of these distances.
+  const NON_RACE_OPTION_DESCRIPTIONS = {
+    '5k': 'Speed-focused: shorter long runs, a bigger share of fast/interval work.',
+    medium: 'Balanced mix of speed and endurance work, with moderate-length long runs.',
+    full: 'Endurance-focused: the highest weekly volume and the longest long runs.',
+  };
 
   const GOAL_TYPE_COPY = {
     race: {
@@ -429,6 +453,11 @@
     },
   };
 
+  function updateRaceDistanceHint() {
+    raceDistanceHint.textContent = getGoalType() === 'race' ? '' : (NON_RACE_OPTION_DESCRIPTIONS[raceDistanceSel.value] || '');
+  }
+  raceDistanceSel.addEventListener('change', updateRaceDistanceHint);
+
   function updateGoalTypeUI() {
     const goalType = getGoalType();
     const copy = GOAL_TYPE_COPY[goalType];
@@ -437,11 +466,27 @@
     raceDateLabel.textContent = copy.dateLabel;
     goalTypeHint.textContent = copy.hint;
 
-    const optionLabels = goalType === 'race' ? RACE_OPTION_LABELS : NON_RACE_OPTION_LABELS;
+    const isRace = goalType === 'race';
+    const optionLabels = isRace ? RACE_OPTION_LABELS : NON_RACE_OPTION_LABELS;
+    const visibleValues = isRace ? RACE_STYLE_VALUES : NON_RACE_STYLE_VALUES;
+    const previousValue = raceDistanceSel.value;
     Array.from(raceDistanceSel.options).forEach(opt => {
+      const visible = visibleValues.includes(opt.value);
+      opt.hidden = !visible;
       const label = optionLabels[opt.value];
-      if (label) opt.textContent = label;
+      if (visible && label) opt.textContent = label;
     });
+    // The value selected under the other goal type's option set might now
+    // be hidden (e.g. 'half'/'10k' when switching to non-race, or 'medium'
+    // when switching back to race) — <select> keeps a hidden option
+    // "selected" rather than auto-picking a visible one, so this needs to
+    // happen explicitly. Only ever reached with previousValue in {'10k',
+    // 'half'} (going non-race) or {'medium'} (going race) — 5k/full are
+    // in both sets already, so they'd never fail the check above.
+    if (!visibleValues.includes(previousValue)) {
+      raceDistanceSel.value = isRace ? 'half' : 'medium';
+    }
+    updateRaceDistanceHint();
   }
   goalTypeToggle.addEventListener('change', updateGoalTypeUI);
   updateGoalTypeUI();
@@ -691,7 +736,11 @@
     const isCustomDistance = getDistanceMode() === 'custom';
     let raceKey = raceDistanceSel.value;
     let raceDistanceKm = RACE_META[raceKey]?.km;
-    let raceLabel = RACE_META[raceKey]?.label;
+    // Non-race: "Short/Medium/Long Distance" (NON_RACE_OPTION_LABELS), not
+    // RACE_META's own race-name label — shown verbatim in the summary
+    // card/PDF header, which would otherwise leak "5K"/"Half Marathon" back
+    // in right after the dropdown itself was relabeled to hide it.
+    let raceLabel = mode === 'race' ? RACE_META[raceKey]?.label : (NON_RACE_OPTION_LABELS[raceKey] || RACE_META[raceKey]?.label);
     if (isCustomDistance) {
       raceKey = 'custom';
       raceDistanceKm = Number(customDistanceKm.value);
