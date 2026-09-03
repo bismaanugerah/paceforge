@@ -29,8 +29,12 @@ sama sekali — atau "nonRace") dan "nonRaceStyle" ("baseBuilding" atau
   asli. JANGAN sebut nama/jarak race itu (mis. "half marathon", "5K")
   sebagai tujuan pelari di "intro" atau "weeklyNotes" — sebut sebagai
   "training block" atau "blok latihan" saja, tanpa embel-embel nama race.
-- "baseBuilding": tujuan pelari menaikkan fitness/volume bertahap, belum
-  ada race spesifik di depan mata.
+- "baseBuilding": tujuan pelari menaikkan aerobic base/volume bertahap,
+  belum ada race spesifik di depan mata. Sesi quality-nya BUKAN tempo/
+  interval/repetition seperti mode race — mayoritas easy run ditambah 1
+  sesi "marathonPace" (lari kontinu santai di pace marathon) per minggu.
+  JANGAN tulis catatan seolah dia sedang latihan speed/interval — fokusnya
+  murni menaikkan mileage & daya tahan aerobik.
 - "maintenance": tujuan pelari MENJAGA fitness (volume mingguannya sengaja
   flat, bukan naik) — jangan tulis catatan seolah-olah dia sedang
   "membangun" menuju puncak, karena memang tidak ada puncak yang dikejar.
@@ -44,20 +48,22 @@ sama sekali — atau "nonRace") dan "nonRaceStyle" ("baseBuilding" atau
 
 Tugasmu:
 1. Tinjau apakah ada sesi individual berjenis "easy", "recovery", "tempo",
-   "interval", atau "repetition" SAJA (JANGAN PERNAH longRun/race/shakeout/
-   evaluation/fartlek) yang jaraknya terasa tidak realistis untuk jenis
-   sesinya (mis. easy run yang kepanjangan dibanding long run minggu itu,
-   tempo run yang mustahil dijaga terus-menerus di pace tempo, atau
-   repetition run yang kepanjangan untuk sesi sprint-pendek-recovery-penuh).
-   Kalau nemu, sarankan lewat field "adjustments" (PALING BANYAK 5, tiap
-   saran maksimal sekitar ±20% dari jarak aslinya). Kalau semua sesi sudah
-   masuk akal, "adjustments" cukup array kosong — JANGAN dipaksakan
-   cari-cari masalah yang tidak ada.
+   "interval", "repetition", atau "marathonPace" SAJA (JANGAN PERNAH
+   longRun/race/shakeout/evaluation/fartlek) yang jaraknya terasa tidak
+   realistis untuk jenis sesinya (mis. easy run yang kepanjangan
+   dibanding long run minggu itu, tempo run yang mustahil dijaga terus-
+   menerus di pace tempo, repetition run yang kepanjangan untuk sesi
+   sprint-pendek-recovery-penuh, atau marathonPace run yang lebih jauh
+   dari long run minggu itu). Kalau nemu, sarankan lewat field
+   "adjustments" (PALING BANYAK 5, tiap saran maksimal sekitar ±20% dari
+   jarak aslinya). Kalau semua sesi sudah masuk akal, "adjustments"
+   cukup array kosong — JANGAN dipaksakan cari-cari masalah yang tidak
+   ada.
 2. Tambahkan catatan pelatih yang personal & actionable, mempertimbangkan
    catatan tambahan pelari (cedera/jadwal/preferensi) jika ada.
 
 Balas HANYA JSON valid (tanpa code fence, tanpa teks lain), format PERSIS:
-{"adjustments": [{"week": N, "dow": 0-6, "type": "easy|recovery|tempo|interval|repetition", "suggestedKm": X, "reason": "maks 12 kata"}], "intro": "maks 2 kalimat ringkasan strategi", "weeklyNotes": [{"week": N, "note": "maks 12 kata"}], "raceDayTips": "maks 3 kalimat: pacing, nutrisi, mental (kalau mode nonRace: tips minggu evaluasi & lanjut ke blok berikutnya, bukan tips race day)"}
+{"adjustments": [{"week": N, "dow": 0-6, "type": "easy|recovery|tempo|interval|repetition|marathonPace", "suggestedKm": X, "reason": "maks 12 kata"}], "intro": "maks 2 kalimat ringkasan strategi", "weeklyNotes": [{"week": N, "note": "maks 12 kata"}], "raceDayTips": "maks 3 kalimat: pacing, nutrisi, mental (kalau mode nonRace: tips minggu evaluasi & lanjut ke blok berikutnya, bukan tips race day)"}
 
 Hemat kata: weeklyNotes JANGAN mencakup semua minggu, HANYA minggu yang
 penting/beda (minggu pertama, tiap transisi fase, cutback, minggu puncak,

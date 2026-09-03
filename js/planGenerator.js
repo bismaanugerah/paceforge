@@ -381,8 +381,11 @@ const PaceForgeGenerator = (() => {
   // effort too (Maintenance mode swaps it in for a rotation slot — see
   // MAINTENANCE_FARTLEK_EVERY/resolveQualitySlot below) so it gets the
   // same weekday-priority/48-72h-spacing placement as tempo/interval/
-  // repetition, not treated like a plain easy day.
-  const QUALITY_TYPES = new Set(['tempo', 'interval', 'repetition', 'fartlek']);
+  // repetition, not treated like a plain easy day. 'marathonPace' is Base
+  // Building's own quality slot (see isBaseBuilding in generatePlan) —
+  // steadier than a real quality session but still deserves the same
+  // weekday placement over a plain easy day.
+  const QUALITY_TYPES = new Set(['tempo', 'interval', 'repetition', 'fartlek', 'marathonPace']);
 
   // Which specific workout occupies a week's quality slot(s) — rotates
   // through popular, well-documented variations on Daniels' T/I/R paces
@@ -846,6 +849,7 @@ const PaceForgeGenerator = (() => {
     repetition: 'Repetition',
     shakeout: 'Shakeout Run',
     fartlek: 'Fartlek',
+    marathonPace: 'Marathon Pace Run',
     evaluation: 'Evaluasi / Time Trial',
     rest: 'Rest',
     // Not a real day.type — a rest day is always 'rest' in the data model.
@@ -880,6 +884,14 @@ const PaceForgeGenerator = (() => {
     } = settings;
     const isNonRace = mode === 'nonRace';
     const isMaintenance = isNonRace && nonRaceStyle === 'maintenance';
+    // Base Building's whole point is raising the aerobic base — mostly
+    // Easy running plus a Marathon-pace steady day, NOT the race-specific
+    // Tempo/Interval/Repetition mix Race mode (and Maintenance, via its own
+    // Fartlek-swapped rotation) use. See the qualityPrimary/qualitySecondary
+    // resolution below, which is the only place this actually changes
+    // anything — everything else (volume ramp, cutback, long-run range from
+    // "gaya latihan") stays identical to Race mode's own machinery.
+    const isBaseBuilding = isNonRace && nonRaceStyle === 'baseBuilding';
 
     // Anchor for "how many weeks do I actually have before race day" — the
     // date the runner wants to start training, not necessarily today (e.g.
@@ -1412,6 +1424,14 @@ const PaceForgeGenerator = (() => {
         // reference pace (see buildFartlekStructure's own comment) — reuses
         // the Interval zone number directly rather than a new zone.
         weekPaces.fartlek = weekPaces.interval;
+        // Base Building's own quality slot (see isBaseBuilding below) — a
+        // continuous, unstructured run at Marathon zone pace (Daniels does
+        // publish this one, unlike recovery/longRun above), aerobic-focused
+        // rather than the race-specific T/I/R work Race/Maintenance modes
+        // use. Named after the day type it drives (weekPaces[type] below),
+        // not just "weekPaces.marathon", to match every other zone-per-type
+        // entry here.
+        weekPaces.marathonPace = midpoint(weekZones.marathon);
       } else {
         // Defensive fallback only — shouldn't occur given the pace floors
         // enforced above (MIN_PLAUSIBLE_PACE_SEC_PER_KM etc.), but the old
@@ -1421,6 +1441,12 @@ const PaceForgeGenerator = (() => {
           weekPaces[zone] = currentPaces[zone] + (paces[zone] - currentPaces[zone]) * paceProgress;
         });
         weekPaces.fartlek = weekPaces.interval;
+        // No flat-multiplier equivalent for Marathon zone (PACE_MULTIPLIERS
+        // only ever covered recovery/easy/longRun/tempo/interval/
+        // repetition) — split the difference between easy and tempo, the
+        // same rough midpoint Marathon zone (75-84% VO2max) sits at between
+        // Easy (59-74%) and Threshold (83-88%).
+        weekPaces.marathonPace = (weekPaces.easy + weekPaces.tempo) / 2;
       }
 
       // Which specific workout (type + variant) fills this week's 1st/2nd
@@ -1428,8 +1454,17 @@ const PaceForgeGenerator = (() => {
       // *where* each type lands) and the per-day structure builder further
       // below (deciding *what shape* that type's session takes) always
       // agree, instead of picking the rotation twice and risking drift.
-      const qualityPrimary = resolveQualitySlot(w, 0, conservativeMode, qualityRotation, isMaintenance);
-      const qualitySecondary = resolveQualitySlot(w, Math.floor(qualityRotation.length / 2), conservativeMode, qualityRotation, isMaintenance);
+      // Base Building always gets exactly ONE steady Marathon-pace day
+      // regardless of daysPerWeek — a 5-6 day plan's 2nd quality slot
+      // (qualitySessionsForDays) falls back to plain 'easy' instead of a
+      // 2nd hard-ish day, since "more easy running" (not more structured
+      // sessions) is the actual goal here.
+      const qualityPrimary = isBaseBuilding
+        ? { type: 'marathonPace' }
+        : resolveQualitySlot(w, 0, conservativeMode, qualityRotation, isMaintenance);
+      const qualitySecondary = isBaseBuilding
+        ? { type: 'easy' }
+        : resolveQualitySlot(w, Math.floor(qualityRotation.length / 2), conservativeMode, qualityRotation, isMaintenance);
 
       // Build the list of workout slots for this week.
       const template = isRaceWeek

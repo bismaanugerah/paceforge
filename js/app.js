@@ -36,6 +36,9 @@
     // date), just for a non-race plan.
     fartlek: 'var(--type-interval)',
     evaluation: 'var(--type-race)',
+    // Marathon zone already reuses the longRun badge color everywhere else
+    // (see ZONE_TYPE_COLOR_KEY below) — same here, for the same reason.
+    marathonPace: 'var(--type-longrun)',
   };
 
   // Distinguishes a week's training phase at a glance in the accordion
@@ -78,6 +81,7 @@
     race: '#6366f1',
     fartlek: '#d97a4f',
     evaluation: '#6366f1',
+    marathonPace: '#3aa98c',
   };
 
   // A rest day defaults to nudging toward strength/gym work as a
@@ -129,6 +133,7 @@
     // reference Interval zone as a loose ceiling/reference, not a strict
     // target.
     fartlek: 'interval',
+    marathonPace: 'marathon',
   };
 
   // Short zone labels for the Pace Target column / bar tooltips — matches
@@ -252,13 +257,11 @@
   const goalTypeToggle = document.getElementById('goalTypeToggle');
   const goalTypeHint = document.getElementById('goalTypeHint');
   const raceFieldsetLegend = document.getElementById('raceFieldsetLegend');
-  const raceDistanceLabel = document.getElementById('raceDistanceLabel');
   const raceDateLabel = document.getElementById('raceDateLabel');
   const distanceModeField = document.getElementById('distanceModeField');
   const distanceModeToggle = document.getElementById('distanceModeToggle');
   const presetDistanceField = document.getElementById('presetDistanceField');
   const raceDistanceSel = document.getElementById('raceDistance');
-  const raceDistanceHint = document.getElementById('raceDistanceHint');
   const customDistanceField = document.getElementById('customDistanceField');
   const customDistanceKm = document.getElementById('customDistanceKm');
   const raceDateInput = document.getElementById('raceDate');
@@ -404,103 +407,59 @@
     return goalTypeToggle.querySelector('input[name="goalType"]:checked').value;
   }
 
-  // #raceDistance's <option>s swap with goal type — race mode shows the
-  // real race distances (what they've always been, 4 options: 5k/10k/
-  // half/full); non-race modes show 3 English, qualitative-only labels
-  // instead (Short/Medium/Long Distance, no "5K"/"Half Marathon"/km
-  // anywhere) since this value is only ever used as a long-run-range/
-  // quality-session-mix template (see resolveRaceProfile in
-  // planGenerator.js) — nobody training without a race should be picking
-  // from a list of race names. Medium is a genuinely blended template
-  // (planGenerator.js's RACE_PROFILES.medium/QUALITY_ROTATIONS.medium)
-  // between 10k's and half's own entries, not just a relabeling of one of
-  // them — see NON_RACE_STYLE_VALUES below, which is why race mode's 10k/
-  // half options get hidden entirely for non-race rather than reused.
-  // `value`s for 5k/full (and so raceKey/raceDistanceKm downstream) are
-  // untouched either way.
-  const RACE_OPTION_LABELS = { '5k': '5K', '10k': '10K', half: 'Half Marathon (21.1K)', full: 'Full Marathon (42.2K)' };
-  const NON_RACE_OPTION_LABELS = { '5k': 'Short Distance', medium: 'Medium Distance', full: 'Long Distance' };
-  const RACE_STYLE_VALUES = ['5k', '10k', 'half', 'full'];
-  const NON_RACE_STYLE_VALUES = ['5k', 'medium', 'full'];
-  // Shown in #raceDistanceHint below the select, updated whenever the
-  // selection or goal type changes — describes what each non-race style
-  // actually trains WITHOUT naming the race distance it's templated off
-  // (per the user's explicit request), since a runner in this mode isn't
-  // running any of these distances.
-  const NON_RACE_OPTION_DESCRIPTIONS = {
-    '5k': 'Speed-focused: shorter long runs, a bigger share of fast/interval work.',
-    medium: 'Balanced mix of speed and endurance work, with moderate-length long runs.',
-    full: 'Endurance-focused: the highest weekly volume and the longest long runs.',
-  };
-
   const GOAL_TYPE_COPY = {
     race: {
       legend: '1. Detail Race',
-      distanceLabel: 'Jarak target',
       dateLabel: 'Tanggal race',
       hint: '',
     },
     baseBuilding: {
       legend: '1. Detail Base Building',
-      distanceLabel: 'Gaya latihan',
       dateLabel: 'Akhir blok training',
-      hint: 'Belum punya race? Volume mingguan tetap naik bertahap seperti training block biasa, cuma "gaya latihan" di bawah ini dipakai sebagai acuan rasio & variasi sesi — bukan race sungguhan. Blok berakhir di minggu evaluasi (deload + opsional time-trial), bukan hari race.',
+      hint: 'Belum punya race? Sesi mingguannya fokus easy run + 1x lari santai di pace marathon per minggu (bukan tempo/interval kayak race prep) — murni buat naikkan mileage & aerobic base. Volume naik bertahap sepanjang blok, lalu berakhir di minggu evaluasi (deload + opsional time-trial), bukan hari race.',
     },
     maintenance: {
       legend: '1. Detail Maintenance',
-      distanceLabel: 'Gaya latihan',
       dateLabel: 'Akhir blok training',
       hint: 'Cuma mau jaga fitness tanpa target race? Volume mingguan ditahan flat (tidak naik), dan sesi quality (tempo/interval) diselingi Fartlek secara berkala biar tidak monoton.',
     },
   };
 
-  function updateRaceDistanceHint() {
-    raceDistanceHint.textContent = getGoalType() === 'race' ? '' : (NON_RACE_OPTION_DESCRIPTIONS[raceDistanceSel.value] || '');
-  }
-  raceDistanceSel.addEventListener('change', updateRaceDistanceHint);
+  // Both non-race modes default internally to this "gaya latihan" — see
+  // planGenerator.js's RACE_PROFILES.medium/QUALITY_ROTATIONS.medium — with
+  // no way for the user to change it (per explicit request: Base Building
+  // no longer needs a choice here at all since its sessions are just easy +
+  // marathon-pace regardless of "style", and Maintenance's own quality-mix
+  // variety comes from QUALITY_ROTATIONS.medium + the Fartlek swap-in, not
+  // from picking a distance). #presetDistanceField/#distanceModeField (see
+  // updateGoalTypeUI) are hidden entirely for non-race rather than showing
+  // a fixed, un-editable value — nothing left to show the user.
+  const NON_RACE_DEFAULT_RACE_KEY = 'medium';
 
   function updateGoalTypeUI() {
     const goalType = getGoalType();
+    const isRace = goalType === 'race';
     const copy = GOAL_TYPE_COPY[goalType];
     raceFieldsetLegend.textContent = copy.legend;
-    raceDistanceLabel.textContent = copy.distanceLabel;
     raceDateLabel.textContent = copy.dateLabel;
     goalTypeHint.textContent = copy.hint;
 
-    const isRace = goalType === 'race';
-    const optionLabels = isRace ? RACE_OPTION_LABELS : NON_RACE_OPTION_LABELS;
-    const visibleValues = isRace ? RACE_STYLE_VALUES : NON_RACE_STYLE_VALUES;
-    const previousValue = raceDistanceSel.value;
-    Array.from(raceDistanceSel.options).forEach(opt => {
-      const visible = visibleValues.includes(opt.value);
-      opt.hidden = !visible;
-      const label = optionLabels[opt.value];
-      if (visible && label) opt.textContent = label;
-    });
-    // The value selected under the other goal type's option set might now
-    // be hidden (e.g. 'half'/'10k' when switching to non-race, or 'medium'
-    // when switching back to race) — <select> keeps a hidden option
-    // "selected" rather than auto-picking a visible one, so this needs to
-    // happen explicitly. Only ever reached with previousValue in {'10k',
-    // 'half'} (going non-race) or {'medium'} (going race) — 5k/full are
-    // in both sets already, so they'd never fail the check above.
-    if (!visibleValues.includes(previousValue)) {
-      raceDistanceSel.value = isRace ? 'half' : 'medium';
+    presetDistanceField.hidden = !isRace;
+    distanceModeField.hidden = !isRace;
+    if (isRace) {
+      if (raceDistanceSel.value === NON_RACE_DEFAULT_RACE_KEY) raceDistanceSel.value = 'half';
+      return;
     }
-    updateRaceDistanceHint();
-
-    // Custom km only makes sense as a real race distance — non-race modes
-    // always use one of the 3 preset styles above, so the whole
-    // preset/custom toggle (and its "Jarak custom" option) is hidden, and
-    // any custom selection already made is forced back to preset. Reuses
+    // Custom km only makes sense as a real race distance — force back to
+    // preset if a custom value was set under Race mode. Reuses
     // distanceModeToggle's own change handler (rather than duplicating its
     // presetDistanceField/customDistanceField/updateRecentRaceHint logic)
     // by dispatching a real change event after flipping the radio.
-    distanceModeField.hidden = !isRace;
-    if (!isRace && getDistanceMode() === 'custom') {
+    if (getDistanceMode() === 'custom') {
       distanceModeToggle.querySelector('input[value="preset"]').checked = true;
       distanceModeToggle.dispatchEvent(new Event('change', { bubbles: true }));
     }
+    raceDistanceSel.value = NON_RACE_DEFAULT_RACE_KEY;
   }
   goalTypeToggle.addEventListener('change', updateGoalTypeUI);
   updateGoalTypeUI();
@@ -742,19 +701,22 @@
   function gatherSettingsFromForm() {
     const goalType = getGoalType();
     // mode/nonRaceStyle passed straight through to PaceForgeGenerator —
-    // see its own settings-destructuring comment. raceDate/raceDistance
-    // are reused as the non-race block's end date / training style (see
-    // GOAL_TYPE_COPY above for the relabeled fields), not a real race.
+    // see its own settings-destructuring comment. raceDate is reused as the
+    // non-race block's end date, not a real race (see GOAL_TYPE_COPY
+    // above); raceDistance stays fixed at NON_RACE_DEFAULT_RACE_KEY (see
+    // updateGoalTypeUI) since neither non-race mode exposes a choice here.
     const mode = goalType === 'race' ? 'race' : 'nonRace';
     const nonRaceStyle = goalType === 'race' ? null : goalType;
     const isCustomDistance = getDistanceMode() === 'custom';
     let raceKey = raceDistanceSel.value;
     let raceDistanceKm = RACE_META[raceKey]?.km;
-    // Non-race: "Short/Medium/Long Distance" (NON_RACE_OPTION_LABELS), not
-    // RACE_META's own race-name label — shown verbatim in the summary
-    // card/PDF header, which would otherwise leak "5K"/"Half Marathon" back
-    // in right after the dropdown itself was relabeled to hide it.
-    let raceLabel = mode === 'race' ? RACE_META[raceKey]?.label : (NON_RACE_OPTION_LABELS[raceKey] || RACE_META[raceKey]?.label);
+    // Non-race: describes what the mode actually DOES (shown verbatim in
+    // the summary card/PDF header) rather than RACE_META's race-name label
+    // — there's no user-chosen "style" to show any more (see
+    // NON_RACE_DEFAULT_RACE_KEY), so showing "Medium Distance" here would
+    // just be a confusing, unexplained constant.
+    const NON_RACE_LABEL = { baseBuilding: 'Aerobic Base', maintenance: 'Flat Volume' };
+    let raceLabel = mode === 'race' ? RACE_META[raceKey]?.label : NON_RACE_LABEL[nonRaceStyle];
     if (isCustomDistance) {
       raceKey = 'custom';
       raceDistanceKm = Number(customDistanceKm.value);
@@ -2656,7 +2618,7 @@
   // still refuses to touch those). MAX_AI_ADJUSTMENTS caps how many
   // sessions a single review can touch, regardless of how many Claude
   // returns.
-  const AI_ADJUSTABLE_TYPES = new Set(['easy', 'recovery', 'tempo', 'interval', 'repetition', 'fartlek']);
+  const AI_ADJUSTABLE_TYPES = new Set(['easy', 'recovery', 'tempo', 'interval', 'repetition', 'fartlek', 'marathonPace']);
   const MAX_AI_ADJUSTMENTS = 5;
 
   // Applies Claude's suggested per-day distance adjustments to an
