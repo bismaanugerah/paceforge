@@ -922,7 +922,27 @@ const PaceForgeGenerator = (() => {
     // weeklySplitForDays divides the week's non-long-run budget across
     // more slots) is what actually prevents the original ballooning
     // symptom, without needing a day-based multiplier on top of it.
-    const maxSupportKm = profile.maxSupportKm;
+    //
+    // Scaling by the runner's own currentWeeklyKm is a different axis,
+    // though, and IS needed: profile.maxSupportKm was sourced from Hal
+    // Higdon's Intermediate 1 plans at whatever peak volume those specific
+    // published plans reach (see RACE_PROFILES' own comment) — a runner
+    // who's already well past that reference volume before this plan even
+    // starts genuinely needs longer support sessions to make sense at
+    // their scale (a fixed 10km "easy run" ceiling is realistic for
+    // someone building toward ~50km/week total, not for someone who
+    // already runs 60km/week). referenceWeeklyKm reconstructs roughly what
+    // peak weekly volume those Higdon plans (all 5 days/week — see above)
+    // were themselves running, from the one number already sourced from
+    // them (longRunMax) via this file's own 5-day long-run share, so nothing
+    // new needs sourcing. Floored at 1 (never shrinks the ceiling below its
+    // sourced value — a low-volume runner's proportional share is already
+    // small on its own, this only ever needs to grow) and capped at 2.5x so
+    // an extreme currentWeeklyKm input doesn't blow the ceiling out to an
+    // implausible number.
+    const referenceWeeklyKm = profile.longRunMax / weeklySplitForDays(5).longRunShare;
+    const supportKmScaleFactor = clamp(currentWeeklyKm / referenceWeeklyKm, 1, 2.5);
+    const maxSupportKm = profile.maxSupportKm * supportKmScaleFactor;
     const isFullMarathonPlan = profile === RACE_PROFILES.full;
     // Race-specific long run (MSL, or its half-marathon equivalent): a
     // long run partly held at goal race pace (see
