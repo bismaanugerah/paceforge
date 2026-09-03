@@ -65,10 +65,14 @@ sama sekali -- atau "nonRace") dan "nonRaceStyle" ("baseBuilding" atau
 - "maintenance": tujuan pelari MENJAGA fitness (volume mingguannya sengaja
   flat, bukan naik) -- jangan tulis catatan seolah-olah dia sedang
   "membangun" menuju puncak, karena memang tidak ada puncak yang dikejar.
-- Minggu terakhir berjenis sesi "evaluation" (bukan "race") -- itu cuma
-  self-test ringan/opsional, BUKAN race sungguhan. Isi "raceDayTips" untuk
-  kasus ini dengan tips seputar minggu evaluasi/deload itu (bukan pacing
-  race hari-H) dan/atau saran buat blok berikutnya, bukan tips race day.
+- Minggu terakhir berjenis sesi "evaluation" (bukan "race") -- kalau
+  conservativeMode aktif itu cuma self-test ringan; kalau TIDAK, itu Time
+  Trial 5K sungguhan (lari secepat mungkin, tanpa target pace). Isi
+  "raceDayTips" untuk kasus ini dengan tips pacing/strategi buat Time
+  Trial-nya sendiri (bukan pacing race hari-H) DAN saran eksplisit buat
+  catat waktu hasilnya lalu masukkan sebagai "waktu race terakhir" (5K)
+  pas generate plan berikutnya -- itu yang bikin plan berikutnya makin
+  akurat.
 - Sesi berjenis "fartlek" itu unstructured (surge+jog santai sesuai
   feeling) -- jangan disarankan lewat "adjustments" (memang tidak termasuk
   daftar jenis yang boleh disarankan di poin 1 di bawah).

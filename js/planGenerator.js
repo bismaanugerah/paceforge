@@ -852,7 +852,10 @@ const PaceForgeGenerator = (() => {
     shakeout: 'Shakeout Run',
     fartlek: 'Fartlek',
     marathonPace: 'Marathon Pace Run',
-    evaluation: 'Evaluasi / Time Trial',
+    // Distance shown separately in its own column (5km, or a lighter
+    // self-test distance in conservativeMode — see generatePlan's 'race'
+    // day-type branch), not baked into this label.
+    evaluation: 'Time Trial',
     rest: 'Rest',
     // Not a real day.type — a rest day is always 'rest' in the data model.
     // This is a display-only key (see app.js's restDisplayKey) a weekday
@@ -981,6 +984,9 @@ const PaceForgeGenerator = (() => {
     const warnings = [];
     if (conservativeMode) {
       warnings.push('Mode latihan konservatif aktif — kenaikan volume mingguan, porsi speedwork, dan kenaikan jarak long run di plan ini sengaja diturunkan untuk menjaga cedera/nyeri yang kamu tandai. Kalau nyeri berlanjut, konsultasikan ke dokter/fisioterapis olahraga.');
+    }
+    if (isNonRace && !conservativeMode && taperWeeks > 0) {
+      warnings.push('Minggu terakhir ada Time Trial 5K opsional — lari secepat yang bisa kamu jaga (bukan target pace tertentu, ini beda dari sesi lain di plan ini), lalu catat waktumu. Waktu itu bisa dimasukkan sebagai "waktu race terakhir" (pilih jarak 5K) pas generate plan berikutnya, supaya estimasi pace & VDOT-nya makin akurat dari kondisimu yang sekarang — bukan wajib, tapi lebih informatif daripada nebak.');
     }
     if (weeksAvailable < profile.recWeeks) {
       // raceLabel is a real race name in race mode, but "Aerobic Base"/
@@ -1637,14 +1643,29 @@ const PaceForgeGenerator = (() => {
 
         if (type === 'race') {
           if (isNonRace) {
-            // No real race to run — this slot becomes a light self-test
-            // instead: a short, moderately-hard effort (not the full
-            // "gaya latihan" distance, and not goal pace) sized off this
-            // block's own peak volume, mainly there as an optional
-            // checkpoint before the next block starts.
+            // No real race to run — this slot becomes a genuine Time Trial
+            // instead: a fixed, standard 5K (matching RACE_META['5k'].km in
+            // js/app.js, so a result plugged back in as "waktu race
+            // terakhir" maps directly onto the existing 5K option) run at
+            // real max-sustainable effort, not a pace this file prescribes
+            // — deliberately no paceSecPerKm set (see js/app.js's Pace
+            // Target column, which shows "Time Trial" instead of a zone
+            // for this type) — the whole point is discovering current
+            // fitness by racing it, not hitting a target. This is what
+            // feeds the NEXT block: the runner's own recorded time becomes
+            // that plan's recentRaceTimeSec/recentRaceDistanceKm input
+            // (see the warnings.push below).
+            //
+            // conservativeMode (injury/pain flagged) keeps the old lighter,
+            // non-maximal self-test instead — a real time trial's whole
+            // premise (max sustainable effort) isn't appropriate there.
             dayObj.type = 'evaluation';
-            dayObj.km = Math.max(2, Math.round(clamp(peakWeeklyKm * 0.15, 3, 10) * 2) / 2);
-            dayObj.paceSecPerKm = weekPaces.tempo;
+            if (conservativeMode) {
+              dayObj.km = Math.max(2, Math.round(clamp(peakWeeklyKm * 0.15, 3, 10) * 2) / 2);
+              dayObj.paceSecPerKm = weekPaces.tempo;
+            } else {
+              dayObj.km = 5;
+            }
             if (dayObj.km > 0) dayObj.structure = buildSimpleStructure(dayObj.km);
             return;
           }

@@ -134,10 +134,12 @@
     // target.
     fartlek: 'interval',
     marathonPace: 'marathon',
-    // Evaluation's paceSecPerKm is weekPaces.tempo (see generatePlan's
-    // isNonRace 'race'-day-type branch) — showing "Tempo" as its Pace
-    // Target is more informative than '—' and matches what it's actually
-    // paced at.
+    // Only actually used for the conservativeMode variant of 'evaluation'
+    // (a real self-test paced at weekPaces.tempo — see planGenerator.js's
+    // 'race'-day-type branch): a normal, non-conservative Time Trial has
+    // no prescribed pace, so the Pace Target column shows "Time Trial"
+    // instead, keyed off day.paceSecPerKm being unset rather than this
+    // zone mapping (see renderDayRow/the PDF export).
     evaluation: 'threshold',
   };
 
@@ -150,6 +152,21 @@
   function zoneForDay(day) {
     if (day.type === 'longRun' && day.isMarathonSpecific) return 'marathon';
     return TYPE_TO_ZONE[day.type] || null;
+  }
+
+  // Pace Target column text — shared by the on-screen day row and the PDF
+  // export so the two never drift. day.type === 'race' always gets "Race
+  // Pace" (day.paceSecPerKm is real goal race pace there). 'evaluation' is
+  // split on whether paceSecPerKm is actually set: conservativeMode's
+  // variant is a real self-test at weekPaces.tempo (falls through to its
+  // zone label, "Tempo"), while a normal Time Trial has no prescribed pace
+  // at all (see planGenerator.js's 'race'-day-type branch) — it wouldn't
+  // make sense to hit a target on a day whose whole point is discovering
+  // your own current pace by racing it.
+  function paceTargetLabel(day, zone) {
+    if (day.type === 'race') return 'Race Pace';
+    if (day.type === 'evaluation' && day.paceSecPerKm == null) return 'Time Trial';
+    return zone ? ZONE_SHORT_LABEL[zone] : '—';
   }
 
   function zoneColorHex(zone) {
@@ -2521,10 +2538,10 @@
             ? `${TYPE_LABELS.longRun} (Pace ${day.structure?.paceLabel || 'Marathon'})`
             : (TYPE_LABELS[displayKey] || displayKey));
           const km = day.km ? `${day.km} km` : '—';
-          // Same zone-name logic as renderDayRow (see there for why) so the
-          // PDF's Pace Target column matches the on-screen result exactly.
+          // Shared with renderDayRow (see paceTargetLabel) so the PDF's
+          // Pace Target column matches the on-screen result exactly.
           const zone = zoneForDay(day);
-          const pace = day.type === 'race' ? 'Race Pace' : (zone ? ZONE_SHORT_LABEL[zone] : '—');
+          const pace = paceTargetLabel(day, zone);
           body.push([day.dayName, day.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }), label, km, pace]);
           // type here is the display key (see restDisplayKey) so the cell
           // color below (TYPE_HEX[rowInfo.type]) picks up the same
@@ -2838,11 +2855,7 @@
     // day"). Race day gets its own label since goal race pace doesn't
     // cleanly belong to one of the 5 training zones.
     const zone = zoneForDay(day);
-    // Deliberately day.type here, not isRace — evaluation isn't paced at
-    // goal race pace (see TYPE_TO_ZONE.evaluation), so it should get its
-    // zone's own label (Tempo) like any other zone-mapped session, not
-    // "Race Pace".
-    const pace = day.type === 'race' ? 'Race Pace' : (zone ? ZONE_SHORT_LABEL[zone] : '—');
+    const pace = paceTargetLabel(day, zone);
     const color = TYPE_COLORS[displayKey] || 'var(--type-rest)';
     const structureRow = day.structure
       ? `<tr class="structure-row ${rowClass}"><td colspan="5">${renderWorkoutStructure(day.structure, zone)}</td></tr>`
