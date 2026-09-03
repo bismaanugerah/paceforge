@@ -397,6 +397,17 @@
     return goalTypeToggle.querySelector('input[name="goalType"]:checked').value;
   }
 
+  // #raceDistance's <option> text swaps with goal type — race mode shows
+  // the real race distances (what they've always been); non-race modes
+  // show a qualitative distance/volume label instead, since "Full Marathon
+  // (42.2K)" reads as "you're running a marathon" even though this value
+  // is only ever used as a template for long-run range/quality-session mix
+  // (see resolveRaceProfile in planGenerator.js) — nobody training without
+  // a race should be picking from a list of race names. `value`s (and so
+  // raceKey/raceDistanceKm downstream) are untouched either way.
+  const RACE_OPTION_LABELS = { '5k': '5K', '10k': '10K', half: 'Half Marathon (21.1K)', full: 'Full Marathon (42.2K)' };
+  const NON_RACE_OPTION_LABELS = { '5k': 'Jarak Pendek', '10k': 'Jarak Menengah', half: 'Jarak Panjang', full: 'Jarak Sangat Panjang' };
+
   const GOAL_TYPE_COPY = {
     race: {
       legend: '1. Detail Race',
@@ -419,11 +430,18 @@
   };
 
   function updateGoalTypeUI() {
-    const copy = GOAL_TYPE_COPY[getGoalType()];
+    const goalType = getGoalType();
+    const copy = GOAL_TYPE_COPY[goalType];
     raceFieldsetLegend.textContent = copy.legend;
     raceDistanceLabel.textContent = copy.distanceLabel;
     raceDateLabel.textContent = copy.dateLabel;
     goalTypeHint.textContent = copy.hint;
+
+    const optionLabels = goalType === 'race' ? RACE_OPTION_LABELS : NON_RACE_OPTION_LABELS;
+    Array.from(raceDistanceSel.options).forEach(opt => {
+      const label = optionLabels[opt.value];
+      if (label) opt.textContent = label;
+    });
   }
   goalTypeToggle.addEventListener('change', updateGoalTypeUI);
   updateGoalTypeUI();
