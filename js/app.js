@@ -255,6 +255,7 @@
   const resultSection = document.getElementById('resultSection');
   const resultWarning = document.getElementById('resultWarning');
   const summaryCards = document.getElementById('summaryCards');
+  const volumeChart = document.getElementById('volumeChart');
   const paceLegend = document.getElementById('paceLegend');
   const planWeeksEl = document.getElementById('planWeeks');
   const aiStatus = document.getElementById('aiStatus');
@@ -1785,6 +1786,79 @@
     `;
   }
 
+  // Bar chart of every week's totalKm, colored by phase (reuses
+  // PHASE_COLORS — the same colors already meaning that phase in each
+  // week's accordion header, not a new palette) — the accordion below only
+  // ever shows one week's total at a time, so without this a runner has
+  // to expand all of them just to see the plan's overall base-build-peak-
+  // taper shape. viewBox height is fixed and preserveAspectRatio="none" so
+  // bar heights stay visually comparable regardless of how many weeks the
+  // plan has (a marathon block can run 2-3x longer than a 5K block).
+  function renderVolumeChart(weeks, currentWeek) {
+    if (!weeks.length) { volumeChart.innerHTML = ''; return; }
+
+    const maxKm = Math.max(...weeks.map(w => w.totalKm), 1);
+    const barSlot = 34;
+    const barWidth = Math.min(22, barSlot - 8);
+    const barMaxHeight = 90;
+    const chartWidth = weeks.length * barSlot;
+
+    const bars = weeks.map((week, i) => {
+      const height = Math.max(2, Math.round((week.totalKm / maxKm) * barMaxHeight));
+      const x = i * barSlot + (barSlot - barWidth) / 2;
+      const y = barMaxHeight - height;
+      const color = PHASE_COLORS[week.phase] || 'var(--color-text-muted)';
+      const isCurrent = currentWeek && week.weekNumber === currentWeek.weekNumber;
+      // <title> as the group's first child (not a loose sibling of <rect>)
+      // is what makes it act as that bar's native hover tooltip — a title
+      // dumped flat into the <svg> wouldn't attach to any specific bar.
+      return `
+        <g class="volume-chart-bar-group">
+          <title>Minggu ${week.weekNumber} • ${week.phase} • ${week.totalKm} km</title>
+          <rect x="${x}" y="${y}" width="${barWidth}" height="${height}" rx="3" style="fill:${color}" opacity="${isCurrent ? 1 : 0.82}"></rect>
+          ${isCurrent ? `<circle cx="${x + barWidth / 2}" cy="${y - 6}" r="2.5" style="fill:var(--color-primary-dark)"></circle>` : ''}
+        </g>
+      `;
+    }).join('');
+
+    // Thin out labels on longer plans (marathon blocks run 16+ weeks) so
+    // they don't collide — always keep the first and last week's number
+    // legible regardless of step, since those anchor the x-axis.
+    const labelStep = weeks.length > 14 ? 2 : 1;
+    const labels = weeks.map((week, i) => {
+      const isEdge = week.weekNumber === 1 || week.weekNumber === weeks.length;
+      if (!isEdge && week.weekNumber % labelStep !== 0) return '';
+      const x = i * barSlot + barSlot / 2;
+      return `<text x="${x}" y="${barMaxHeight + 16}" text-anchor="middle" style="fill:var(--color-text-muted);font-size:9px">${week.weekNumber}</text>`;
+    }).join('');
+
+    const peakWeek = weeks.reduce((max, w) => (w.totalKm > max.totalKm ? w : max), weeks[0]);
+    const lastWeek = weeks[weeks.length - 1];
+    const ariaLabel = `Grafik volume lari mingguan: ${weeks[0].totalKm} km di minggu 1, naik ke puncak ${peakWeek.totalKm} km di minggu ${peakWeek.weekNumber}, lalu ${lastWeek.totalKm} km di minggu ${lastWeek.weekNumber}.`;
+
+    // Only lists phases this specific plan actually has (a short 5K block
+    // may never see Cutback, for instance) rather than a fixed 6-item
+    // legend that would otherwise mention phases nowhere in the chart.
+    const phasesPresent = [...new Set(weeks.map(w => w.phase))];
+    const legend = phasesPresent.map(phase => `
+      <span class="volume-chart-legend-item">
+        <span class="volume-chart-legend-dot" style="background:${PHASE_COLORS[phase] || 'var(--color-text-muted)'}"></span>${phase}
+      </span>
+    `).join('');
+
+    volumeChart.innerHTML = `
+      <div class="pace-zone-header">
+        <span class="pace-zone-title">📈 Volume Mingguan</span>
+        <span class="pace-zone-source">Peak ${peakWeek.totalKm} km di minggu ${peakWeek.weekNumber}</span>
+      </div>
+      <svg class="volume-chart-bars" viewBox="0 0 ${chartWidth} ${barMaxHeight + 22}" preserveAspectRatio="none" role="img" aria-label="${ariaLabel}">
+        ${bars}
+        ${labels}
+      </svg>
+      <div class="volume-chart-legend">${legend}</div>
+    `;
+  }
+
   function renderPlan(plan) {
     lastPlan = plan;
     const { meta, warnings, weeks } = plan;
@@ -1824,6 +1898,13 @@
       ` : ''}
     `;
 
+    // Hoisted above renderVolumeChart/the weeks loop below — both need to
+    // know which week is "now" (the chart to mark it, the loop to open it
+    // by default and badge it).
+    const currentWeek = findCurrentWeek(weeks);
+
+    renderVolumeChart(weeks, currentWeek);
+
     // Zona Pace — full 5-zone VDOT table (Jack Daniels methodology, same
     // one popularized by calculators like vdoto2.com), computed from the
     // runner's actual recent-race performance when available, or from the
@@ -1840,7 +1921,6 @@
     // analysis card per day) doesn't dump its entire length on screen at
     // once. Only the week most relevant right now starts open; see
     // defaultOpenWeekNumber below for which one that is.
-    const currentWeek = findCurrentWeek(weeks);
     const defaultOpenWeekNumber = pickDefaultOpenWeek(weeks, currentWeek);
     planWeeksEl.innerHTML = weeks.map(week => {
       const vdot = weekVdot(meta, week);
