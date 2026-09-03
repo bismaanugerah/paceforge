@@ -930,12 +930,25 @@ const PaceForgeGenerator = (() => {
       const paceLevelMultiplier = currentEquivPaceSec >= PACE_LEVEL_NEUTRAL_SEC
         ? Math.min(PACE_LEVEL_CEILING_FACTOR, 1 + (currentEquivPaceSec - PACE_LEVEL_NEUTRAL_SEC) * PACE_LEVEL_SLOW_SLOPE)
         : paceLevelFastFactor(currentEquivPaceSec);
+      // qualityGainMultiplier/volumeGainMultiplier/paceLevelMultiplier each
+      // have their own individually-modest ceiling (1.3/1.25/1.17), but
+      // multiplied together they stack: a runner who happens to hit the
+      // favorable end of all three at once (2 quality sessions, well under
+      // the volume plateau, starting pace slower than 6:00/km) gets
+      // 1.3*1.25*1.17 ≈ 1.90x — nearly double CONSERVATIVE_FITNESS_GAIN_PCT's
+      // own "deliberately modest" base rate, which defeats the point of
+      // that base rate being conservative in the first place. Capped at
+      // 1.3x combined (only clamps the aggressive/upper tail — a fast
+      // runner's paceLevelMultiplier can still legitimately pull the
+      // product well BELOW 1, correctly projecting less room to improve)
+      // so at most one factor's worth of "extra stimulus" credit applies,
+      // not all three simultaneously.
+      const STIMULUS_MULTIPLIER_CAP = 1.3;
+      const stimulusMultiplier = Math.min(STIMULUS_MULTIPLIER_CAP, qualityGainMultiplier * volumeGainMultiplier * paceLevelMultiplier);
       const gainFraction = CONSERVATIVE_FITNESS_GAIN_PCT[fitnessLevel]
         * clamp(buildWeeks / profile.recWeeks, 0, 1)
         * (conservativeMode ? 0.5 : 1)
-        * qualityGainMultiplier
-        * volumeGainMultiplier
-        * paceLevelMultiplier;
+        * stimulusMultiplier;
       goalPaceSec = currentEquivPaceSec * (1 - gainFraction);
       goalPaceSource = 'recentRace';
     } else {
