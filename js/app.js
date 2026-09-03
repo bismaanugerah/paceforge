@@ -134,6 +134,11 @@
     // target.
     fartlek: 'interval',
     marathonPace: 'marathon',
+    // Evaluation's paceSecPerKm is weekPaces.tempo (see generatePlan's
+    // isNonRace 'race'-day-type branch) — showing "Tempo" as its Pace
+    // Target is more informative than '—' and matches what it's actually
+    // paced at.
+    evaluation: 'threshold',
   };
 
   // Short zone labels for the Pace Target column / bar tooltips — matches
@@ -1384,8 +1389,15 @@
     const dayA = week?.days.find(d => d.dow === dowA);
     const dayB = week?.days.find(d => d.dow === dowB);
     if (!dayA || !dayB) return false;
-    if (dayA.type === 'race' || dayB.type === 'race') {
-      alert('Race day nggak bisa dipindah — itu tanggal race sungguhan, bukan slot latihan.');
+    // 'evaluation' (non-race modes' self-test day, see planGenerator.js's
+    // isNonRace 'race'-day-type branch) is pinned to the block's own end
+    // date the exact same way 'race' is pinned to the runner's real race
+    // date — neither is a slot that can just move.
+    if (dayA.type === 'race' || dayB.type === 'race' || dayA.type === 'evaluation' || dayB.type === 'evaluation') {
+      const isEvaluation = dayA.type === 'evaluation' || dayB.type === 'evaluation';
+      alert(isEvaluation
+        ? 'Minggu evaluasi nggak bisa dipindah — itu tanggal akhir blok, bukan slot latihan.'
+        : 'Race day nggak bisa dipindah — itu tanggal race sungguhan, bukan slot latihan.');
       return false;
     }
     // Backstops the UI-level guards in renderDayRow/markCompletedSessionsFromStrava
@@ -2547,7 +2559,7 @@
               data.cell.styles.fontStyle = 'bold';
               data.cell.styles.halign = 'center';
             }
-            if (rowInfo.kind === 'day' && rowInfo.type === 'race') {
+            if (rowInfo.kind === 'day' && (rowInfo.type === 'race' || rowInfo.type === 'evaluation')) {
               data.cell.styles.fontStyle = data.cell.styles.fontStyle || 'bold';
               if (data.column.index !== 2) data.cell.styles.fillColor = [232, 234, 253];
             }
@@ -2801,7 +2813,10 @@
   function renderDayRow(day, weekNumber) {
     const { formatDate, TYPE_LABELS } = PaceForgeGenerator;
     const isRest = day.type === 'rest';
-    const isRace = day.type === 'race';
+    // 'evaluation' is treated identically to 'race' below (same pinned-to-
+    // a-real-date reasoning as attemptDaySwap's own guard) — kept named
+    // isRace since it still drives the 'is-race' CSS class either way.
+    const isRace = day.type === 'race' || day.type === 'evaluation';
     // Set by markCompletedSessionsFromStrava once a matching Strava
     // activity is found for this date — persisted on the day itself
     // (not just a DOM class) so it survives a reRenderWeek (e.g. after
@@ -2823,7 +2838,11 @@
     // day"). Race day gets its own label since goal race pace doesn't
     // cleanly belong to one of the 5 training zones.
     const zone = zoneForDay(day);
-    const pace = isRace ? 'Race Pace' : (zone ? ZONE_SHORT_LABEL[zone] : '—');
+    // Deliberately day.type here, not isRace — evaluation isn't paced at
+    // goal race pace (see TYPE_TO_ZONE.evaluation), so it should get its
+    // zone's own label (Tempo) like any other zone-mapped session, not
+    // "Race Pace".
+    const pace = day.type === 'race' ? 'Race Pace' : (zone ? ZONE_SHORT_LABEL[zone] : '—');
     const color = TYPE_COLORS[displayKey] || 'var(--type-rest)';
     const structureRow = day.structure
       ? `<tr class="structure-row ${rowClass}"><td colspan="5">${renderWorkoutStructure(day.structure, zone)}</td></tr>`

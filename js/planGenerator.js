@@ -981,7 +981,12 @@ const PaceForgeGenerator = (() => {
       warnings.push('Mode latihan konservatif aktif — kenaikan volume mingguan, porsi speedwork, dan kenaikan jarak long run di plan ini sengaja diturunkan untuk menjaga cedera/nyeri yang kamu tandai. Kalau nyeri berlanjut, konsultasikan ke dokter/fisioterapis olahraga.');
     }
     if (weeksAvailable < profile.recWeeks) {
-      warnings.push(`Waktu persiapanmu (${weeksAvailable} minggu) lebih pendek dari rekomendasi umum untuk ${raceLabel} (${profile.recWeeks} minggu). Plan ini dipadatkan — fokus jaga konsistensi dan hindari lompatan volume terlalu besar.`);
+      // raceLabel is a real race name in race mode, but "Aerobic Base"/
+      // "Flat Volume" (see js/app.js's NON_RACE_LABEL) in non-race mode —
+      // "rekomendasi umum untuk Aerobic Base" reads oddly, so this drops
+      // the label entirely for non-race rather than naming the block.
+      const recWeeksSubject = isNonRace ? 'blok latihan ini' : raceLabel;
+      warnings.push(`Waktu persiapanmu (${weeksAvailable} minggu) lebih pendek dari rekomendasi umum untuk ${recWeeksSubject} (${profile.recWeeks} minggu). Plan ini dipadatkan — fokus jaga konsistensi dan hindari lompatan volume terlalu besar.`);
     }
     const extraWeeks = weeksAvailable - profile.recWeeks;
     if (extraWeeks > 0) {
@@ -1013,7 +1018,14 @@ const PaceForgeGenerator = (() => {
       const prepGrowthWeeks = Math.min(extraWeeks, profile.recWeeks);
       const prepGrowthMultiplier = clamp(Math.pow(WEEKLY_GROWTH_RATE, prepGrowthWeeks), 1, PREP_GROWTH_CAP);
       const prepTargetWeeklyKm = Math.round(prepStartKm * prepGrowthMultiplier);
-      warnings.push(`Kamu punya ${extraWeeks} minggu ekstra sebelum race. Plan detail di bawah mencakup ${planWeeks} minggu terakhir (training block ${raceLabel} standar) — sebelum itu, manfaatkan buat naikkan base mileage bertahap dari ~${Math.round(prepStartKm)} ke sekitar ${prepTargetWeeklyKm} km/minggu (kira-kira +${Math.round((WEEKLY_GROWTH_RATE - 1) * 100)}% tiap minggu, laju kenaikan aman yang sama dipakai di plan ini). Plan di bawah tetap dihitung dari kondisimu sekarang — generate ulang lebih dekat ke tanggal mulai training kalau base mileage-mu sudah naik, supaya peak volume & long run-nya ikut menyesuaikan jadi lebih kuat.`);
+      // Same raceLabel concern as the short-time warning above — "training
+      // block Aerobic Base standar" reads oddly, and "sebelum race" is
+      // literally wrong when there's no race (raceDate is really just the
+      // block's own end date — see generatePlan's mode/nonRaceStyle
+      // comment). Non-race phrasing drops both.
+      const deadlineNoun = isNonRace ? 'akhir blok' : 'race';
+      const blockDescriptor = isNonRace ? 'blok yang kamu pilih' : `training block ${raceLabel} standar`;
+      warnings.push(`Kamu punya ${extraWeeks} minggu ekstra sebelum ${deadlineNoun}. Plan detail di bawah mencakup ${planWeeks} minggu terakhir (${blockDescriptor}) — sebelum itu, manfaatkan buat naikkan base mileage bertahap dari ~${Math.round(prepStartKm)} ke sekitar ${prepTargetWeeklyKm} km/minggu (kira-kira +${Math.round((WEEKLY_GROWTH_RATE - 1) * 100)}% tiap minggu, laju kenaikan aman yang sama dipakai di plan ini). Plan di bawah tetap dihitung dari kondisimu sekarang — generate ulang lebih dekat ke tanggal mulai training kalau base mileage-mu sudah naik, supaya peak volume & long run-nya ikut menyesuaikan jadi lebih kuat.`);
     }
 
     // Goal pace (sec/km), in priority order:
@@ -1771,7 +1783,8 @@ const PaceForgeGenerator = (() => {
     }
 
     if (rampLimited) {
-      warnings.push(`Long run puncak di jadwal ini (~${Math.round(actualPeakLongRunKm * 10) / 10} km) sengaja ditahan di bawah target ${Math.round(peakLongRunKm)} km, karena lari terjauhmu saat ini baru ${longestRecentRunKm} km — kenaikan jarak long run dinaikkan bertahap per minggu (maks ~${Math.round(MAX_LONG_RUN_JUMP_RATIO * 100)}%) supaya aman dari cedera. Kalau waktu persiapanmu masih cukup panjang, ini normal dan long run akan terus naik mendekati race day.`);
+      const approachingNoun = isNonRace ? 'akhir blok' : 'race day';
+      warnings.push(`Long run puncak di jadwal ini (~${Math.round(actualPeakLongRunKm * 10) / 10} km) sengaja ditahan di bawah target ${Math.round(peakLongRunKm)} km, karena lari terjauhmu saat ini baru ${longestRecentRunKm} km — kenaikan jarak long run dinaikkan bertahap per minggu (maks ~${Math.round(MAX_LONG_RUN_JUMP_RATIO * 100)}%) supaya aman dari cedera. Kalau waktu persiapanmu masih cukup panjang, ini normal dan long run akan terus naik mendekati ${approachingNoun}.`);
     }
     if (supportSessionCapped) {
       warnings.push(`Beberapa sesi easy run/tempo/interval/repetition di jadwal ini dibatasi maksimal ${Math.round(maxSupportKm * 10) / 10} km (repetition: ${MAX_REPETITION_SESSION_KM} km) — dengan volume mingguanmu yang cukup tinggi, porsi proporsionalnya bisa lebih jauh dari itu, tapi sesi selain long run sebaiknya tidak sejauh itu. Total mingguan jadi sedikit lebih rendah dari target sebagai konsekuensinya — lebih aman begitu daripada memaksakan sesi harian yang kepanjangan.`);
