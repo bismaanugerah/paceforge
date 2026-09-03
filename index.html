@@ -174,7 +174,11 @@
       <fieldset>
         <legend>4. Waktu Race Terakhir</legend>
         <p class="field-hint">Dipakai untuk memperkirakan pace &amp; waktu finish race targetmu (rumus Riegel), kalau kamu belum isi target waktu finish spesifik di bawah. Pilih race/lari terdekat jaraknya ke race targetmu — bukan harus 5K — supaya perkiraannya lebih akurat.</p>
-        <p class="field-hint" id="recentRaceSourceNote" hidden></p>
+        <!-- className is set in JS (js/app.js's setRecentRaceSourceNote) —
+             "strava-fill-badge" (same badge as section 2's stravaFillBadge)
+             when the value shown actually came from Strava, "field-hint"
+             when it's just explaining that nothing was found. -->
+        <p id="recentRaceSourceNote" hidden></p>
         <div class="field-row" id="recentRaceFields">
           <div class="field">
             <label for="recentRaceDistance">Jarak race tersebut</label>

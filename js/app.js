@@ -389,6 +389,18 @@
     recentRaceHint.textContent = `Estimasi: ${formatDuration(predictedSec)} untuk ${raceKm} km (pace ${formatPace(predictedSec / raceKm)}). Dipakai otomatis sebagai goal pace kalau kamu tidak isi target waktu finish di bawah.`;
   }
 
+  // Sets recentRaceSourceNote's text AND look in one place: `badge: true`
+  // reuses the exact same green "strava-fill-badge" style as section 2's
+  // stravaFillBadge (see index.html) for a value that actually came from
+  // Strava (a real race or a detected estimate) — `badge: false` falls back
+  // to a plain field-hint for the "nothing found" case, which isn't Strava
+  // data at all, just an explanation of its absence.
+  function setRecentRaceSourceNote(text, badge) {
+    recentRaceSourceNote.textContent = text;
+    recentRaceSourceNote.className = badge ? 'strava-fill-badge' : 'field-hint';
+    recentRaceSourceNote.hidden = false;
+  }
+
   // Manually touching any of these fields invalidates whatever "dari Strava"
   // / "estimasi" provenance note was showing (see applyStravaSummaryToForm,
   // which sets it) — the number on screen is now the user's own edit, not
@@ -1310,19 +1322,21 @@
       // genuine Strava-tagged race from the best quality segment found
       // within an otherwise-untagged run — worth saying out loud, since the
       // two are different-confidence signals even though they fill the
-      // exact same fields the exact same way.
-      recentRaceSourceNote.textContent = summary.recentRace.isEstimate
-        ? '📊 Estimasi dari segmen tercepat di salah satu sesi larimu (bukan race resmi di Strava) — edit di bawah kalau kamu punya waktu race asli.'
-        : '✓ Dari race yang kamu tandai di Strava.';
-      recentRaceSourceNote.hidden = false;
+      // exact same fields the exact same way. Both are real Strava data
+      // though, so both get the badge treatment (badge: true).
+      setRecentRaceSourceNote(
+        summary.recentRace.isEstimate
+          ? '📊 Estimasi dari segmen tercepat di salah satu sesi larimu (bukan race resmi di Strava) — edit di bawah kalau kamu punya waktu race asli.'
+          : '📊 Dari race yang kamu tandai di Strava.',
+        true,
+      );
       filledAny = true;
     } else {
       recentRaceHours.value = 0;
       recentRaceMinutes.value = 0;
       recentRaceSeconds.value = 0;
       updateRecentRaceHint();
-      recentRaceSourceNote.textContent = 'Belum ada race atau sesi cepat (≥3km) yang terdeteksi dari Strava-mu dalam 90 hari terakhir. Isi manual di bawah kalau ada, atau kosongkan — plan akan pakai pace default sesuai level fitnessmu.';
-      recentRaceSourceNote.hidden = false;
+      setRecentRaceSourceNote('Belum ada race atau sesi cepat (≥3km) yang terdeteksi dari Strava-mu dalam 90 hari terakhir. Isi manual di bawah kalau ada, atau kosongkan — plan akan pakai pace default sesuai level fitnessmu.', false);
     }
     if (Array.isArray(summary.suggestedDaysOfWeek) && summary.suggestedDaysOfWeek.length) {
       const daysPerWeek = Number(daysPerWeekInput.value);
