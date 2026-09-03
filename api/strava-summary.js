@@ -62,7 +62,7 @@ module.exports = async (req, res) => {
 
     const afterEpoch = Math.floor(Date.now() / 1000) - LOOKBACK_DAYS * 24 * 3600;
     const runs = await fetchRecentRuns(accessToken, afterEpoch);
-    const summary = summarizeRuns(runs);
+    const summary = await summarizeRuns(runs, accessToken);
 
     // Best-effort caching too — the summary is already computed and about
     // to be returned below either way, a caching failure shouldn't turn

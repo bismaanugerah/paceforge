@@ -213,8 +213,6 @@
   const dayCheckboxes = document.getElementById('dayCheckboxes');
   const dayCountHint = document.getElementById('dayCountHint');
   const longRunDaySelect = document.getElementById('longRunDay');
-  const hasRecentRace = document.getElementById('hasRecentRace');
-  const recentRaceFields = document.getElementById('recentRaceFields');
   const recentRaceDistanceSel = document.getElementById('recentRaceDistance');
   const recentRaceCustomField = document.getElementById('recentRaceCustomField');
   const recentRaceCustomKm = document.getElementById('recentRaceCustomKm');
@@ -222,6 +220,7 @@
   const recentRaceMinutes = document.getElementById('recentRaceMinutes');
   const recentRaceSeconds = document.getElementById('recentRaceSeconds');
   const recentRaceHint = document.getElementById('recentRaceHint');
+  const recentRaceSourceNote = document.getElementById('recentRaceSourceNote');
   const hasTargetTime = document.getElementById('hasTargetTime');
   const targetInputWrap = document.getElementById('targetInputWrap');
   const targetModeToggle = document.getElementById('targetModeToggle');
@@ -360,8 +359,18 @@
 
   const DEFAULT_RECENT_RACE_HINT = recentRaceHint.textContent;
 
+  // No more opt-in checkbox gating these fields (see index.html's own
+  // comment on the fieldset) — "has a recent race" is now just "the time
+  // fields add up to something", checked fresh from the inputs themselves
+  // rather than a separate boolean the user has to remember to tick.
+  function hasRecentRaceTimeEntered() {
+    return (Number(recentRaceHours.value) || 0) * 3600
+      + (Number(recentRaceMinutes.value) || 0) * 60
+      + (Number(recentRaceSeconds.value) || 0) > 0;
+  }
+
   function updateRecentRaceHint() {
-    if (!hasRecentRace.checked) {
+    if (!hasRecentRaceTimeEntered()) {
       recentRaceHint.textContent = DEFAULT_RECENT_RACE_HINT;
       return;
     }
@@ -371,8 +380,8 @@
     const recentTimeSec = h * 3600 + m * 60 + s;
     const fromKm = getRecentRaceDistanceKm();
     const raceKm = getCurrentRaceDistanceKm();
-    if (recentTimeSec <= 0 || !fromKm || !raceKm) {
-      recentRaceHint.textContent = 'Isi jarak & waktu race yang valid untuk melihat estimasi.';
+    if (!fromKm || !raceKm) {
+      recentRaceHint.textContent = 'Isi jarak race yang valid untuk melihat estimasi.';
       return;
     }
     const { predictRaceTime, formatDuration, formatPace } = PaceForgeGenerator;
@@ -380,15 +389,25 @@
     recentRaceHint.textContent = `Estimasi: ${formatDuration(predictedSec)} untuk ${raceKm} km (pace ${formatPace(predictedSec / raceKm)}). Dipakai otomatis sebagai goal pace kalau kamu tidak isi target waktu finish di bawah.`;
   }
 
-  hasRecentRace.addEventListener('change', () => {
-    recentRaceFields.hidden = !hasRecentRace.checked;
-    updateRecentRaceHint();
-  });
+  // Manually touching any of these fields invalidates whatever "dari Strava"
+  // / "estimasi" provenance note was showing (see applyStravaSummaryToForm,
+  // which sets it) — the number on screen is now the user's own edit, not
+  // what Strava reported, so it shouldn't keep claiming a source
+  // it no longer accurately describes.
+  function clearRecentRaceSourceNote() {
+    recentRaceSourceNote.hidden = true;
+    recentRaceSourceNote.textContent = '';
+  }
+
   recentRaceDistanceSel.addEventListener('change', () => {
     recentRaceCustomField.hidden = recentRaceDistanceSel.value !== 'custom';
     updateRecentRaceHint();
+    clearRecentRaceSourceNote();
   });
-  [recentRaceCustomKm, recentRaceHours, recentRaceMinutes, recentRaceSeconds].forEach(el => el.addEventListener('input', updateRecentRaceHint));
+  [recentRaceCustomKm, recentRaceHours, recentRaceMinutes, recentRaceSeconds].forEach(el => el.addEventListener('input', () => {
+    updateRecentRaceHint();
+    clearRecentRaceSourceNote();
+  }));
   raceDistanceSel.addEventListener('change', updateRecentRaceHint);
   customDistanceKm.addEventListener('input', updateRecentRaceHint);
 
@@ -571,13 +590,12 @@
 
     let recentRaceTimeSec = null;
     let recentRaceDistanceKm = null;
-    if (hasRecentRace.checked) {
+    if (hasRecentRaceTimeEntered()) {
       const h = Number(recentRaceHours.value) || 0;
       const m = Number(recentRaceMinutes.value) || 0;
       const s = Number(recentRaceSeconds.value) || 0;
       recentRaceTimeSec = h * 3600 + m * 60 + s;
       recentRaceDistanceKm = getRecentRaceDistanceKm();
-      if (recentRaceTimeSec <= 0) { showError('Isi waktu race terakhir yang valid.'); return null; }
       if (!recentRaceDistanceKm || recentRaceDistanceKm <= 0) { showError('Isi jarak race terakhir yang valid.'); return null; }
     }
 
@@ -666,9 +684,7 @@
     updateLongRunDayOptions();
     longRunDaySelect.value = String(settings.longRunDay);
 
-    hasRecentRace.checked = settings.recentRaceTimeSec != null;
-    recentRaceFields.hidden = !hasRecentRace.checked;
-    if (hasRecentRace.checked) {
+    if (settings.recentRaceTimeSec != null) {
       const isPreset = ['5', '10', '15', '21.1', '42.2'].includes(String(settings.recentRaceDistanceKm));
       recentRaceDistanceSel.value = isPreset ? String(settings.recentRaceDistanceKm) : 'custom';
       recentRaceCustomField.hidden = isPreset;
@@ -676,7 +692,16 @@
       recentRaceHours.value = Math.floor(settings.recentRaceTimeSec / 3600);
       recentRaceMinutes.value = Math.floor((settings.recentRaceTimeSec % 3600) / 60);
       recentRaceSeconds.value = settings.recentRaceTimeSec % 60;
+    } else {
+      recentRaceHours.value = 0;
+      recentRaceMinutes.value = 0;
+      recentRaceSeconds.value = 0;
     }
+    // A restored saved plan's settings carry no source provenance (see
+    // savePlanForCurrentUser — only the plain time/distance is persisted,
+    // not whether it originally came from a Strava race vs. estimate vs. a
+    // manual edit), so there's nothing accurate left to label it with.
+    clearRecentRaceSourceNote();
     updateRecentRaceHint();
 
     hasTargetTime.checked = settings.targetTimeSec != null;
@@ -1228,7 +1253,7 @@
   const DUMMY_STRAVA_SUMMARY = {
     currentWeeklyKm: 24,
     longestRecentRunKm: 12.5,
-    recentRace: { distanceKm: 10, timeSec: 52 * 60 + 30 },
+    recentRace: { distanceKm: 10, timeSec: 52 * 60 + 30, isEstimate: false },
     suggestedDaysOfWeek: [2, 4, 6, 0],
   };
 
@@ -1273,8 +1298,6 @@
       filledAny = true;
     }
     if (summary.recentRace) {
-      hasRecentRace.checked = true;
-      recentRaceFields.hidden = false;
       const isPreset = ['5', '10', '15', '21.1', '42.2'].includes(String(summary.recentRace.distanceKm));
       recentRaceDistanceSel.value = isPreset ? String(summary.recentRace.distanceKm) : 'custom';
       recentRaceCustomField.hidden = isPreset;
@@ -1283,7 +1306,23 @@
       recentRaceMinutes.value = Math.floor((summary.recentRace.timeSec % 3600) / 60);
       recentRaceSeconds.value = summary.recentRace.timeSec % 60;
       updateRecentRaceHint();
+      // isEstimate (see server/strava.js's summarizeRuns) distinguishes a
+      // genuine Strava-tagged race from the best quality segment found
+      // within an otherwise-untagged run — worth saying out loud, since the
+      // two are different-confidence signals even though they fill the
+      // exact same fields the exact same way.
+      recentRaceSourceNote.textContent = summary.recentRace.isEstimate
+        ? '📊 Estimasi dari segmen tercepat di salah satu sesi larimu (bukan race resmi di Strava) — edit di bawah kalau kamu punya waktu race asli.'
+        : '✓ Dari race yang kamu tandai di Strava.';
+      recentRaceSourceNote.hidden = false;
       filledAny = true;
+    } else {
+      recentRaceHours.value = 0;
+      recentRaceMinutes.value = 0;
+      recentRaceSeconds.value = 0;
+      updateRecentRaceHint();
+      recentRaceSourceNote.textContent = 'Belum ada race atau sesi cepat (≥3km) yang terdeteksi dari Strava-mu dalam 90 hari terakhir. Isi manual di bawah kalau ada, atau kosongkan — plan akan pakai pace default sesuai level fitnessmu.';
+      recentRaceSourceNote.hidden = false;
     }
     if (Array.isArray(summary.suggestedDaysOfWeek) && summary.suggestedDaysOfWeek.length) {
       const daysPerWeek = Number(daysPerWeekInput.value);

@@ -162,19 +162,20 @@
         </div>
       </fieldset>
 
-      <!-- Recent race / time-trial result -->
+      <!-- Recent race / time-trial result — no longer gated behind an
+           opt-in checkbox: always shown, since it's the main input driving
+           goal pace when no specific target finish time is set below. A
+           connected Strava account auto-fills this (a genuine tagged race
+           if one exists, otherwise the fastest quality segment found within
+           an ordinary run — see recentRaceSourceNote's own states below for
+           how those two get labeled differently); without a match, the
+           note explains the fallback instead of leaving the checkbox
+           silently unchecked. -->
       <fieldset>
-        <legend>4. Waktu Race Terakhir (opsional)</legend>
-        <div class="field checkbox-field">
-          <label class="checkbox-option">
-            <input type="checkbox" id="hasRecentRace" name="hasRecentRace">
-            <span>
-              <span class="checkbox-option-title">Saya punya waktu race/time-trial terakhir</span>
-              <span class="checkbox-option-desc">Dipakai untuk memperkirakan pace &amp; waktu finish race targetmu (rumus Riegel), kalau kamu belum isi target waktu finish spesifik di bawah. Pilih race/lari terdekat jaraknya ke race targetmu — bukan harus 5K — supaya perkiraannya lebih akurat.</span>
-            </span>
-          </label>
-        </div>
-        <div class="field-row" id="recentRaceFields" hidden>
+        <legend>4. Waktu Race Terakhir</legend>
+        <p class="field-hint">Dipakai untuk memperkirakan pace &amp; waktu finish race targetmu (rumus Riegel), kalau kamu belum isi target waktu finish spesifik di bawah. Pilih race/lari terdekat jaraknya ke race targetmu — bukan harus 5K — supaya perkiraannya lebih akurat.</p>
+        <p class="field-hint" id="recentRaceSourceNote" hidden></p>
+        <div class="field-row" id="recentRaceFields">
           <div class="field">
             <label for="recentRaceDistance">Jarak race tersebut</label>
             <select id="recentRaceDistance" name="recentRaceDistance">
@@ -196,14 +197,14 @@
           </div>
           <div class="field field-small">
             <label for="recentRaceMinutes">Menit</label>
-            <input type="number" id="recentRaceMinutes" min="0" max="59" step="1" value="30">
+            <input type="number" id="recentRaceMinutes" min="0" max="59" step="1" value="0">
           </div>
           <div class="field field-small">
             <label for="recentRaceSeconds">Detik</label>
             <input type="number" id="recentRaceSeconds" min="0" max="59" step="1" value="0">
           </div>
         </div>
-        <p class="field-hint" id="recentRaceHint">Kalau diisi dan kamu tidak set target waktu finish di bawah, PaceForge akan memperkirakan waktu finish &amp; pace latihanmu dari hasil race ini (pakai rumus prediksi race time Riegel).</p>
+        <p class="field-hint" id="recentRaceHint">Kalau diisi dan kamu tidak set target waktu finish di bawah, PaceForge akan memperkirakan waktu finish &amp; pace latihanmu dari hasil race ini (pakai rumus prediksi race time Riegel). Kosongkan kalau memang belum punya data race/lari cepat — plan akan pakai pace default sesuai level fitnessmu.</p>
       </fieldset>
 
       <!-- Goal pace -->

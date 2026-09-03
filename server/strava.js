@@ -7,6 +7,10 @@
 
 const TOKEN_URL = 'https://www.strava.com/oauth/token';
 const ACTIVITIES_URL = 'https://www.strava.com/api/v3/athlete/activities';
+// Single-activity DETAIL endpoint (note: /activities/{id}, not
+// /athlete/activities) — only this one, not the list endpoint above,
+// includes `best_efforts` (see bestEffortWithinRuns below).
+const ACTIVITY_DETAIL_URL = 'https://www.strava.com/api/v3/activities';
 
 function getCredentials() {
   // Same client ID value as js/config.js (it's public, not a secret) — set
@@ -77,6 +81,16 @@ function daysAgo(n) {
   return new Date(Date.now() - n * 24 * 3600 * 1000);
 }
 
+// Fetches one activity's full detail — needed only for `best_efforts` (see
+// bestEffortWithinRuns below), which the list endpoint fetchRecentRuns uses
+// doesn't include.
+async function fetchActivityDetail(accessToken, activityId) {
+  const res = await fetch(`${ACTIVITY_DETAIL_URL}/${activityId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || `Strava activity detail fetch gagal (${res.status})`);
+  return data;
+}
+
 // Strava's start_date_local is the athlete's local wall-clock time,
 // serialized as ISO 8601 but with a 'Z' suffix as if it were UTC (Strava's
 // own documented quirk) — so a Date parsed from it has the *local*
@@ -102,18 +116,101 @@ function riegelPredict(timeSec, fromKm, toKm) {
   return timeSec * Math.pow(toKm / fromKm, 1.06);
 }
 
+// workout_type === 1 is how Strava itself tags an activity as "Race" (set by
+// the athlete, either at upload or afterward in Strava). Among those, in the
+// last 3 months, picks the one that best represents current fitness — the
+// BEST performance (fastest 10K-equivalent time via Riegel), not simply the
+// most recently run one: a mediocre-effort race run last week is a worse
+// fitness signal than a strong one run six weeks ago. A tagged race is used
+// AS A WHOLE, start to finish — never trimmed to a faster-looking segment —
+// since Riegel's prediction assumes a single maximal, paced effort over the
+// full distance, which is exactly what a real race already is.
+function bestTaggedRace(runs, cutoff90) {
+  let best = null;
+  let bestEquivSec = Infinity;
+  for (const run of runs) {
+    const startedAt = new Date(run.start_date_local || run.start_date);
+    if (Number.isNaN(startedAt.getTime()) || startedAt < cutoff90) continue;
+    if (run.workout_type !== 1) continue;
+    const km = (run.distance || 0) / 1000;
+    if (!(km > 0) || !(run.moving_time > 0)) continue;
+    const equivSec = riegelPredict(run.moving_time, km, 10);
+    if (equivSec < bestEquivSec) {
+      bestEquivSec = equivSec;
+      best = { distanceKm: Math.round(km * 10) / 10, timeSec: Math.round(run.moving_time), equivSec };
+    }
+  }
+  return best;
+}
+
+const MIN_EFFORT_KM = 3; // below this, a "best effort" is more likely a stride/segment PR than a real pace signal
+const MAX_DETAIL_FETCHES = 8; // caps the extra per-activity API calls this adds — see bestEffortWithinRuns' own comment
+const MIN_PLAUSIBLE_PACE_SEC_PER_KM = 120; // 2:00/km — same implausibility floor js/planGenerator.js uses; catches GPS glitches before they become someone's goal pace
+
+// Most runners never manually tag a Strava activity "Race" — even a session
+// that WAS their best recent effort. Detecting a race-worthy performance
+// can't depend on that tag, so this instead looks at the fastest QUALITY
+// SEGMENT within an athlete's recent runs: a tempo/interval session's hard
+// portion, not diluted by that same run's warm up/cool down/recovery jogs
+// (which whole-activity average pace — all fetchRecentRuns' list endpoint
+// returns — can't separate out). Strava computes this itself per activity as
+// `best_efforts` (its "fastest 5K/10K/etc within this run" feature), but
+// only on the single-activity DETAIL endpoint, not the list one, so getting
+// it costs one extra API call per activity checked.
+// To stay well inside Strava's rate limit (200 req/15min — see
+// fetchRecentRuns above) this only fetches detail for a bounded shortlist:
+// the MAX_DETAIL_FETCHES fastest non-Race-tagged runs (by simple whole-
+// activity pace, Riegel-normalized) in the last 90 days — cheap to compute
+// from data already in hand, and a run whose OVERALL pace isn't at least
+// competitive has little chance of containing a genuinely fast segment
+// worth the extra call. Race-tagged runs are excluded here entirely — see
+// bestTaggedRace above, which handles those on their own terms.
+async function bestEffortWithinRuns(accessToken, runs, cutoff90) {
+  const candidates = runs.filter(run => {
+    const startedAt = new Date(run.start_date_local || run.start_date);
+    if (Number.isNaN(startedAt.getTime()) || startedAt < cutoff90) return false;
+    if (run.workout_type === 1) return false;
+    const km = (run.distance || 0) / 1000;
+    return km >= MIN_EFFORT_KM && run.moving_time > 0;
+  });
+  candidates.sort((a, b) => riegelPredict(a.moving_time, a.distance / 1000, 10) - riegelPredict(b.moving_time, b.distance / 1000, 10));
+  const shortlist = candidates.slice(0, MAX_DETAIL_FETCHES);
+
+  let best = null;
+  let bestEquivSec = Infinity;
+  await Promise.all(shortlist.map(async (run) => {
+    let detail;
+    try {
+      detail = await fetchActivityDetail(accessToken, run.id);
+    } catch {
+      return; // best-effort only (pun intended) — one failed detail fetch shouldn't break the whole summary
+    }
+    for (const effort of detail.best_efforts || []) {
+      const km = (effort.distance || 0) / 1000;
+      if (km < MIN_EFFORT_KM || !(effort.moving_time > 0)) continue;
+      if (effort.moving_time / km < MIN_PLAUSIBLE_PACE_SEC_PER_KM) continue; // implausibly fast — likely a GPS glitch, not a real effort
+      const equivSec = riegelPredict(effort.moving_time, km, 10);
+      if (equivSec < bestEquivSec) {
+        bestEquivSec = equivSec;
+        best = { distanceKm: Math.round(km * 10) / 10, timeSec: Math.round(effort.moving_time), equivSec };
+      }
+    }
+  }));
+  return best;
+}
+
 // Turns a raw Run-activity list into exactly the fields PaceForge's form
 // can use to prefill itself. See supabase/schema.sql + api/strava-summary.js
-// for how this gets cached.
-function summarizeRuns(runs) {
+// for how this gets cached. `accessToken` is only needed for
+// bestEffortWithinRuns' detail fetches — everything else here works purely
+// off the already-fetched `runs` list.
+async function summarizeRuns(runs, accessToken) {
   const cutoff28 = daysAgo(28);
   const cutoff90 = daysAgo(90);
   const cutoff56 = daysAgo(56);
 
   let km28 = 0;
   let longestKm90 = 0;
-  let bestRace = null;
-  let bestRaceEquivSec = Infinity; // bestRace's time normalized to a 10K-equivalent effort (Riegel), lower = better performance
   const dayOfWeekCounts = new Array(7).fill(0);
 
   for (const run of runs) {
@@ -124,24 +221,17 @@ function summarizeRuns(runs) {
     if (startedAt >= cutoff28) km28 += km;
     if (startedAt >= cutoff90) longestKm90 = Math.max(longestKm90, km);
     if (startedAt >= cutoff56) dayOfWeekCounts[startedAt.getDay()]++;
-
-    // workout_type === 1 is how Strava itself tags an activity as "Race"
-    // (set by the athlete, either at upload or afterward in Strava). Among
-    // those, in the last 3 months (matching longestKm90's window above),
-    // pick the one that best represents current fitness — the BEST
-    // performance (fastest 10K-equivalent time via Riegel), not simply the
-    // most recently run one: a mediocre-effort race run last week is a
-    // worse fitness signal than a strong one run six weeks ago (e.g. a
-    // supported long run someone tagged "Race" in Strava for logistics
-    // reasons, not as a timed effort, shouldn't win just for being newer).
-    if (run.workout_type === 1 && startedAt >= cutoff90 && km > 0 && run.moving_time > 0) {
-      const equivSec = riegelPredict(run.moving_time, km, 10);
-      if (equivSec < bestRaceEquivSec) {
-        bestRaceEquivSec = equivSec;
-        bestRace = run;
-      }
-    }
   }
+
+  // Compare the athlete's best tagged-race performance against the best
+  // quality segment found within their other runs, and keep whichever one
+  // is the stronger fitness signal (lower 10K-equivalent time) — not
+  // hardcoded to always prefer the tagged race, since an old/soft-effort
+  // "race" tag shouldn't outrank a genuinely faster recent tempo session.
+  const taggedRace = bestTaggedRace(runs, cutoff90);
+  const effortBest = await bestEffortWithinRuns(accessToken, runs, cutoff90);
+  const candidates = [taggedRace, effortBest].filter(Boolean).sort((a, b) => a.equivSec - b.equivSec);
+  const bestPerformance = candidates[0] || null;
 
   const suggestedDaysOfWeek = dayOfWeekCounts
     .map((count, dow) => ({ dow, count }))
@@ -165,9 +255,15 @@ function summarizeRuns(runs) {
   return {
     currentWeeklyKm: km28 > 0 ? Math.round(km28 / 4) : null,
     longestRecentRunKm: longestKm90 > 0 ? Math.round(longestKm90 * 10) / 10 : null,
-    recentRace: bestRace ? {
-      distanceKm: Math.round((bestRace.distance / 1000) * 10) / 10,
-      timeSec: Math.round(bestRace.moving_time),
+    // isEstimate: false only when bestPerformance came from a genuine
+    // Strava-tagged race (=== taggedRace); true when it's the best quality
+    // segment found within an otherwise-untagged run instead — see
+    // js/app.js's applyStravaSummaryToForm for how the two get labeled
+    // differently on the form.
+    recentRace: bestPerformance ? {
+      distanceKm: bestPerformance.distanceKm,
+      timeSec: bestPerformance.timeSec,
+      isEstimate: bestPerformance !== taggedRace,
     } : null,
     suggestedDaysOfWeek,
     recentRuns,
