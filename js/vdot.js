@@ -41,9 +41,9 @@ const PaceForgeVDOT = (() => {
   const ZONE_ORDER = ['easy', 'marathon', 'threshold', 'interval', 'repetition'];
 
   const ZONE_LABELS = {
-    easy: 'Easy (Santai)',
+    easy: 'Easy',
     marathon: 'Marathon',
-    threshold: 'Threshold (Tempo)',
+    threshold: 'Threshold',
     interval: 'Interval',
     repetition: 'Repetition',
   };

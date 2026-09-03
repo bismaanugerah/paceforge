@@ -85,10 +85,10 @@
     repetition: 'repetition',
   };
 
-  // Short zone labels for the Pace Target column / bar tooltips — the same
-  // 5 zones as PaceForgeVDOT.ZONE_LABELS but without that table's
-  // parenthetical explainer ("(Santai)"/"(Tempo)"), which would just repeat
-  // on every single row here instead of appearing once.
+  // Short zone labels for the Pace Target column / bar tooltips — matches
+  // PaceForgeVDOT.ZONE_LABELS except calling the threshold zone "Tempo"
+  // here, since that's the name the day-table's own session-type badges
+  // (TYPE_LABELS in planGenerator.js) use for it.
   const ZONE_SHORT_LABEL = { easy: 'Easy', marathon: 'Marathon', threshold: 'Tempo', interval: 'Interval', repetition: 'Repetition' };
 
   function zoneForDay(day) {
@@ -109,7 +109,7 @@
   // own zone color; 'easy' segments (warm up/cool down — genuinely easy-
   // pace running) use the Easy zone's green; 'recovery' segments (the jog
   // between hard reps) get their own fixed gray — the same
-  // --type-recovery color already used for "Lari Pemulihan" days
+  // --type-recovery color already used for "Recovery Run" days
   // elsewhere, since a recovery jog isn't really "Easy zone" pace so much
   // as its own thing, and reads more clearly as a visually distinct gray
   // than folded into the same green as warm up/cool down.
@@ -2517,7 +2517,7 @@
   // Interval/Repetition/Marathon — matching the Zona Pace table's colors
   // and the Pace Target column's zone name), its warm up/cool down by the
   // Easy zone (green), and the jog-recovery between reps by its own fixed
-  // gray (same as the "Lari Pemulihan" session-type color) rather than
+  // gray (same as the "Recovery Run" session-type color) rather than
   // folded into either. A plain continuous run (easy/recovery/long run/
   // shakeout) renders as a single solid block in its own zone's color;
   // interval/tempo sessions break down into their segments.
@@ -2551,7 +2551,7 @@
         segments.push({ label: 'Recovery', km: structure.recoveryKm, role: 'recovery', durationLabel: recoveryLabel });
       }
       segments.push({ label: 'Cool Down', km: structure.cooldownKm, role: 'easy' });
-      caption = `Warm up ${formatKm(structure.warmupKm)} → ${structure.reps}× (${formatKm(structure.workKm)} keras + ${recoveryLabel} pemulihan) → Cool down ${formatKm(structure.cooldownKm)}`;
+      caption = `Warm up ${formatKm(structure.warmupKm)} → ${structure.reps}× (${formatKm(structure.workKm)} hard + ${recoveryLabel} recovery) → Cool down ${formatKm(structure.cooldownKm)}`;
     } else if (structure.kind === 'tempo') {
       segments = [
         { label: 'Warm Up', km: structure.warmupKm, role: 'easy' },
@@ -2565,13 +2565,13 @@
       // buildRaceSpecificLongRunStructure in planGenerator.js for why that
       // order specifically.
       segments = [
-        { label: 'Santai', km: structure.easyKm, role: 'easy' },
+        { label: 'Easy', km: structure.easyKm, role: 'easy' },
         { label: `Pace ${structure.paceLabel}`, km: structure.paceKm, role: 'work' },
       ];
-      caption = `${formatKm(structure.easyKm)} santai → ${formatKm(structure.paceKm)} pace ${structure.paceLabel}`;
+      caption = `${formatKm(structure.easyKm)} easy → ${formatKm(structure.paceKm)} pace ${structure.paceLabel}`;
     } else {
       // 'simple' — a single continuous block, no warm up/cool down split.
-      segments = [{ label: 'Lari', km: structure.km, role: 'work' }];
+      segments = [{ label: 'Run', km: structure.km, role: 'work' }];
     }
     return { segments, caption };
   }

@@ -733,14 +733,14 @@ const PaceForgeGenerator = (() => {
   const MAX_REPETITION_SESSION_KM = 8;
 
   const TYPE_LABELS = {
-    recovery: 'Lari Pemulihan',
-    easy: 'Lari Santai',
-    longRun: 'Lari Jarak Jauh',
+    recovery: 'Recovery Run',
+    easy: 'Easy Run',
+    longRun: 'Long Run',
     tempo: 'Tempo Run',
     interval: 'Interval',
     repetition: 'Repetition',
-    shakeout: 'Lari Ringan (Shakeout)',
-    rest: 'Istirahat',
+    shakeout: 'Shakeout Run',
+    rest: 'Rest',
     race: 'RACE DAY! 🏁',
   };
 
@@ -1236,7 +1236,7 @@ const PaceForgeGenerator = (() => {
       // Week 1 only, and only when the full lead time is being used
       // (firstWeekStart landed before planStartAnchor — see above): drop
       // the days before planStartAnchor instead of showing them as
-      // scheduled-but-blank "Istirahat" rows the runner never actually
+      // scheduled-but-blank "Rest" rows the runner never actually
       // had training-wise, or session slots landing on a date before
       // they said they'd start. The per-day assignment loop below already
       // no-ops when a preferred day's dayObj isn't found (see `if
@@ -1473,7 +1473,7 @@ const PaceForgeGenerator = (() => {
       warnings.push(`Long run puncak di jadwal ini (~${Math.round(actualPeakLongRunKm * 10) / 10} km) sengaja ditahan di bawah target ${Math.round(peakLongRunKm)} km, karena lari terjauhmu saat ini baru ${longestRecentRunKm} km — kenaikan jarak long run dinaikkan bertahap per minggu (maks ~${Math.round(MAX_LONG_RUN_JUMP_RATIO * 100)}%) supaya aman dari cedera. Kalau waktu persiapanmu masih cukup panjang, ini normal dan long run akan terus naik mendekati race day.`);
     }
     if (supportSessionCapped) {
-      warnings.push(`Beberapa sesi lari santai/tempo/interval/repetition di jadwal ini dibatasi maksimal ${Math.round(maxSupportKm * 10) / 10} km (repetition: ${MAX_REPETITION_SESSION_KM} km) — dengan volume mingguanmu yang cukup tinggi, porsi proporsionalnya bisa lebih jauh dari itu, tapi sesi selain long run sebaiknya tidak sejauh itu. Total mingguan jadi sedikit lebih rendah dari target sebagai konsekuensinya — lebih aman begitu daripada memaksakan sesi harian yang kepanjangan.`);
+      warnings.push(`Beberapa sesi easy run/tempo/interval/repetition di jadwal ini dibatasi maksimal ${Math.round(maxSupportKm * 10) / 10} km (repetition: ${MAX_REPETITION_SESSION_KM} km) — dengan volume mingguanmu yang cukup tinggi, porsi proporsionalnya bisa lebih jauh dari itu, tapi sesi selain long run sebaiknya tidak sejauh itu. Total mingguan jadi sedikit lebih rendah dari target sebagai konsekuensinya — lebih aman begitu daripada memaksakan sesi harian yang kepanjangan.`);
     }
     if (Math.abs(currentFitnessPaceSec - goalPaceSec) >= 3) {
       warnings.push(`Pace target di sesi tempo/interval/long run dimulai lebih santai (${formatPace(currentFitnessPaceSec)}, sesuai kemampuanmu saat ini) lalu naik bertahap tiap minggu menuju goal pace ${formatPace(goalPaceSec)} di puncak training block — bukan langsung dipatok di goal pace dari minggu 1.`);
