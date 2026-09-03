@@ -32,6 +32,12 @@
   --type-interval: #d97a4f;
   --type-repetition: #d9455a;
   --type-rest: #8b93a3;
+  /* Weekday rest days suggest strength training (see app.js's
+     restDisplayKey) — a distinct violet (a hue nothing else in this list
+     uses) so that badge reads as its own thing at a glance instead of
+     blending into plain --type-rest gray. Weekend rest keeps --type-rest;
+     this is only for the weekday variant. */
+  --type-rest-strength: #9d84c9;
   --type-race: var(--color-primary);
 
   /* Bumped from 12px — softer, larger corners on cards read as calmer/more
@@ -554,6 +560,29 @@ input[type="radio"]:focus-visible {
 .feedback-actions { display: flex; gap: 10px; }
 .feedback-status { font-size: 0.85rem; color: var(--color-accent); margin: 0; }
 .feedback-status.is-error { color: var(--color-error); }
+
+/* Auto-shown suggestion, not a runner-opened panel — deliberately the
+   error palette (same soft/muted red as .form-error), not .form-warning's
+   amber: this sits right next to plain informational notices (e.g. "3
+   minggu ekstra sebelum race") that also use the warning color, and a
+   missed week is a step up from those — something actionable the runner
+   should actually notice, not just a heads-up. Still the app's existing
+   muted dark-theme red, not a jarring bright one. See
+   detectMissedWeek/renderMissedWeekBanner in js/app.js. */
+.missed-week-banner {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border: 1px solid var(--color-error-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+.missed-week-banner p { margin: 0; line-height: 1.5; }
+.missed-week-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 
 .summary-grid {
   display: grid;

@@ -313,6 +313,20 @@
 
     <div id="resultWarning" class="form-warning" hidden></div>
 
+    <!-- Auto-shown (see detectMissedWeek/renderMissedWeekBanner in
+         js/app.js) when the week that just ended fell well short of its
+         planned volume, per the runner's own Strava data. Offers to back
+         off this week's sessions using the same rule-based logic
+         feedbackPanel's manual "Sesuaikan Jadwal" falls back to — never
+         applied silently, always a runner-confirmed click. -->
+    <div id="missedWeekBanner" class="missed-week-banner no-print" hidden>
+      <p id="missedWeekText"></p>
+      <div class="missed-week-actions">
+        <button type="button" id="missedWeekApplyBtn" class="btn btn-secondary btn-small">Sesuaikan Volume Minggu Ini</button>
+        <button type="button" id="missedWeekDismissBtn" class="btn btn-ghost btn-small">Abaikan</button>
+      </div>
+    </div>
+
     <div class="result-header">
       <h2>Training Plan Kamu</h2>
       <div class="result-actions no-print">

@@ -741,6 +741,14 @@ const PaceForgeGenerator = (() => {
     repetition: 'Repetition',
     shakeout: 'Shakeout Run',
     rest: 'Rest',
+    // Not a real day.type — a rest day is always 'rest' in the data model.
+    // This is a display-only key (see app.js's restDisplayKey) a weekday
+    // rest day is shown under instead, as a nudge that the slot is also a
+    // reasonable place for the runner's own strength/gym session if they
+    // do one. Weekend rest stays plain 'Rest' — see restDisplayKey for why.
+    // planGenerator.js itself has no opinion on what that session should
+    // contain.
+    restStrength: 'Rest / Strength Training',
     race: 'RACE DAY! 🏁',
   };
 

@@ -19,6 +19,10 @@
     repetition: 'var(--type-repetition)',
     shakeout: 'var(--type-easy)',
     rest: 'var(--type-rest)',
+    // Not a real day.type (day.type is always 'rest') — see
+    // restDisplayKey, the display-only key a weekday rest day is looked
+    // up under instead of plain 'rest' so its badge gets its own color.
+    restStrength: 'var(--type-rest-strength)',
     race: 'var(--type-race)',
   };
 
@@ -52,8 +56,26 @@
     repetition: '#d9455a',
     shakeout: '#74b358',
     rest: '#8b93a3',
+    restStrength: '#9d84c9',
     race: '#6366f1',
   };
+
+  // A rest day defaults to nudging toward strength/gym work as a
+  // productive use of the slot — but only on a weekday. Weekend rest is
+  // usually genuine recovery (from the week's harder weekday running, and
+  // often sits right next to the long run), not another slot to fill, so
+  // it's shown as plain "Rest" instead. This is purely a display choice —
+  // day.type is always 'rest' either way, so nothing that touches the data
+  // (applyFeedbackAdjustment, markCompletedSessionsFromStrava's completion
+  // matching, saved-plan persistence, ...) needs to know about it — only
+  // the label/color lookups below (renderDayRow, PDF export) key off this
+  // instead of day.type directly.
+  const WEEKEND_DOWS = new Set([0, 6]);
+  function restDisplayKey(day) {
+    if (day.type !== 'rest') return day.type;
+    return WEEKEND_DOWS.has(day.dow) ? 'rest' : 'restStrength';
+  }
+
   // Maps each VDOT pace zone (js/vdot.js's ZONE_ORDER) onto the closest
   // matching session type, so the Zona Pace table's row dots — and, below,
   // the workout-structure bars and Pace Target column — all reuse the same
@@ -270,6 +292,10 @@
   const feedbackSubmitBtn = document.getElementById('feedbackSubmitBtn');
   const feedbackCancelBtn = document.getElementById('feedbackCancelBtn');
   const feedbackStatus = document.getElementById('feedbackStatus');
+  const missedWeekBanner = document.getElementById('missedWeekBanner');
+  const missedWeekText = document.getElementById('missedWeekText');
+  const missedWeekApplyBtn = document.getElementById('missedWeekApplyBtn');
+  const missedWeekDismissBtn = document.getElementById('missedWeekDismissBtn');
 
   // Kept around so the AI review step can send the currently-generated plan
   // (and retry on demand) without recomputing anything.
@@ -314,6 +340,12 @@
   // literal value). Persisted and replayed the same way as daySwaps —
   // see handleFeedbackSubmit and applySavedDaySwaps/applySavedFeedback.
   let feedbackOverrides = [];
+  // Week numbers the runner has already acted on (applied or dismissed) via
+  // missedWeekBanner — see detectMissedWeek/renderMissedWeekBanner. Unlike
+  // daySwaps/feedbackOverrides this isn't replayed against a regenerated
+  // plan (there's nothing to reconstruct — it's just "don't ask again about
+  // this week"), so it's persisted and restored as plain data only.
+  let acknowledgedMissedWeeks = [];
 
   // Set a sensible default race date: 12 weeks from today.
   const defaultRaceDate = new Date();
@@ -763,6 +795,7 @@
     daySwaps = [];
     swapSelection = null;
     feedbackOverrides = [];
+    acknowledgedMissedWeeks = [];
 
     showLoading(restoring ? 'Memuat training plan-mu...' : undefined);
     loadingSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -972,6 +1005,127 @@
     feedbackStatus.hidden = true;
     feedbackStatus.classList.remove('is-error');
     feedbackNote.value = '';
+  }
+
+  // A week counts as "significantly missed" once at least this fraction of
+  // its planned km never got run (per Strava — see day.isCompleted, set by
+  // markCompletedSessionsFromStrava). Simple fixed threshold rather than
+  // anything fancier — same "explainable over clever" spirit as
+  // buildRuleBasedFeedbackAdjustments above.
+  const MISSED_WEEK_THRESHOLD = 0.4;
+
+  // Looks at the week that just ended (i.e. the one right before whatever
+  // week is current today) and flags it when the runner's actual Strava
+  // mileage fell far short of what was planned. Only ever looks at THAT one
+  // week — not "any past week with a gap" — so the nudge appears right when
+  // it's fresh and never resurfaces for an old, long-settled week once the
+  // plan has moved on. Returns null whenever there's nothing worth asking
+  // about: no plan started/already over (no currentWeek), no prior week to
+  // compare (currentWeek is week 1), that prior week planned ~0 km itself
+  // (e.g. a rest week), the miss doesn't clear MISSED_WEEK_THRESHOLD, or the
+  // runner already acted on this exact week via missedWeekBanner.
+  function detectMissedWeek(plan) {
+    const currentWeek = findCurrentWeek(plan.weeks);
+    if (!currentWeek) return null;
+    const missedWeek = plan.weeks.find(w => w.weekNumber === currentWeek.weekNumber - 1);
+    if (!missedWeek) return null;
+    if (acknowledgedMissedWeeks.includes(missedWeek.weekNumber)) return null;
+
+    const plannedKm = missedWeek.totalKm;
+    if (!(plannedKm > 0)) return null;
+
+    let missedKm = 0;
+    missedWeek.days.forEach(day => {
+      if (day.type === 'rest' || day.type === 'race' || !day.km) return;
+      if (!day.isCompleted) missedKm += day.km;
+    });
+    const missedFraction = missedKm / plannedKm;
+    if (missedFraction < MISSED_WEEK_THRESHOLD) return null;
+
+    return {
+      missedWeek,
+      currentWeek,
+      plannedKm,
+      missedKm: Math.round(missedKm * 10) / 10,
+      missedFraction,
+    };
+  }
+
+  function closeMissedWeekBanner() {
+    missedWeekBanner.hidden = true;
+  }
+
+  // Recomputes and shows/hides missedWeekBanner — called after every
+  // markCompletedSessionsFromStrava pass (see there) so it's always as
+  // current as the completion data it depends on.
+  function renderMissedWeekBanner() {
+    if (!lastPlan) { closeMissedWeekBanner(); return; }
+    const info = detectMissedWeek(lastPlan);
+    if (!info) { closeMissedWeekBanner(); return; }
+
+    const ranKm = Math.round((info.plannedKm - info.missedKm) * 10) / 10;
+    const pct = Math.round(info.missedFraction * 100);
+    missedWeekText.textContent = `⚠️ Minggu ${info.missedWeek.weekNumber} lalu cuma kepakai ${ranKm} dari ${info.plannedKm} km rencana (${pct}% terlewat). Mau PaceForge sesuaikan volume minggu ${info.currentWeek.weekNumber} ini biar nggak lompat balik ke rencana semula?`;
+    missedWeekBanner.dataset.week = String(info.missedWeek.weekNumber);
+    missedWeekBanner.hidden = false;
+  }
+
+  // Marks a week "handled" (applied or dismissed) so detectMissedWeek never
+  // asks about it again, and persists that immediately — otherwise a
+  // dismiss would just reappear on the next reload/device.
+  function acknowledgeMissedWeek(weekNumber) {
+    if (!acknowledgedMissedWeeks.includes(weekNumber)) acknowledgedMissedWeeks.push(weekNumber);
+    closeMissedWeekBanner();
+    if (REQUIRE_LOGIN && lastSettings) savePlanForCurrentUser(lastSettings);
+  }
+
+  function handleMissedWeekDismiss() {
+    const weekNumber = Number(missedWeekBanner.dataset.week);
+    if (Number.isFinite(weekNumber)) acknowledgeMissedWeek(weekNumber);
+  }
+
+  // Backs off the CURRENT week's upcoming sessions (never the missed week
+  // itself — that's already over) by the same rule-based reduction
+  // buildRuleBasedFeedbackAdjustments already uses for the manual "lagi
+  // nggak fit?" flow — reused as-is rather than inventing a second set of
+  // cut fractions. Deliberately rule-based only, no AI call: unlike a
+  // runner's free-text note, "X% of last week's km never got run" doesn't
+  // need judgment to interpret.
+  function handleMissedWeekApply() {
+    if (!lastPlan) return;
+    const weekNumber = Number(missedWeekBanner.dataset.week);
+    const info = detectMissedWeek(lastPlan);
+    if (!info || info.missedWeek.weekNumber !== weekNumber) { closeMissedWeekBanner(); return; }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const candidates = [];
+    info.currentWeek.days.forEach(day => {
+      const dayDate = new Date(day.date);
+      dayDate.setHours(0, 0, 0, 0);
+      if (dayDate < today) return; // already run/passed this week — nothing left to back off
+      if (day.type === 'race' || day.type === 'rest' || !day.km) return;
+      candidates.push({ week: info.currentWeek.weekNumber, dow: day.dow, type: day.type, km: day.km });
+    });
+
+    if (candidates.length) {
+      const adjustments = buildRuleBasedFeedbackAdjustments(candidates);
+      const touchedWeeks = new Set();
+      adjustments.forEach(adj => {
+        const week = lastPlan.weeks.find(w => w.weekNumber === adj.week);
+        const day = week?.days.find(d => d.dow === adj.dow);
+        if (!day) return;
+        if (adj.action === 'skip') applyFeedbackAdjustment(day, 'skip');
+        else applyFeedbackAdjustment(day, 'reduce', adj.suggestedKm);
+        feedbackOverrides = feedbackOverrides.filter(o => !(o.week === adj.week && o.dow === adj.dow));
+        feedbackOverrides.push({ week: adj.week, dow: adj.dow, type: day.type, km: day.km });
+        touchedWeeks.add(adj.week);
+      });
+      touchedWeeks.forEach(reRenderWeek);
+      if (touchedWeeks.size) markCompletedSessionsFromStrava(lastPlan).catch(() => {});
+    }
+
+    acknowledgeMissedWeek(weekNumber);
   }
 
   async function handleFeedbackSubmit() {
@@ -1192,6 +1346,7 @@
         // schema or endpoint change on either path.
         daySwaps,
         feedbackOverrides,
+        acknowledgedMissedWeeks,
       },
       user_notes: userNotesInput.value.trim(),
     };
@@ -1239,6 +1394,16 @@
       await generateAndShowPlan(settings, { restoring: true });
       applySavedDaySwaps(data.settings.daySwaps);
       applySavedFeedbackOverrides(data.settings.feedbackOverrides);
+      // Plain data, not replayed against the plan — see the declaration
+      // above for why this doesn't need an "apply" step like the two lines
+      // above it do.
+      acknowledgedMissedWeeks = Array.isArray(data.settings.acknowledgedMissedWeeks) ? data.settings.acknowledgedMissedWeeks.slice() : [];
+      // generateAndShowPlan above already rendered missedWeekBanner once,
+      // against the freshly-reset (empty) acknowledgedMissedWeeks it starts
+      // every plan with — refresh it now that this restore's saved value is
+      // actually in place, or a previously-dismissed/applied week's banner
+      // would incorrectly reappear on every reload.
+      renderMissedWeekBanner();
       paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat (mode dummy — lokal).');
       return true;
     }
@@ -1264,6 +1429,16 @@
       await generateAndShowPlan(settings, { restoring: true });
       applySavedDaySwaps(data.settings.daySwaps);
       applySavedFeedbackOverrides(data.settings.feedbackOverrides);
+      // Plain data, not replayed against the plan — see the declaration
+      // above for why this doesn't need an "apply" step like the two lines
+      // above it do.
+      acknowledgedMissedWeeks = Array.isArray(data.settings.acknowledgedMissedWeeks) ? data.settings.acknowledgedMissedWeeks.slice() : [];
+      // generateAndShowPlan above already rendered missedWeekBanner once,
+      // against the freshly-reset (empty) acknowledgedMissedWeeks it starts
+      // every plan with — refresh it now that this restore's saved value is
+      // actually in place, or a previously-dismissed/applied week's banner
+      // would incorrectly reappear on every reload.
+      renderMissedWeekBanner();
       paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat dari akunmu.');
       return true;
     } catch (err) {
@@ -1640,6 +1815,10 @@
     if (upgradeCandidates.length) {
       upgradeRecentAnalysisWithSegmentPace(upgradeCandidates).catch(() => {});
     }
+
+    // Every day.isCompleted flag this pass could set is now set — the
+    // exact moment detectMissedWeek's numbers are trustworthy.
+    renderMissedWeekBanner();
   }
 
   if (!REQUIRE_LOGIN) {
@@ -1730,6 +1909,8 @@
   });
   feedbackCancelBtn.addEventListener('click', closeFeedbackPanel);
   feedbackSubmitBtn.addEventListener('click', handleFeedbackSubmit);
+  missedWeekApplyBtn.addEventListener('click', handleMissedWeekApply);
+  missedWeekDismissBtn.addEventListener('click', handleMissedWeekDismiss);
   aiRetryBtn.addEventListener('click', async () => {
     aiRetryBtn.hidden = true;
     aiStatus.hidden = false;
@@ -2190,16 +2371,23 @@
         const rowMeta = [];
         const body = [];
         week.days.forEach(day => {
+          const displayKey = restDisplayKey(day);
           const label = pdfSafeText((day.type === 'longRun' && day.isMarathonSpecific)
             ? `${TYPE_LABELS.longRun} (Pace ${day.structure?.paceLabel || 'Marathon'})`
-            : (TYPE_LABELS[day.type] || day.type));
+            : (TYPE_LABELS[displayKey] || displayKey));
           const km = day.km ? `${day.km} km` : '—';
           // Same zone-name logic as renderDayRow (see there for why) so the
           // PDF's Pace Target column matches the on-screen result exactly.
           const zone = zoneForDay(day);
           const pace = day.type === 'race' ? 'Race Pace' : (zone ? ZONE_SHORT_LABEL[zone] : '—');
           body.push([day.dayName, day.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }), label, km, pace]);
-          rowMeta.push({ kind: 'day', type: day.type });
+          // type here is the display key (see restDisplayKey) so the cell
+          // color below (TYPE_HEX[rowInfo.type]) picks up the same
+          // weekday-rest-vs-weekend-rest distinction as the on-screen
+          // badge — every other type passes through unchanged, and the
+          // rowInfo.type === 'race' check further down still works since
+          // restDisplayKey never touches non-rest types.
+          rowMeta.push({ kind: 'day', type: displayKey });
           if (day.structure) {
             const { segments, caption } = structureToSegments(day.structure);
             body.push([{ content: '', colSpan: 5, styles: { minCellHeight: 30, fillColor: [255, 255, 255] } }]);
@@ -2479,9 +2667,10 @@
     const isCompleted = !!day.isCompleted;
     const isSwapSelected = !!swapSelection && swapSelection.week === weekNumber && swapSelection.dow === day.dow;
     const rowClass = [isRest ? 'is-rest' : (isRace ? 'is-race' : ''), isSwapSelected ? 'is-swap-selected' : '', isCompleted ? 'is-completed' : ''].filter(Boolean).join(' ');
+    const displayKey = restDisplayKey(day);
     const label = (day.type === 'longRun' && day.isMarathonSpecific)
       ? `${TYPE_LABELS.longRun} (Pace ${day.structure?.paceLabel || 'Marathon'})`
-      : (TYPE_LABELS[day.type] || day.type);
+      : (TYPE_LABELS[displayKey] || displayKey);
     const km = day.km ? `${day.km} km` : '—';
     // Pace Target names the VDOT zone this session trains at (Easy, Tempo,
     // Interval, Repetition, Marathon) instead of that week's specific pace
@@ -2492,7 +2681,7 @@
     // cleanly belong to one of the 5 training zones.
     const zone = zoneForDay(day);
     const pace = isRace ? 'Race Pace' : (zone ? ZONE_SHORT_LABEL[zone] : '—');
-    const color = TYPE_COLORS[day.type] || 'var(--type-rest)';
+    const color = TYPE_COLORS[displayKey] || 'var(--type-rest)';
     const structureRow = day.structure
       ? `<tr class="structure-row ${rowClass}"><td colspan="5">${renderWorkoutStructure(day.structure, zone)}</td></tr>`
       : '';
