@@ -243,12 +243,16 @@ async function summarizeRuns(runs, accessToken) {
   // not clipped to any of the cutoffs above) so the client can match a
   // plan day against whatever actually happened on that calendar date —
   // see js/app.js's markCompletedSessionsFromStrava. Deliberately just
-  // date/distance/time, not the full Strava activity payload.
+  // date/distance/time (+ id), not the full Strava activity payload. `id`
+  // is what lets the client ask api/strava-activity-detail.js for that one
+  // activity's `best_efforts` afterward, for a recently-completed session
+  // whose comparison shouldn't be diluted by warm up/cool down — see that
+  // endpoint's own comment for why this isn't done for every matched run.
   const recentRuns = runs
     .map(run => {
       const date = localDateStr(run.start_date_local || run.start_date);
       if (!date || !(run.distance > 0)) return null;
-      return { date, km: Math.round((run.distance / 1000) * 100) / 100, movingTimeSec: Math.round(run.moving_time || 0) };
+      return { id: run.id, date, km: Math.round((run.distance / 1000) * 100) / 100, movingTimeSec: Math.round(run.moving_time || 0) };
     })
     .filter(Boolean);
 
@@ -270,4 +274,4 @@ async function summarizeRuns(runs, accessToken) {
   };
 }
 
-module.exports = { exchangeCodeForToken, refreshAccessToken, fetchRecentRuns, summarizeRuns };
+module.exports = { exchangeCodeForToken, refreshAccessToken, fetchRecentRuns, fetchActivityDetail, summarizeRuns };

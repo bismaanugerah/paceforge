@@ -1368,6 +1368,156 @@
     ];
   }
 
+  // The overall average pace of an interval/repetition/tempo activity is
+  // dragged slow by its warm up/cool down/jogged-recovery segments — see
+  // upgradeRecentAnalysisWithSegmentPace below, which fixes this for
+  // recently-completed sessions by pulling the actual hard-segment pace out
+  // of Strava's own `best_efforts`. This set is only the fallback label used
+  // BEFORE (or if) that upgrade happens: 'tempo' isn't listed here since a
+  // whole-activity tempo average is still a reasonable (if diluted)
+  // approximation, but interval/repetition's averages include full-recovery
+  // jogs between reps, which read as "way slower than target" even on a
+  // well-executed session — misleading enough to caveat rather than compare
+  // outright.
+  const NON_COMPARABLE_PACE_TYPES = new Set(['interval', 'repetition']);
+
+  // How many days back from today still get the upgraded, best_efforts-
+  // based comparison below (see upgradeRecentAnalysisWithSegmentPace) —
+  // roughly "this week + last week". Bounds the extra per-activity Strava
+  // API calls this can cost to a handful, regardless of how many weeks/
+  // sessions the plan as a whole has already covered — see that function's
+  // own comment for the full reasoning.
+  const RECENT_ANALYSIS_WINDOW_DAYS = 14;
+
+  // A matched best_effort has to land within this fraction of the planned
+  // hard-segment distance to count as "the same segment" — Strava's
+  // best_efforts only come in fixed round distances (1K, 1 mile, 5K, ...),
+  // never exactly whatever a given workout's warm up/cool down split out
+  // to, so this is deliberately loose rather than requiring an exact match
+  // that would almost never occur.
+  const EFFORT_MATCH_TOLERANCE = 0.4;
+
+  // The planned distance of a session's actual hard segment — the part
+  // upgradeRecentAnalysisWithSegmentPace tries to match against one of the
+  // activity's best_efforts, as opposed to the warm up/cool down/recovery
+  // padding around it. Derived from day.structure.kind (see
+  // planGenerator.js's buildTempoStructure/buildRepsStructure), not
+  // day.type directly — 'interval' covers real interval, cruise-tempo, AND
+  // repetition sessions alike, since they all share the same warm up ->
+  // reps -> cool down shape.
+  function plannedHardSegmentKm(structure) {
+    if (!structure) return null;
+    if (structure.kind === 'tempo' && structure.tempoKm > 0) return structure.tempoKm;
+    if (structure.kind === 'interval' && structure.reps > 0 && structure.workKm > 0) return structure.reps * structure.workKm;
+    return null;
+  }
+
+  // sessionStorage cache for api/strava-activity-detail.js responses — a
+  // past activity's best_efforts never change, so once fetched this tab
+  // never re-fetches it again (a fresh page load in a NEW tab/session
+  // does) rather than re-hitting Strava's API on every re-render. Wrapped
+  // in try/catch since sessionStorage can throw (private browsing, storage
+  // disabled) — a cache miss there just means "fetch fresh", not a hard
+  // failure.
+  async function fetchActivityDetailCached(activityId) {
+    const cacheKey = `paceforge_activity_detail_${activityId}`;
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch { /* fall through to a fresh fetch */ }
+    const res = await fetch(`/api/strava-activity-detail?id=${activityId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    try { sessionStorage.setItem(cacheKey, JSON.stringify(data)); } catch { /* best-effort only */ }
+    return data;
+  }
+
+  // Picks whichever best_effort's distance is closest (relatively) to
+  // targetKm, or null if nothing's within EFFORT_MATCH_TOLERANCE — the
+  // closest available proxy for "how fast was the actual hard segment",
+  // not necessarily this activity's single fastest effort.
+  function closestBestEffort(bestEfforts, targetKm) {
+    if (!Array.isArray(bestEfforts) || !bestEfforts.length || !(targetKm > 0)) return null;
+    let best = null;
+    let bestRelDiff = Infinity;
+    bestEfforts.forEach(effort => {
+      if (!(effort.distanceKm > 0) || !(effort.timeSec > 0)) return;
+      const relDiff = Math.abs(effort.distanceKm - targetKm) / targetKm;
+      if (relDiff < bestRelDiff) { bestRelDiff = relDiff; best = effort; }
+    });
+    return bestRelDiff <= EFFORT_MATCH_TOLERANCE ? best : null;
+  }
+
+  const SEGMENT_TYPE_LABEL = { tempo: 'tempo', interval: 'interval', repetition: 'repetition' };
+
+  // Builds the "Pace ... (target ..., N detik/km lebih cepat/lambat)"
+  // fragment shared by both the whole-activity baseline (renderCompletedRow
+  // below) and the upgraded segment-based version (
+  // upgradeRecentAnalysisWithSegmentPace) — same comparison logic either
+  // way, just fed a different actualPaceSecPerKm/caveat.
+  function buildPaceComparisonLabel(paceLabelPrefix, actualPaceSecPerKm, day, caveat) {
+    const { formatPace } = PaceForgeGenerator;
+    let label = `${paceLabelPrefix} ${formatPace(actualPaceSecPerKm)}`;
+    if (caveat) {
+      label += ` (${caveat})`;
+    } else if (day.paceSecPerKm) {
+      const diffSec = Math.round(actualPaceSecPerKm - day.paceSecPerKm);
+      label += Math.abs(diffSec) < 3
+        ? ' — pas di target'
+        : ` (target ${formatPace(day.paceSecPerKm)}, ${Math.abs(diffSec)} detik/km ${diffSec < 0 ? 'lebih cepat' : 'lebih lambat'})`;
+    }
+    return label;
+  }
+
+  // Renders the baseline (whole-activity-average) comparison into
+  // analysisEl — always runs first, for every matched day regardless of how
+  // long ago it was, so the plan never waits on the extra best_efforts
+  // fetch below just to show SOMETHING (the caller decides separately,
+  // via plannedHardSegmentKm, whether this day also qualifies for the
+  // upgrade — see markCompletedSessionsFromStrava).
+  function renderCompletedRow(analysisEl, day, best) {
+    const { formatDuration } = PaceForgeGenerator;
+    const actualPaceSecPerKm = best.movingTimeSec / best.km;
+    const kmDiff = Math.round((best.km - day.km) * 100) / 100;
+    const kmDiffLabel = kmDiff === 0 ? '' : ` (${kmDiff > 0 ? '+' : ''}${kmDiff} km dari rencana)`;
+    const caveat = NON_COMPARABLE_PACE_TYPES.has(day.type) ? 'termasuk jeda recovery, bukan pace repetisinya sendiri' : null;
+    const paceLabel = buildPaceComparisonLabel('Pace rata-rata', actualPaceSecPerKm, day, caveat);
+    analysisEl.innerHTML = `📊 ${best.km} km${kmDiffLabel} &middot; ${paceLabel} &middot; ${formatDuration(best.movingTimeSec)}`;
+  }
+
+  // Progressive enhancement over renderCompletedRow's baseline: for a
+  // handful of recently-completed tempo/interval/repetition sessions (see
+  // RECENT_ANALYSIS_WINDOW_DAYS), fetches that activity's best_efforts and,
+  // if one lands close enough to the session's own planned hard-segment
+  // distance (see plannedHardSegmentKm), swaps the pace comparison from
+  // "whole activity, diluted by warm up/cool down/recovery jogs" to "just
+  // the hard segment itself" — including for interval/repetition, which
+  // otherwise only ever get the NON_COMPARABLE_PACE_TYPES caveat instead of
+  // a real target comparison. Silently leaves the baseline in place on any
+  // failure (no detail, no matching effort, request error) — this is an
+  // accuracy upgrade on an already-complete, already-useful row, never
+  // something worth surfacing as an error.
+  async function upgradeRecentAnalysisWithSegmentPace(candidates) {
+    const { formatDuration } = PaceForgeGenerator;
+    await Promise.all(candidates.map(async ({ analysisEl, day, best, targetKm }) => {
+      let detail;
+      try {
+        detail = await fetchActivityDetailCached(best.id);
+      } catch {
+        return;
+      }
+      const effort = detail && closestBestEffort(detail.bestEfforts, targetKm);
+      if (!effort) return;
+
+      const actualPaceSecPerKm = effort.timeSec / effort.distanceKm;
+      const kmDiff = Math.round((best.km - day.km) * 100) / 100;
+      const kmDiffLabel = kmDiff === 0 ? '' : ` (${kmDiff > 0 ? '+' : ''}${kmDiff} km dari rencana)`;
+      const segmentLabel = SEGMENT_TYPE_LABEL[day.type] || 'segmen';
+      const paceLabel = buildPaceComparisonLabel(`Pace ${segmentLabel} (≈${effort.distanceKm} km):`, actualPaceSecPerKm, day, null);
+      analysisEl.innerHTML = `📊 ${best.km} km${kmDiffLabel} &middot; ${paceLabel} &middot; ${formatDuration(best.movingTimeSec)}`;
+    }));
+  }
+
   // Compares the currently-shown plan's PAST-or-today sessions against the
   // runner's actual Strava activities, so a page reload or a fresh login
   // shows which sessions have already been done — recomputed fresh every
@@ -1403,15 +1553,12 @@
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const recentCutoff = new Date(today);
+    recentCutoff.setDate(recentCutoff.getDate() - RECENT_ANALYSIS_WINDOW_DAYS);
 
-    const { formatPace, formatDuration } = PaceForgeGenerator;
-    // The overall average pace of an interval/repetition activity is
-    // dragged slow by its jogged recovery segments — comparing it against
-    // day.paceSecPerKm (the fast, work-segment target pace for that zone)
-    // would read as "way slower than target" even on a well-executed
-    // session, so those two types skip the vs.-target comparison below and
-    // just report the plain average instead.
-    const NON_COMPARABLE_PACE_TYPES = new Set(['interval', 'repetition']);
+    // Collected while walking every matched day below (see the loop), then
+    // resolved in one batch afterward — see upgradeRecentAnalysisWithSegmentPace.
+    const upgradeCandidates = [];
 
     plan.weeks.forEach(week => {
       week.days.forEach(day => {
@@ -1455,25 +1602,20 @@
         if (analysisRow) analysisRow.classList.add('is-completed');
         const analysisEl = analysisRow?.querySelector('.completed-analysis');
         if (analysisEl && best.km > 0 && best.movingTimeSec > 0) {
-          const actualPaceSecPerKm = best.movingTimeSec / best.km;
-          const kmDiff = Math.round((best.km - day.km) * 100) / 100;
-          const kmDiffLabel = kmDiff === 0 ? '' : ` (${kmDiff > 0 ? '+' : ''}${kmDiff} km dari rencana)`;
-
-          let paceLabel = `Pace rata-rata ${formatPace(actualPaceSecPerKm)}`;
-          if (NON_COMPARABLE_PACE_TYPES.has(day.type)) {
-            paceLabel += ' (termasuk jeda recovery, bukan pace repetisinya sendiri)';
-          } else if (day.paceSecPerKm) {
-            const paceDiffSec = Math.round(actualPaceSecPerKm - day.paceSecPerKm);
-            paceLabel += Math.abs(paceDiffSec) < 3
-              ? ' — pas di target'
-              : ` (target ${formatPace(day.paceSecPerKm)}, ${Math.abs(paceDiffSec)} detik/km ${paceDiffSec < 0 ? 'lebih cepat' : 'lebih lambat'})`;
-          }
-
-          analysisEl.innerHTML = `📊 ${best.km} km${kmDiffLabel} &middot; ${paceLabel} &middot; ${formatDuration(best.movingTimeSec)}`;
+          renderCompletedRow(analysisEl, day, best);
           analysisRow.hidden = false;
+
+          const targetKm = plannedHardSegmentKm(day.structure);
+          if (targetKm && best.id && dayDate >= recentCutoff) {
+            upgradeCandidates.push({ analysisEl, day, best, targetKm });
+          }
         }
       });
     });
+
+    if (upgradeCandidates.length) {
+      upgradeRecentAnalysisWithSegmentPace(upgradeCandidates).catch(() => {});
+    }
   }
 
   if (!REQUIRE_LOGIN) {
