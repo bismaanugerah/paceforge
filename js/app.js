@@ -862,11 +862,19 @@
     day.km = km;
     const { buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure } = PaceForgeGenerator;
     if (day.type === 'interval') {
-      day.structure = buildIntervalStructure(km, lastFitnessLevel, lastConservativeMode, day.workoutVariant, day.recoveryPaceSecPerKm);
+      // day.paceSecPerKm is this day's own I-pace (untouched by the km
+      // reduction above) — buildIntervalStructure may re-resolve
+      // day.workoutVariant against it if the requested variant no longer
+      // fits under its duration cap (see planGenerator.js).
+      const built = buildIntervalStructure(km, lastFitnessLevel, lastConservativeMode, day.workoutVariant, day.paceSecPerKm, day.recoveryPaceSecPerKm);
+      day.workoutVariant = built.resolvedVariant;
+      day.structure = built.structure;
     } else if (day.type === 'tempo') {
       day.structure = buildTempoStructure(km, day.workoutVariant, day.recoveryPaceSecPerKm);
     } else if (day.type === 'repetition') {
-      day.structure = buildRepetitionStructure(km, day.recoveryPaceSecPerKm);
+      const built = buildRepetitionStructure(km, day.workoutVariant, day.paceSecPerKm, day.recoveryPaceSecPerKm);
+      day.workoutVariant = built.resolvedVariant;
+      day.structure = built.structure;
     } else {
       day.structure = buildSimpleStructure(km);
     }
@@ -2044,15 +2052,27 @@
       if (rounded === day.km) continue;
 
       day.km = rounded;
-      // day.workoutVariant and day.recoveryPaceSecPerKm (both set by the
-      // generator for interval/tempo/repetition — see planGenerator.js)
-      // are preserved as-is here so an AI distance tweak doesn't silently
-      // reset e.g. a "short reps" interval week back to the default
-      // variant, or its recovery jog back to a different week's pace.
-      if (day.type === 'interval') day.structure = buildIntervalStructure(day.km, lastFitnessLevel, lastConservativeMode, day.workoutVariant, day.recoveryPaceSecPerKm);
-      else if (day.type === 'tempo') day.structure = buildTempoStructure(day.km, day.workoutVariant, day.recoveryPaceSecPerKm);
-      else if (day.type === 'repetition') day.structure = buildRepetitionStructure(day.km, day.recoveryPaceSecPerKm);
-      else day.structure = buildSimpleStructure(day.km);
+      // day.workoutVariant, day.paceSecPerKm and day.recoveryPaceSecPerKm
+      // (all set by the generator for interval/tempo/repetition — see
+      // planGenerator.js) are preserved as-is here so an AI distance tweak
+      // doesn't silently reset e.g. a "short reps" interval week back to
+      // the default variant, or its recovery jog back to a different
+      // week's pace. buildIntervalStructure/buildRepetitionStructure may
+      // still re-resolve workoutVariant against day.paceSecPerKm if it no
+      // longer fits that variant's duration cap (see planGenerator.js).
+      if (day.type === 'interval') {
+        const built = buildIntervalStructure(day.km, lastFitnessLevel, lastConservativeMode, day.workoutVariant, day.paceSecPerKm, day.recoveryPaceSecPerKm);
+        day.workoutVariant = built.resolvedVariant;
+        day.structure = built.structure;
+      } else if (day.type === 'tempo') {
+        day.structure = buildTempoStructure(day.km, day.workoutVariant, day.recoveryPaceSecPerKm);
+      } else if (day.type === 'repetition') {
+        const built = buildRepetitionStructure(day.km, day.workoutVariant, day.paceSecPerKm, day.recoveryPaceSecPerKm);
+        day.workoutVariant = built.resolvedVariant;
+        day.structure = built.structure;
+      } else {
+        day.structure = buildSimpleStructure(day.km);
+      }
 
       appliedCount++;
       touchedWeeks.add(week);
