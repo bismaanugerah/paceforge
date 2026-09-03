@@ -13,6 +13,16 @@ const { refreshAccessToken, fetchRecentRuns, summarizeRuns } = require('../serve
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 jam
 const LOOKBACK_DAYS = 100; // sedikit lebih dari 90 hari (buffer buat deteksi race terbaik 3 bulan terakhir — lihat summarizeRuns)
 
+// Bump this whenever summarizeRuns' output shape or logic changes in a way
+// that matters (e.g. adding `recentRace.isEstimate` — see server/strava.js).
+// A cached summary computed by an OLDER version is otherwise
+// indistinguishable from a fresh one by age alone: the 1-hour TTL above has
+// no idea a deploy just changed what "the summary" even means, so without
+// this, anyone whose cache was still warm at deploy time keeps getting
+// served the stale shape (missing fields silently read as falsy/undefined
+// on the client) for up to an hour after the fix already shipped.
+const SUMMARY_CACHE_VERSION = 2;
+
 module.exports = async (req, res) => {
   if (req.method !== 'GET') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -32,10 +42,11 @@ module.exports = async (req, res) => {
       return;
     }
 
-    if (athlete.summary_cache && athlete.summary_cached_at) {
+    if (athlete.summary_cache && athlete.summary_cached_at && athlete.summary_cache._cacheVersion === SUMMARY_CACHE_VERSION) {
       const age = Date.now() - new Date(athlete.summary_cached_at).getTime();
       if (age < CACHE_TTL_MS) {
-        res.status(200).json(athlete.summary_cache);
+        const { _cacheVersion, ...cached } = athlete.summary_cache;
+        res.status(200).json(cached);
         return;
       }
     }
@@ -69,7 +80,7 @@ module.exports = async (req, res) => {
     // into a user-facing error.
     try {
       await update('strava_athletes', 'athlete_id', athlete.athlete_id, {
-        summary_cache: summary,
+        summary_cache: { ...summary, _cacheVersion: SUMMARY_CACHE_VERSION },
         summary_cached_at: new Date().toISOString(),
       });
     } catch (err) {
