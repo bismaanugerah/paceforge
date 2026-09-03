@@ -1103,6 +1103,15 @@
       alert('Race day nggak bisa dipindah — itu tanggal race sungguhan, bukan slot latihan.');
       return false;
     }
+    // Backstops the UI-level guards in renderDayRow/markCompletedSessionsFromStrava
+    // (no swap button, not draggable, on a day already marked completed) —
+    // this is what actually rejects a swap attempted via a stale button
+    // reference or a drop onto a completed row, which skips draggable
+    // entirely but not being a valid drop *target*.
+    if (dayA.isCompleted || dayB.isCompleted) {
+      alert('Sesi yang sudah kamu jalani nggak bisa ditukar lagi — datanya sudah tercatat dari Strava.');
+      return false;
+    }
     if (dayA.type === 'longRun' || dayB.type === 'longRun') {
       if (!confirm('Ini bakal mindahin long run ke hari lain minggu ini. Lanjutkan?')) return false;
     }
@@ -1581,7 +1590,18 @@
 
         const row = planWeeksEl.querySelector(`tr[data-date="${key}"]`);
         if (!row) return;
+        // Persisted on the day itself, not just this row's class — see
+        // isCompleted in renderDayRow, which is what makes the swap
+        // button/draggable stay suppressed across a later reRenderWeek
+        // too (e.g. after swapping a *different* day the same week).
+        day.isCompleted = true;
         row.classList.add('is-completed');
+        row.removeAttribute('draggable');
+        // This row was already rendered (with a swap button) before this
+        // match was found — renderDayRow only knows to leave the button
+        // off on days that were already isCompleted at render time, so a
+        // day completed just now needs it torn out here instead.
+        row.querySelector('.swap-day-btn')?.remove();
         const slot = row.querySelector('.completed-slot');
         if (slot) {
           slot.innerHTML = `<span class="completed-badge" title="Selesai — tercatat ${best.km} km di Strava">✅</span>`;
@@ -2459,8 +2479,14 @@
     const { formatDate, TYPE_LABELS } = PaceForgeGenerator;
     const isRest = day.type === 'rest';
     const isRace = day.type === 'race';
+    // Set by markCompletedSessionsFromStrava once a matching Strava
+    // activity is found for this date — persisted on the day itself
+    // (not just a DOM class) so it survives a reRenderWeek (e.g. after
+    // swapping a *different* day the same week) and so attemptDaySwap
+    // below can check it directly.
+    const isCompleted = !!day.isCompleted;
     const isSwapSelected = !!swapSelection && swapSelection.week === weekNumber && swapSelection.dow === day.dow;
-    const rowClass = [isRest ? 'is-rest' : (isRace ? 'is-race' : ''), isSwapSelected ? 'is-swap-selected' : ''].filter(Boolean).join(' ');
+    const rowClass = [isRest ? 'is-rest' : (isRace ? 'is-race' : ''), isSwapSelected ? 'is-swap-selected' : '', isCompleted ? 'is-completed' : ''].filter(Boolean).join(' ');
     const label = (day.type === 'longRun' && day.isMarathonSpecific)
       ? `${TYPE_LABELS.longRun} (Pace ${day.structure?.paceLabel || 'Marathon'})`
       : (TYPE_LABELS[day.type] || day.type);
@@ -2484,19 +2510,26 @@
     // upfront (rather than only added when a match exists) so that lookup
     // never has to touch innerHTML/re-render the row itself.
     const analysisRow = isRest ? '' : `<tr class="completed-analysis-row" data-analysis-date="${dateKey(day.date)}" hidden><td colspan="5"><div class="completed-analysis"></div></td></tr>`;
-    // Race day is never swappable (see handleSwapDayClick) — no button at
-    // all rather than a disabled one, since there's nothing a click on it
-    // could ever do. The selected source day gets a "cancel" affordance
-    // (✕) in place of the swap icon (⇄) instead of a second button, so
-    // there's always exactly one control to reason about per row.
-    const swapBtn = isRace ? '' : `<button type="button" class="swap-day-btn" data-week="${weekNumber}" data-dow="${day.dow}" title="${isSwapSelected ? 'Batal tukar' : 'Tukar dengan hari lain'}" aria-label="${isSwapSelected ? 'Batalkan pemilihan tukar hari' : `Tukar sesi hari ${day.dayName} dengan hari lain`}">${isSwapSelected ? '✕' : '⇄'}</button>`;
-    // draggable is left off entirely for race day (matching swapBtn above
-    // — nothing a drag could ever do there either), rather than draggable
-    // plus a drop handler that just rejects it: HTML5 drag events don't
-    // fire at all on an element without the attribute, so this is the one
-    // place that guard needs to exist instead of three.
+    // Race day and an already-completed day are never swappable (see
+    // handleSwapDayClick/attemptDaySwap) — no button at all rather than a
+    // disabled one, since there's nothing a click on it could ever do (a
+    // completed day's distance/pace is a record of what you actually
+    // ran, not a slot left to plan). The selected source day gets a
+    // "cancel" affordance (✕) in place of the swap icon (⇄) instead of a
+    // second button, so there's always exactly one control to reason
+    // about per row.
+    const swapDisabled = isRace || isCompleted;
+    const swapBtn = swapDisabled ? '' : `<button type="button" class="swap-day-btn" data-week="${weekNumber}" data-dow="${day.dow}" title="${isSwapSelected ? 'Batal tukar' : 'Tukar dengan hari lain'}" aria-label="${isSwapSelected ? 'Batalkan pemilihan tukar hari' : `Tukar sesi hari ${day.dayName} dengan hari lain`}">${isSwapSelected ? '✕' : '⇄'}</button>`;
+    // draggable is left off entirely for race day/a completed day
+    // (matching swapBtn above — nothing a drag could ever do there
+    // either), rather than draggable plus a drop handler that just
+    // rejects it: HTML5 drag events don't fire at all on an element
+    // without the attribute, so this is the one place that guard needs
+    // to exist instead of three. (A completed day can still be dropped
+    // *onto* — draggable only governs being picked up as the source —
+    // which is why attemptDaySwap also checks isCompleted itself.)
     return `
-      <tr class="${rowClass}" data-date="${dateKey(day.date)}" data-week="${weekNumber}" data-dow="${day.dow}"${isRace ? '' : ' draggable="true"'}>
+      <tr class="${rowClass}" data-date="${dateKey(day.date)}" data-week="${weekNumber}" data-dow="${day.dow}"${swapDisabled ? '' : ' draggable="true"'}>
         <td>${day.dayName}</td>
         <td>${day.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</td>
         <td><span class="type-badge" style="background:${color}">${label}</span><span class="completed-slot"></span></td>
