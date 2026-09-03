@@ -9,8 +9,21 @@
   --color-primary: #6366f1;
   --color-primary-dark: #a5b4fc;
   --color-primary-light: rgba(99, 102, 241, 0.18);
+  /* Reserved specifically for content the app filled in automatically —
+     AI review notes/tips and Strava auto-fill badges (see color audit
+     below). Nothing else should reach for this color; it needs to keep
+     meaning "the app did this for you" at a glance. */
   --color-accent: #4fd6b5;
   --color-accent-light: rgba(79, 214, 181, 0.14);
+  /* Formerly one-off hex values inlined into .form-error/.form-warning —
+     pulled up here so they sit alongside the rest of the palette instead
+     of being the only colors in the file that don't go through a token. */
+  --color-error: #ff9c90;
+  --color-error-bg: #3a1a1a;
+  --color-error-border: #63302a;
+  --color-warning: #f0c66a;
+  --color-warning-bg: #3a2c10;
+  --color-warning-border: #5c4519;
 
   --type-recovery: #b0a396;
   --type-easy: #74b358;
@@ -21,8 +34,13 @@
   --type-rest: #8b93a3;
   --type-race: var(--color-primary);
 
-  --radius: 12px;
-  --shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+  /* Bumped from 12px — softer, larger corners on cards read as calmer/more
+     premium (references the platform-card sizing in music-app-style dark
+     UIs), and .card drops its hairline border below in favor of this
+     radius + a slightly bigger, softer shadow to carry the elevation cue
+     instead. */
+  --radius: 16px;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
   --font-body: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-display: 'Space Grotesk', var(--font-body);
 }
@@ -73,7 +91,7 @@ body {
   font-style: italic;
   opacity: 0.75;
 }
-.sync-status.is-error { color: #ff9c90; opacity: 1; font-style: normal; }
+.sync-status.is-error { color: var(--color-error); opacity: 1; font-style: normal; }
 
 @media (max-width: 640px) {
   .auth-box { position: static; justify-content: center; margin-bottom: 14px; }
@@ -114,8 +132,10 @@ main.container { margin-top: -28px; padding-bottom: 60px; }
 
 /* ---------- Card ---------- */
 .card {
+  /* No hairline border — the surface tone against --color-bg plus the
+     shadow below is enough of an elevation cue on its own, and dropping
+     the outline reads as a calmer, less "boxed-in" surface. */
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 28px 28px 32px;
@@ -134,18 +154,36 @@ main.container { margin-top: -28px; padding-bottom: 60px; }
 .loading-card { text-align: center; padding: 56px 28px; }
 .loading-card h1 { margin-top: 0; }
 .loading-card .section-desc { max-width: 420px; margin-left: auto; margin-right: auto; }
-.loading-spinner {
-  width: 44px;
-  height: 44px;
-  margin: 0 auto 22px;
-  border: 4px solid var(--color-border);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+
+/* Shimmering placeholders shaped like the summary-cards row + a week block
+   that are about to render — gives the wait something concrete to look at
+   instead of a content-free spinner, and roughly previews the shape of
+   what's coming. */
+.loading-skeleton {
+  max-width: 480px;
+  margin: 28px auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
+.skeleton-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.skeleton-block, .skeleton-bar {
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--color-border) 25%, var(--color-surface) 37%, var(--color-border) 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+.skeleton-block { height: 52px; }
+.skeleton-bar { display: block; height: 14px; width: 100%; }
+.skeleton-bar-title { width: 55%; height: 18px; margin-top: 6px; }
+.skeleton-bar-short { width: 40%; }
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .loading-spinner { animation-duration: 2.4s; }
+  .skeleton-block, .skeleton-bar { animation-duration: 3.2s; }
 }
 
 /* ---------- Login gate ---------- */
@@ -377,14 +415,14 @@ input[type="radio"]:focus-visible {
   margin: 14px 0;
 }
 .form-error {
-  background: #3a1a1a;
-  color: #ff9c90;
-  border: 1px solid #63302a;
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border: 1px solid var(--color-error-border);
 }
 .form-warning {
-  background: #3a2c10;
-  color: #f0c66a;
-  border: 1px solid #5c4519;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning-border);
 }
 
 /* ---------- Buttons ---------- */
@@ -398,14 +436,25 @@ input[type="radio"]:focus-visible {
   letter-spacing: -0.006em;
   cursor: pointer;
   font-family: inherit;
-  transition: transform 0.05s, filter 0.15s;
+  transition: transform 0.1s, filter 0.15s, background 0.15s, border-color 0.15s;
 }
+.btn:hover { transform: translateY(-1px); }
 .btn:active { transform: translateY(1px); }
 .btn-primary { background: var(--color-primary); color: #fff; }
 .btn-primary:hover { filter: brightness(1.06); }
-.btn-large { width: 100%; padding: 15px 20px; font-size: 1.05rem; margin-top: 10px; }
-.btn-secondary { background: var(--color-accent-light); color: var(--color-accent); }
+/* Fully rounded — reserved for the two marquee calls-to-action (Strava
+   login, generate plan) so they read as THE action on their screen,
+   distinct from every smaller rectangular-radius button around them. */
+.btn-large { width: 100%; padding: 15px 20px; font-size: 1.05rem; margin-top: 10px; border-radius: 999px; }
+/* Neutral, not accent-colored: this is a plain secondary action (export a
+   PDF, open the adjust-schedule panel), not something the app filled in
+   automatically — see the --color-accent comment in :root. Sits one step
+   up from .btn-ghost (a visible fill instead of just an outline) without
+   borrowing a color that's supposed to mean something else. */
+.btn-secondary { background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-border); }
+.btn-secondary:hover { border-color: var(--color-primary-dark); }
 .btn-ghost { background: transparent; color: var(--color-text-muted); border: 1px solid var(--color-border); }
+.btn-ghost:hover { border-color: var(--color-text-muted); color: var(--color-text); }
 .btn-small { padding: 7px 14px; font-size: 0.82rem; }
 .btn:disabled { opacity: 0.6; cursor: wait; }
 
@@ -414,7 +463,11 @@ input[type="radio"]:focus-visible {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 10px 0 0;
+  /* Was 10px — the action-button row above and the AI status/intro block
+     below were reading as one dense cluster; a bit more air separates
+     "things you can do" from "what the app found out" without adding any
+     new visual furniture. */
+  margin: 18px 0 0;
   min-height: 1.3em;
 }
 .ai-status {
@@ -423,7 +476,7 @@ input[type="radio"]:focus-visible {
   font-style: italic;
   margin: 0;
 }
-.ai-status.is-error { color: #ff9c90; font-style: normal; }
+.ai-status.is-error { color: var(--color-error); font-style: normal; }
 .btn-link {
   background: none;
   border: none;
@@ -500,7 +553,7 @@ input[type="radio"]:focus-visible {
 .feedback-panel textarea { width: 100%; resize: vertical; }
 .feedback-actions { display: flex; gap: 10px; }
 .feedback-status { font-size: 0.85rem; color: var(--color-accent); margin: 0; }
-.feedback-status.is-error { color: #ff9c90; }
+.feedback-status.is-error { color: var(--color-error); }
 
 .summary-grid {
   display: grid;
@@ -508,11 +561,20 @@ input[type="radio"]:focus-visible {
   gap: 12px;
   margin: 20px 0;
 }
+/* Neutral, not accent-teal — these are plain facts about the plan (race
+   distance, dates, peak volume), not something the app auto-filled or an
+   AI wrote, so they shouldn't borrow that color's meaning (see the
+   --color-accent comment in :root). Sits on --color-bg rather than the
+   card's own --color-surface so the tiles still read as a distinct
+   group, and lifts slightly on hover the way the rest of this pass's
+   interactive surfaces do. */
 .summary-item {
-  background: var(--color-accent-light);
-  border-radius: 10px;
+  background: var(--color-bg);
+  border-radius: 12px;
   padding: 14px 16px;
+  transition: transform 0.15s ease;
 }
+.summary-item:hover { transform: translateY(-2px); }
 .summary-item .label { font-size: 0.76rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 4px; }
 .summary-item .value {
   font-family: var(--font-display);
@@ -520,7 +582,7 @@ input[type="radio"]:focus-visible {
   font-weight: 700;
   letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
-  color: var(--color-accent);
+  color: var(--color-primary-dark);
 }
 
 .pace-legend {
@@ -597,9 +659,13 @@ input[type="radio"]:focus-visible {
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--color-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Wraps instead of truncating: at in-between widths (roughly 600-790px,
+     which includes iPad-portrait's 768px) the fixed title/total columns
+     leave this middle column too narrow for the full "PHASE • date range"
+     string, and ellipsis was silently hiding the week's date range instead
+     of just reflowing it onto a second line. The grid row (align-items:
+     center) grows to fit a wrapped 2-line phase with no other side effect. */
+  white-space: normal;
 }
 /* Colored per phase (see PHASE_COLORS in js/app.js) so Base/Build/Peak/
    Cutback/Taper/Race Week reads apart at a glance instead of all six
@@ -616,8 +682,11 @@ input[type="radio"]:focus-visible {
    rules below strip the browser's own disclosure triangle so the custom
    .week-toggle-icon (which rotates on [open], see below) is the only one
    shown, consistently across browsers. */
-summary.week-header { cursor: pointer; list-style: none; }
+summary.week-header { cursor: pointer; list-style: none; transition: background 0.15s; }
 summary.week-header::-webkit-details-marker { display: none; }
+/* Tactile feedback for a clickable row that otherwise looks identical to
+   any other header — same idea as the row-hover below on .day-table. */
+summary.week-header:hover { background: var(--color-surface); }
 .week-toggle-icon {
   font-size: 0.9rem;
   color: var(--color-text-muted);
@@ -662,9 +731,14 @@ summary.week-header::-webkit-details-marker { display: none; }
 /* Drag-and-drop day swap (desktop mouse only — see handleDayDragStart's
    comment in js/app.js): the row being dragged fades out, a row it's
    currently hovering over gets a dashed outline as a valid-drop cue. */
-.day-table tr[draggable="true"] { cursor: grab; }
+.day-table tr[draggable="true"] { cursor: grab; transition: background 0.1s; }
 .day-table tr.is-dragging { opacity: 0.4; }
 .day-table tr.is-drag-over { outline: 2px dashed var(--color-primary); outline-offset: -2px; }
+/* Row-hover feedback (skipped on rows already carrying a state tint, so
+   hovering a race/swap-selected row doesn't visually flatten it back to
+   neutral) — a plain white/dark row otherwise gives no hint that it's
+   draggable or has a swap button tucked in its last cell. */
+.day-table tr[draggable="true"]:not(.is-race):not(.is-swap-selected):hover { background: var(--color-bg); }
 .swap-day-btn {
   float: right;
   border: 1px solid var(--color-border);
@@ -811,6 +885,16 @@ summary.week-header::-webkit-details-marker { display: none; }
   .type-badge { padding: 3px 7px; font-size: 0.72rem; }
   .structure-row td { padding: 2px 6px 12px; }
   .structure-caption { font-size: 0.72rem; }
+
+  /* Same problem as .day-table above, worse: .table-scroll made this
+     horizontally scrollable, but with no scroll affordance the "Pace /km"
+     column (the actual number a runner needs) sat past the visible edge on
+     a phone, invisible unless you knew to swipe. Tightened enough that all
+     3 columns fit without scrolling on a 375px-wide screen. */
+  .pace-zone-table th { padding: 6px 3px; font-size: 0.62rem; letter-spacing: 0.02em; }
+  .pace-zone-table td { padding: 6px 3px; font-size: 0.71rem; }
+  .pace-zone-table .zone-name { gap: 4px; }
+  .pace-zone-table .zone-dot { width: 8px; height: 8px; }
   /* The fixed-width title/total columns (see .week-header above) are
      sized for desktop — on a narrow phone screen they'd squeeze the phase
      text down to almost nothing, so stack title / phase / (total +
@@ -823,7 +907,7 @@ summary.week-header::-webkit-details-marker { display: none; }
     row-gap: 4px;
   }
   .week-title-group { grid-area: title; }
-  .week-header .week-phase { grid-area: phase; white-space: normal; }
+  .week-header .week-phase { grid-area: phase; }
   .week-header .week-total { grid-area: total; }
   .week-toggle-icon { grid-area: chevron; }
 }

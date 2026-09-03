@@ -289,9 +289,23 @@
        anything is shown (see js/app.js) can take a few seconds — this
        replaces the form so that wait is never just a frozen page. -->
   <section id="loadingSection" class="card loading-card" hidden>
-    <div class="loading-spinner" aria-hidden="true"></div>
     <h1 id="loadingTitle">Menyusun training plan-mu...</h1>
     <p class="section-desc">Menghitung jarak &amp; pace tiap sesi, lalu minta review dari AI. Beberapa detik lagi.</p>
+    <!-- Shimmering placeholders shaped like what's about to render (summary
+         cards row, then a week block) instead of a content-free spinner —
+         see .loading-skeleton in css/styles.css. Purely decorative, so
+         hidden from assistive tech. -->
+    <div class="loading-skeleton" aria-hidden="true">
+      <div class="skeleton-row">
+        <span class="skeleton-block"></span>
+        <span class="skeleton-block"></span>
+        <span class="skeleton-block"></span>
+      </div>
+      <span class="skeleton-bar skeleton-bar-title"></span>
+      <span class="skeleton-bar"></span>
+      <span class="skeleton-bar"></span>
+      <span class="skeleton-bar skeleton-bar-short"></span>
+    </div>
   </section>
 
   <!-- ===================== RESULTS SECTION ===================== -->
