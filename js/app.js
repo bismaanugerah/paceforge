@@ -254,6 +254,7 @@
   const raceFieldsetLegend = document.getElementById('raceFieldsetLegend');
   const raceDistanceLabel = document.getElementById('raceDistanceLabel');
   const raceDateLabel = document.getElementById('raceDateLabel');
+  const distanceModeField = document.getElementById('distanceModeField');
   const distanceModeToggle = document.getElementById('distanceModeToggle');
   const presetDistanceField = document.getElementById('presetDistanceField');
   const raceDistanceSel = document.getElementById('raceDistance');
@@ -487,6 +488,19 @@
       raceDistanceSel.value = isRace ? 'half' : 'medium';
     }
     updateRaceDistanceHint();
+
+    // Custom km only makes sense as a real race distance — non-race modes
+    // always use one of the 3 preset styles above, so the whole
+    // preset/custom toggle (and its "Jarak custom" option) is hidden, and
+    // any custom selection already made is forced back to preset. Reuses
+    // distanceModeToggle's own change handler (rather than duplicating its
+    // presetDistanceField/customDistanceField/updateRecentRaceHint logic)
+    // by dispatching a real change event after flipping the radio.
+    distanceModeField.hidden = !isRace;
+    if (!isRace && getDistanceMode() === 'custom') {
+      distanceModeToggle.querySelector('input[value="preset"]').checked = true;
+      distanceModeToggle.dispatchEvent(new Event('change', { bubbles: true }));
+    }
   }
   goalTypeToggle.addEventListener('change', updateGoalTypeUI);
   updateGoalTypeUI();

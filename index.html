@@ -86,7 +86,12 @@
       <fieldset>
         <legend id="raceFieldsetLegend">1. Detail Race</legend>
 
-        <div class="field">
+        <!-- Hidden entirely for non-race modes (see updateGoalTypeUI in
+             app.js) — "custom km" only makes sense as a real race
+             distance; Base Building/Maintenance's "gaya latihan" is always
+             one of the 3 preset qualitative styles (see #raceDistance),
+             so there's nothing left to toggle between. -->
+        <div class="field" id="distanceModeField">
           <label>Cara menentukan jarak</label>
           <div class="mode-toggle" id="distanceModeToggle">
             <label class="mode-chip"><input type="radio" name="distanceMode" value="preset" checked> Jarak target</label>
