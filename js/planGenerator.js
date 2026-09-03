@@ -577,11 +577,17 @@ const PaceForgeGenerator = (() => {
   // the constant happened to be tuned against — a beginner and an advanced
   // runner doing the exact same "800m, 90s jog" interval are, in Daniels'
   // own terms, doing two different workouts (very different recovery
-  // ratios), even though the app would show them identically. `minSec` is a
-  // small floor so a very short rep at a very fast pace still gets a real
-  // jog, not next to none.
-  function recoverySecForWork(repKm, workPaceSecPerKm, ratio, minSec = 15) {
-    return Math.max(minSec, Math.round(repKm * workPaceSecPerKm * ratio));
+  // ratios), even though the app would show them identically. Floored to
+  // the nearest 30s (not rounded) so what's actually shown/coached reads as
+  // a clean "90 detik pemulihan" instead of the raw math's "94 detik" —
+  // Daniels' own tables are written in round numbers too, and rounding UP
+  // even by a few seconds would nudge the real recovery:work ratio past
+  // what was intended, where flooring only ever pulls it (slightly) tighter.
+  // `minSec` is a floor (already a multiple of 30) so a very short rep at a
+  // very fast pace still gets a real jog, not next to none.
+  function recoverySecForWork(repKm, workPaceSecPerKm, ratio, minSec = 30) {
+    const raw = repKm * workPaceSecPerKm * ratio;
+    return Math.max(minSec, Math.floor(raw / 30) * 30);
   }
 
   // Longest-to-shortest order for capVariantByDuration's downgrade cascade
