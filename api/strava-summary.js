@@ -21,7 +21,11 @@ const LOOKBACK_DAYS = 100; // sedikit lebih dari 90 hari (buffer buat deteksi ra
 // this, anyone whose cache was still warm at deploy time keeps getting
 // served the stale shape (missing fields silently read as falsy/undefined
 // on the client) for up to an hour after the fix already shipped.
-const SUMMARY_CACHE_VERSION = 2;
+// v3: recentRuns entries gained an `id` field (see server/strava.js's
+// summarizeRuns) — required by api/strava-activity-detail.js's per-session
+// best_efforts lookup in js/app.js, so a v2 cache (which lacks it) has to
+// be invalidated too, not just treated as "close enough".
+const SUMMARY_CACHE_VERSION = 3;
 
 module.exports = async (req, res) => {
   if (req.method !== 'GET') {
