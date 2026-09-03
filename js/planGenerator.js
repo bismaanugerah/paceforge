@@ -1003,6 +1003,33 @@ const PaceForgeGenerator = (() => {
     });
     currentPaces.goal = currentFitnessPaceSec;
 
+    // The block's start/end VDOT — ramped directly in VDOT-space week to
+    // week (see weekVdotScore below), rather than ramping PACE and
+    // re-deriving VDOT from that pace afterward like weekPaces.goal still
+    // does. That distinction matters specifically for currentVdot: when a
+    // recent race exists, currentFitnessPaceSec above already went through
+    // predictRaceTime (Riegel) to translate it to raceDistanceKm — a
+    // second, independent cross-distance model from VDOT's own
+    // %VO2max-vs-duration curve, and the two don't perfectly agree,
+    // especially across a big distance jump (5K -> marathon). Re-deriving
+    // VDOT from that Riegel-translated pace (the previous approach) could
+    // land noticeably off the VDOT computed DIRECTLY from the actual
+    // recent-race performance — the exact number already shown, unRiegel'd,
+    // on the plan's own top-level "Zona Pace" card (see
+    // js/app.js's renderPaceZones) — which is what a runner would actually
+    // compare week 1's badge against. Computing currentVdot the same
+    // direct way keeps the two in agreement (mod the small ramp already
+    // applied by week 1's own paceProgress). goalVdot doesn't have an
+    // equivalent "direct" option — it's inherently a projection, so some
+    // cross-distance model is unavoidable when recentRaceDistanceKm !=
+    // raceDistanceKm — so it's still derived from goalPaceSec as before;
+    // Riegel's actual job (predicting a finish time) is confined to that
+    // projection and to predictedRaceTimeSec, not reused for this.
+    const currentVdot = (recentRaceTimeSec && recentRaceDistanceKm)
+      ? PaceForgeVDOT.vdotFromPerformance(recentRaceDistanceKm, recentRaceTimeSec)
+      : PaceForgeVDOT.vdotFromGoalPace(raceDistanceKm, currentFitnessPaceSec);
+    const goalVdot = PaceForgeVDOT.vdotFromGoalPace(raceDistanceKm, goalPaceSec);
+
     // Peak weekly volume & peak long run.
     //
     // Peak weekly volume grows off the runner's *current* base at a safe compounding
@@ -1170,24 +1197,26 @@ const PaceForgeGenerator = (() => {
       }
       weekKm = Math.round(weekKm * 10) / 10;
 
-      // This week's zone paces — derived from THIS week's own ramping
-      // "goal" pace (weekPaces.goal, interpolated currentFitnessPaceSec ->
-      // goalPaceSec by paceProgress, same as always) run back through the
-      // real Daniels/Gilbert VDOT formulas (js/vdot.js) — the same ones
-      // already used to render the "Zona Pace" reference table shown
-      // alongside the plan — rather than the old flat PACE_MULTIPLIERS
-      // approximation, which was tuned relative to goal pace directly and
-      // could land noticeably outside the %VO2max-correct zone (e.g. a
-      // tempo target outside Threshold's real 83-88% VO2max range) — the
-      // exact mismatch a runner comparing this table against their own
-      // Zona Pace card would notice. Ramping weekPaces.goal itself is
-      // unchanged — only how the OTHER zones get derived FROM it changed —
+      // This week's zone paces — derived from THIS week's own VDOT (ramped
+      // directly in VDOT-space, currentVdot -> goalVdot by paceProgress —
+      // see currentVdot's own comment above for why VDOT-space rather than
+      // pace-space) run through the real Daniels/Gilbert VDOT formulas
+      // (js/vdot.js) — the same ones already used to render the "Zona
+      // Pace" reference table shown alongside the plan — rather than the
+      // old flat PACE_MULTIPLIERS approximation, which was tuned relative
+      // to goal pace directly and could land noticeably outside the
+      // %VO2max-correct zone (e.g. a tempo target outside Threshold's real
+      // 83-88% VO2max range) — the exact mismatch a runner comparing this
+      // table against their own Zona Pace card would notice. weekPaces.goal
+      // (the runner's actual predicted race pace, used for MSL segments and
+      // predictedRaceTimeSec-adjacent display) keeps ramping in pace-space
+      // exactly as before — only how the OTHER zones get derived changed —
       // so early-week quality sessions still target a pace the runner can
       // actually hold right now, tightening toward race-goal pace as the
       // block progresses, exactly as before.
       const weekPaces = {};
       weekPaces.goal = currentFitnessPaceSec + (goalPaceSec - currentFitnessPaceSec) * paceProgress;
-      const weekVdotScore = PaceForgeVDOT.vdotFromGoalPace(raceDistanceKm, weekPaces.goal);
+      const weekVdotScore = (currentVdot && goalVdot) ? currentVdot + (goalVdot - currentVdot) * paceProgress : null;
       const weekZones = weekVdotScore ? PaceForgeVDOT.paceZonesFromVDOT(weekVdotScore) : null;
       if (weekZones) {
         // Single-number target = each zone's own midpoint — Daniels
@@ -1461,10 +1490,15 @@ const PaceForgeGenerator = (() => {
         phase,
         totalKm,
         // This week's own interpolated goal pace (see weekPaces.goal above)
-        // — exposed per-week so js/app.js can show a "VDOT X.X" figure that
-        // climbs week to week alongside the schedule, instead of only a
-        // single static VDOT snapshot.
+        // — exposed per-week for MSL/predicted-time-adjacent display uses.
         weekGoalPaceSec: weekPaces.goal,
+        // This week's own VDOT (see weekVdotScore above, ramped directly
+        // in VDOT-space) — exposed so js/app.js can show a "VDOT X.X"
+        // figure that climbs week to week alongside the schedule, instead
+        // of only a single static snapshot. NOT re-derived from
+        // weekGoalPaceSec above — see currentVdot's own comment for why
+        // that would drift from this.
+        weekVdot: weekVdotScore,
         days,
       });
     }

@@ -146,13 +146,16 @@
     return `${y}-${m}-${d}`;
   }
 
-  // This week's own VDOT — derived the same way as the top Zona Pace card
-  // (see renderPaceZones), just from week.weekGoalPaceSec (that week's own
-  // interpolated goal pace, see planGenerator.js) instead of the overall
-  // plan's goalPaceSec — so the figure climbs week to week alongside the
-  // schedule instead of staying fixed at the plan's single snapshot.
-  function weekVdot(meta, week) {
-    return PaceForgeVDOT.vdotFromGoalPace(meta.raceDistanceKm, week.weekGoalPaceSec);
+  // This week's own VDOT — computed by planGenerator.js (week.weekVdot,
+  // ramped directly in VDOT-space from the runner's actual recent-race
+  // performance toward their projected goal) so the figure climbs week to
+  // week alongside the schedule instead of staying fixed at the plan's
+  // single snapshot. NOT re-derived here from week.weekGoalPaceSec via
+  // vdotFromGoalPace any more — that indirect route used to disagree with
+  // the top-level Zona Pace card's own (direct, un-Riegel'd) VDOT, most
+  // visibly right at week 1 — see planGenerator.js's currentVdot comment.
+  function weekVdot(week) {
+    return week.weekVdot;
   }
 
   // The week today actually falls inside, if any — null when the plan
@@ -1936,7 +1939,7 @@
     // defaultOpenWeekNumber below for which one that is.
     const defaultOpenWeekNumber = pickDefaultOpenWeek(weeks, currentWeek);
     planWeeksEl.innerHTML = weeks.map(week => {
-      const vdot = weekVdot(meta, week);
+      const vdot = weekVdot(week);
       const vdotLine = vdot
         ? `<div class="week-vdot">🎯 Zona Pace (VDOT ${vdot.toFixed(1)}) per ${formatLongDate(week.startDate)}</div>`
         : '';
@@ -2186,7 +2189,7 @@
 
         // Same per-week "Zona Pace (VDOT ...)" line as the on-screen
         // result (see weekVdot()) — the VDOT figure climbing week to week.
-        const vdot = weekVdot(meta, week);
+        const vdot = weekVdot(week);
         if (vdot) {
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(7.6);
