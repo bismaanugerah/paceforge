@@ -594,8 +594,56 @@ input[type="radio"]:focus-visible {
   background: var(--color-bg);
   border-radius: 10px;
 }
-.volume-chart-bars { display: block; width: 100%; height: 130px; }
-.volume-chart-bar-group:hover rect { opacity: 1; }
+/* .table-scroll (defined further down, shared with .day-table/.pace-zone-table)
+   lets a long marathon-length plan (16-20+ columns) scroll horizontally on a
+   narrow phone instead of squeezing every bar down to unreadable. */
+.volume-chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  margin-top: 4px;
+}
+.volume-chart-col {
+  flex: 1 1 0;
+  min-width: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.volume-chart-value {
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+/* Fixed-height track the bar sits at the bottom of — a real pixel height
+   here (set inline per bar in JS) instead of a percentage of some scaled
+   viewBox is what keeps the value/week-number text above and below it
+   crisp, unlike the SVG version this replaced. */
+.volume-chart-track { height: 90px; width: 100%; display: flex; align-items: flex-end; }
+.volume-chart-fill {
+  width: 100%;
+  min-width: 16px;
+  border-radius: 4px 4px 0 0;
+  opacity: 0.82;
+  transition: opacity 0.15s;
+}
+.volume-chart-col:hover .volume-chart-fill { opacity: 1; }
+.volume-chart-week-no { font-size: 0.68rem; color: var(--color-text-muted); }
+/* The current week needs to be unmistakable, not just a slightly brighter
+   bar in a row of a dozen similar ones — a visible ring on the bar plus
+   bolded/colored labels above and below it, backed up by the explicit
+   "Sekarang: Minggu N" text in the header line above (see renderVolumeChart). */
+.volume-chart-col.is-current .volume-chart-fill {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--color-primary-dark);
+}
+.volume-chart-col.is-current .volume-chart-value,
+.volume-chart-col.is-current .volume-chart-week-no {
+  color: var(--color-primary-dark);
+  font-weight: 700;
+}
 .volume-chart-legend {
   display: flex;
   flex-wrap: wrap;

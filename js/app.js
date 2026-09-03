@@ -1791,50 +1791,46 @@
   // week's accordion header, not a new palette) — the accordion below only
   // ever shows one week's total at a time, so without this a runner has
   // to expand all of them just to see the plan's overall base-build-peak-
-  // taper shape. viewBox height is fixed and preserveAspectRatio="none" so
-  // bar heights stay visually comparable regardless of how many weeks the
-  // plan has (a marathon block can run 2-3x longer than a 5K block).
+  // taper shape.
+  //
+  // Plain flex/CSS bars, not SVG: an SVG viewBox stretched to the
+  // container's width with preserveAspectRatio="none" (the first version
+  // of this) scales X and Y by different factors, which distorts text —
+  // fine for bars alone, but this chart needs the km value legible on
+  // every bar without hovering, and distorted digits defeat that. Flex
+  // items given a real pixel height inside a fixed-height track sidestep
+  // that entirely, at the cost of needing JS instead of the SVG's own
+  // coordinate math.
   function renderVolumeChart(weeks, currentWeek) {
     if (!weeks.length) { volumeChart.innerHTML = ''; return; }
 
     const maxKm = Math.max(...weeks.map(w => w.totalKm), 1);
-    const barSlot = 34;
-    const barWidth = Math.min(22, barSlot - 8);
-    const barMaxHeight = 90;
-    const chartWidth = weeks.length * barSlot;
+    const trackHeight = 90;
 
-    const bars = weeks.map((week, i) => {
-      const height = Math.max(2, Math.round((week.totalKm / maxKm) * barMaxHeight));
-      const x = i * barSlot + (barSlot - barWidth) / 2;
-      const y = barMaxHeight - height;
+    const cols = weeks.map(week => {
+      const heightPx = Math.max(3, Math.round((week.totalKm / maxKm) * trackHeight));
       const color = PHASE_COLORS[week.phase] || 'var(--color-text-muted)';
       const isCurrent = currentWeek && week.weekNumber === currentWeek.weekNumber;
-      // <title> as the group's first child (not a loose sibling of <rect>)
-      // is what makes it act as that bar's native hover tooltip — a title
-      // dumped flat into the <svg> wouldn't attach to any specific bar.
+      // Rounded to a whole km for the always-visible label — the exact
+      // figure (which can carry a .1-.9 decimal, see planGenerator's
+      // totalKm) is still available in the hover title below, but doesn't
+      // need to fight for space against a dozen other bars' labels.
       return `
-        <g class="volume-chart-bar-group">
-          <title>Minggu ${week.weekNumber} • ${week.phase} • ${week.totalKm} km</title>
-          <rect x="${x}" y="${y}" width="${barWidth}" height="${height}" rx="3" style="fill:${color}" opacity="${isCurrent ? 1 : 0.82}"></rect>
-          ${isCurrent ? `<circle cx="${x + barWidth / 2}" cy="${y - 6}" r="2.5" style="fill:var(--color-primary-dark)"></circle>` : ''}
-        </g>
+        <div class="volume-chart-col${isCurrent ? ' is-current' : ''}" title="Minggu ${week.weekNumber} • ${week.phase} • ${week.totalKm} km">
+          <span class="volume-chart-value">${Math.round(week.totalKm)}</span>
+          <div class="volume-chart-track">
+            <span class="volume-chart-fill" style="height:${heightPx}px;background:${color}"></span>
+          </div>
+          <span class="volume-chart-week-no">${week.weekNumber}</span>
+        </div>
       `;
     }).join('');
 
-    // Thin out labels on longer plans (marathon blocks run 16+ weeks) so
-    // they don't collide — always keep the first and last week's number
-    // legible regardless of step, since those anchor the x-axis.
-    const labelStep = weeks.length > 14 ? 2 : 1;
-    const labels = weeks.map((week, i) => {
-      const isEdge = week.weekNumber === 1 || week.weekNumber === weeks.length;
-      if (!isEdge && week.weekNumber % labelStep !== 0) return '';
-      const x = i * barSlot + barSlot / 2;
-      return `<text x="${x}" y="${barMaxHeight + 16}" text-anchor="middle" style="fill:var(--color-text-muted);font-size:9px">${week.weekNumber}</text>`;
-    }).join('');
-
     const peakWeek = weeks.reduce((max, w) => (w.totalKm > max.totalKm ? w : max), weeks[0]);
-    const lastWeek = weeks[weeks.length - 1];
-    const ariaLabel = `Grafik volume lari mingguan: ${weeks[0].totalKm} km di minggu 1, naik ke puncak ${peakWeek.totalKm} km di minggu ${peakWeek.weekNumber}, lalu ${lastWeek.totalKm} km di minggu ${lastWeek.weekNumber}.`;
+    // Spelled out in words, not just a highlighted bar — a lone highlight
+    // in a row of a dozen near-identical bars is too easy to miss as "the
+    // current week" versus, say, "the biggest week" or a rendering glitch.
+    const currentNote = currentWeek ? ` • Sekarang: Minggu ${currentWeek.weekNumber}` : '';
 
     // Only lists phases this specific plan actually has (a short 5K block
     // may never see Cutback, for instance) rather than a fixed 6-item
@@ -1848,13 +1844,10 @@
 
     volumeChart.innerHTML = `
       <div class="pace-zone-header">
-        <span class="pace-zone-title">📈 Volume Mingguan</span>
-        <span class="pace-zone-source">Peak ${peakWeek.totalKm} km di minggu ${peakWeek.weekNumber}</span>
+        <span class="pace-zone-title">📈 Volume Mingguan (km)</span>
+        <span class="pace-zone-source">Peak ${peakWeek.totalKm} km di minggu ${peakWeek.weekNumber}${currentNote}</span>
       </div>
-      <svg class="volume-chart-bars" viewBox="0 0 ${chartWidth} ${barMaxHeight + 22}" preserveAspectRatio="none" role="img" aria-label="${ariaLabel}">
-        ${bars}
-        ${labels}
-      </svg>
+      <div class="table-scroll"><div class="volume-chart-bars">${cols}</div></div>
       <div class="volume-chart-legend">${legend}</div>
     `;
   }
