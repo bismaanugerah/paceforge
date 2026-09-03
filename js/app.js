@@ -845,10 +845,18 @@
     if (goalTypeRadio) goalTypeRadio.checked = true;
     updateGoalTypeUI();
 
-    const isCustom = settings.raceKey === 'custom';
-    distanceModeToggle.querySelector(`input[value="${isCustom ? 'custom' : 'preset'}"]`).checked = true;
-    presetDistanceField.hidden = isCustom;
-    customDistanceField.hidden = !isCustom;
+    // Only meaningful in Race mode — non-race modes have no custom-distance
+    // choice at all (see NON_RACE_DEFAULT_RACE_KEY), and updateGoalTypeUI
+    // above already hid #distanceModeField/#presetDistanceField for them.
+    // Unconditionally touching those fields' `hidden` here (the previous
+    // behaviour) undid that hiding the moment a saved non-race plan was
+    // restored — a real bug caught from a live screenshot, not hypothetical.
+    const isCustom = goalTypeValue === 'race' && settings.raceKey === 'custom';
+    if (goalTypeValue === 'race') {
+      distanceModeToggle.querySelector(`input[value="${isCustom ? 'custom' : 'preset'}"]`).checked = true;
+      presetDistanceField.hidden = isCustom;
+      customDistanceField.hidden = !isCustom;
+    }
     if (isCustom) {
       customDistanceKm.value = settings.raceDistanceKm;
     } else {

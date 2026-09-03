@@ -934,26 +934,12 @@ const PaceForgeGenerator = (() => {
     // more slots) is what actually prevents the original ballooning
     // symptom, without needing a day-based multiplier on top of it.
     //
-    // Scaling by the runner's own currentWeeklyKm is a different axis,
-    // though, and IS needed: profile.maxSupportKm was sourced from Hal
-    // Higdon's Intermediate 1 plans at whatever peak volume those specific
-    // published plans reach (see RACE_PROFILES' own comment) — a runner
-    // who's already well past that reference volume before this plan even
-    // starts genuinely needs longer support sessions to make sense at
-    // their scale (a fixed 10km "easy run" ceiling is realistic for
-    // someone building toward ~50km/week total, not for someone who
-    // already runs 60km/week). referenceWeeklyKm reconstructs roughly what
-    // peak weekly volume those Higdon plans (all 5 days/week — see above)
-    // were themselves running, from the one number already sourced from
-    // them (longRunMax) via this file's own 5-day long-run share, so nothing
-    // new needs sourcing. Floored at 1 (never shrinks the ceiling below its
-    // sourced value — a low-volume runner's proportional share is already
-    // small on its own, this only ever needs to grow) and capped at 2.5x so
-    // an extreme currentWeeklyKm input doesn't blow the ceiling out to an
-    // implausible number.
-    const referenceWeeklyKm = profile.longRunMax / weeklySplitForDays(5).longRunShare;
-    const supportKmScaleFactor = clamp(currentWeeklyKm / referenceWeeklyKm, 1, 2.5);
-    const maxSupportKm = profile.maxSupportKm * supportKmScaleFactor;
+    // Scaling by volume is a different axis, though, and IS needed — see
+    // supportKmScaleFactor below (computed once theoreticalPeakWeeklyKm is
+    // available, since that — not currentWeeklyKm itself — is what actually
+    // needs comparing against the reference volume these caps were sourced
+    // at). maxSupportKm itself is assigned once that's resolved.
+    let maxSupportKm = profile.maxSupportKm; // reassigned below, once supportKmScaleFactor is known
     const isFullMarathonPlan = profile === RACE_PROFILES.full;
     // Race-specific long run (MSL, or its half-marathon equivalent): a
     // long run partly held at goal race pace (see
@@ -1022,17 +1008,16 @@ const PaceForgeGenerator = (() => {
     // Base Building's whole point is raising mileage from a lower baseline
     // — past VOLUME_GAIN_PLATEAU_KM, that headroom is mostly gone (same
     // reasoning goalPaceSec's volumeGainMultiplier above already applies to
-    // pace gains), and this plan's long-run range (profile.longRunMax) can
-    // end up BELOW the runner's own longestRecentRunKm at this volume,
-    // which clamps the long run down instead of growing it — a Base
-    // Building block essentially can't progress a runner meaningfully past
-    // this point. Maintenance doesn't have that ceiling problem (it never
-    // tries to grow the long run in the first place), so it's the better
-    // fit once volume is already this high. Advisory only — doesn't block
-    // or auto-switch, since the runner may have a real reason to keep
-    // pushing volume regardless.
+    // pace gains). This plan's long-run range still scales with
+    // supportKmScaleFactor (see peakLongRunKm below), so it isn't a hard
+    // wall the way it was before that fix, but growth genuinely does get
+    // harder to sustain up here regardless — Maintenance's flat-volume
+    // design doesn't have any ceiling to run into in the first place, so
+    // it's the better fit once volume is already this high. Advisory
+    // only — doesn't block or auto-switch, since the runner may have a
+    // real reason to keep pushing volume regardless.
     if (isBaseBuilding && currentWeeklyKm >= VOLUME_GAIN_PLATEAU_KM) {
-      warnings.push(`Volume mingguanmu sekarang (${currentWeeklyKm} km) sudah di titik di mana Base Building lewat penambahan volume biasanya makin nggak signifikan hasilnya, dan long run di plan ini bisa malah ketahan di bawah kemampuanmu sekarang (dibatasi ke maks ${profile.longRunMax} km buat gaya latihan ini). Kalau tujuanmu sekarang lebih ke jaga fitness daripada terus naikin mileage, mode Maintenance kemungkinan lebih pas. Base Building tetap bisa dipakai, cuma progresnya bakal kerasa terbatas dari titik ini.`);
+      warnings.push(`Volume mingguanmu sekarang (${currentWeeklyKm} km) sudah di titik di mana Base Building lewat penambahan volume biasanya makin nggak signifikan hasilnya. Kalau tujuanmu sekarang lebih ke jaga fitness daripada terus naikin mileage, mode Maintenance kemungkinan lebih pas. Base Building tetap bisa dipakai, cuma progresnya bakal kerasa terbatas dari titik ini.`);
     }
     if (weeksAvailable < profile.recWeeks) {
       // raceLabel is a real race name in race mode, but "Aerobic Base"/
@@ -1284,10 +1269,49 @@ const PaceForgeGenerator = (() => {
     // deliverable once session caps are accounted for.
     const theoreticalPeakWeeklyKm = Math.max(currentWeeklyKm * growthMultiplier, currentWeeklyKm); // never plan below current base
 
-    // Aim for the race's recommended long-run range — longRunShare already
-    // reflects a realistic per-days-per-week share (see weeklySplitForDays),
-    // clamped to the race-appropriate absolute range.
-    const peakLongRunKm = clamp(theoreticalPeakWeeklyKm * longRunShare, profile.longRunMin, profile.longRunMax);
+    // profile.longRunMin/Max and profile.maxSupportKm (maxSupportKm
+    // reassigned just below) were sourced from Hal Higdon's Intermediate 1
+    // plans at whatever peak volume those specific published plans reach
+    // (see RACE_PROFILES' own comment) — a plan whose own peak volume
+    // target is already well past that reference needs both ranges to grow
+    // with it, or they clamp hard against a ceiling calibrated for a
+    // smaller plan. Compared against theoreticalPeakWeeklyKm here, NOT
+    // currentWeeklyKm — growthMultiplier alone can push the former well
+    // past referenceWeeklyKm even while the runner's *starting* volume is
+    // still comfortably under it (e.g. 36km/week compounding toward
+    // ~78km/week over an 11-week block), so currentWeeklyKm was the wrong
+    // thing to compare and left this basically inert for exactly the
+    // inputs it needed to catch: confirmed live, a 36km/week, 3-day input
+    // (whose 50% long-run share hits longRunMax especially early) produced
+    // a nearly flat 34-34.5km chart for its entire Base/Build/Peak arc
+    // before this fix, currentWeeklyKm-based scaling included. Floored at
+    // 1 (never shrinks either ceiling below its sourced value — a low-
+    // volume plan's raw shares are already small on their own, this only
+    // ever needs to grow) and capped at 2.5x so an extreme input doesn't
+    // blow either ceiling out to an implausible number.
+    const referenceWeeklyKm = profile.longRunMax / weeklySplitForDays(5).longRunShare;
+    const supportKmScaleFactor = clamp(theoreticalPeakWeeklyKm / referenceWeeklyKm, 1, 2.5);
+    maxSupportKm = profile.maxSupportKm * supportKmScaleFactor;
+    // Long-run range scaling is non-race-only, unlike maxSupportKm just
+    // above — a real race's long run is bounded by the RACE itself, not
+    // just "how much volume can fit in one session": scaling it the same
+    // way for Race mode let a 70km/week half-marathon plan's peak long run
+    // reach ~47.5km, more than double the actual 21.1km race distance,
+    // which no amount of extra weekly volume makes sensible prep for that
+    // specific race. Non-race modes have no such external distance to stay
+    // bounded by (see isNonRace's own settings-destructuring comment), so
+    // they keep scaling — this is exactly the mechanism the flat-Base-
+    // Building-growth bug above needed fixed. Race mode's long run instead
+    // stays at its Higdon-sourced value regardless of how much extra
+    // volume the runner already carries; maxSupportKm scaling still lets
+    // that extra volume go into MORE/longer non-long-run sessions instead.
+    const scaledLongRunMin = isNonRace ? profile.longRunMin * supportKmScaleFactor : profile.longRunMin;
+    const scaledLongRunMax = isNonRace ? profile.longRunMax * supportKmScaleFactor : profile.longRunMax;
+
+    // Aim for the race's recommended long-run range (now scaled — see
+    // above) — longRunShare already reflects a realistic per-days-per-week
+    // share (see weeklySplitForDays).
+    const peakLongRunKm = clamp(theoreticalPeakWeeklyKm * longRunShare, scaledLongRunMin, scaledLongRunMax);
 
     // theoreticalPeakWeeklyKm * longRunShare (the long run's raw, nominal
     // slice of the week) almost never survives peakLongRunKm's own
