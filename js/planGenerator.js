@@ -91,6 +91,19 @@ const PaceForgeGenerator = (() => {
     advanced: 0.03,
   };
 
+  // Maintenance mode's own (much smaller, flat-across-levels) version of
+  // the gain fraction above. Maintenance has no race/goal distance to
+  // project toward — the point isn't "ramp toward a faster target" the way
+  // Base Building/race mode do, just a small, honest nod to the fact that
+  // consistent training still produces some fitness gain even without one.
+  // Deliberately flat regardless of fitnessLevel (unlike
+  // CONSERVATIVE_FITNESS_GAIN_PCT, which scales 3-8% by level) and roughly
+  // a quarter of that table's smallest entry — small enough that even a
+  // stale VDOT input (a maintenance user is exactly the kind of runner
+  // likely to not have a recent race) can't compound into an unrealistic
+  // target, since the target itself barely moves from where it started.
+  const MAINTENANCE_FITNESS_GAIN_PCT = 0.02;
+
   // Absolute floor for any pace this generator will ever schedule or treat
   // as a goal, in sec/km — well under the current marathon world record
   // pace (~2:50/km) and every shorter distance's, so it only ever catches a
@@ -353,8 +366,12 @@ const PaceForgeGenerator = (() => {
 
   // Shared by workoutTemplate's day-assignment (prioritize these onto
   // weekdays — see below) and applyConservativeAdjustment (shift weight
-  // off these onto easy/recovery slots).
-  const QUALITY_TYPES = new Set(['tempo', 'interval', 'repetition']);
+  // off these onto easy/recovery slots). 'fartlek' counts as a quality
+  // effort too (Maintenance mode swaps it in for a rotation slot — see
+  // MAINTENANCE_FARTLEK_EVERY/resolveQualitySlot below) so it gets the
+  // same weekday-priority/48-72h-spacing placement as tempo/interval/
+  // repetition, not treated like a plain easy day.
+  const QUALITY_TYPES = new Set(['tempo', 'interval', 'repetition', 'fartlek']);
 
   // Which specific workout occupies a week's quality slot(s) — rotates
   // through popular, well-documented variations on Daniels' T/I/R paces
@@ -484,6 +501,27 @@ const PaceForgeGenerator = (() => {
       return { type: 'tempo', variant: 'continuous' };
     }
     return pick;
+  }
+
+  // Maintenance mode's own quality-slot resolver: every Nth quality
+  // occurrence (across both weeks and a week's 1st/2nd slot, same index
+  // space qualityPick already uses) is swapped for Fartlek instead of
+  // whatever the race-style rotation would've picked — an unstructured,
+  // effort-based session standing in for a structured one. This is
+  // Maintenance's "rest" mechanism in place of Base Building's volume
+  // cutback (see generatePlan's isMaintenance branch, which deliberately
+  // skips the -20%-every-4-weeks cutback): swapping out a fixed-pace
+  // session periodically keeps hard-effort exposure from accumulating
+  // indefinitely without needing to touch weekly volume, which stays flat
+  // by design in this mode. Race mode and Base Building are unaffected —
+  // callers pass isMaintenance=false and get qualityPick's own pick back
+  // untouched.
+  const MAINTENANCE_FARTLEK_EVERY = 4;
+  function resolveQualitySlot(weekIndex, slotOffset, conservativeMode, rotation, isMaintenance) {
+    if (isMaintenance && (weekIndex + slotOffset) % MAINTENANCE_FARTLEK_EVERY === MAINTENANCE_FARTLEK_EVERY - 1) {
+      return { type: 'fartlek' };
+    }
+    return qualityPick(weekIndex, slotOffset, conservativeMode, rotation);
   }
 
   /** Ordered workout-type template for a given days-per-week, excluding long run
@@ -670,6 +708,42 @@ const PaceForgeGenerator = (() => {
     return { kind: 'tempo', warmupKm, cooldownKm, tempoKm };
   }
 
+  // Fartlek ("speed play") — unlike every other quality workout here, real
+  // fartlek surges are run/felt by TIME or landmark, not a measured
+  // distance, so this is anchored to a fixed work DURATION
+  // (FARTLEK_WORK_SEC) and converted to km only for the bar's rendering,
+  // the same way buildRepsStructure already converts recoverySec to a km
+  // width. Classic "1 minute on / 1 minute off" shape (~6-10 reps) — a
+  // loose reference the UI should caption as adjustable "sesuai feeling",
+  // not a strict target the way Tempo/Interval reps are.
+  //
+  // Work effort is meant to reference the Interval zone (~8-9/10 perceived
+  // exertion per multiple coaching sources, closer to interval effort than
+  // tempo's "comfortably hard" ~7/10 — see callers passing weekPaces.interval
+  // as workPaceSecPerKm), but recovery is genuine EASY-pace jogging
+  // (weekPaces.easy passed as easyPaceSecPerKm), NOT the slower near-walk
+  // pace Interval/Repetition/Tempo-cruise recover at (weekPaces.recovery).
+  // That's fartlek's defining difference from structured interval training:
+  // "your running pace between speed bursts should be your regular base run
+  // pace" (Runstreet); recovery is run "at your easy pace" (McMillan's "The
+  // Lost Art of the Fartlek"; TrainingPeaks "Fartlek Run 101") — unlike
+  // interval's slower/near-walk recovery.
+  const FARTLEK_WORK_SEC = 60;
+  const FARTLEK_RECOVERY_RATIO = 1.0; // "1 minute off" — equal work:recovery
+  const FARTLEK_MIN_REPS = 6;
+  const FARTLEK_MAX_REPS = 10;
+
+  function buildFartlekStructure(sessionKm, workPaceSecPerKm, easyPaceSecPerKm) {
+    const repKm = FARTLEK_WORK_SEC / workPaceSecPerKm;
+    const recoverySec = FARTLEK_WORK_SEC * FARTLEK_RECOVERY_RATIO;
+    return buildRepsStructure(sessionKm, {
+      repKm, recoverySec, recoveryPaceSecPerKm: easyPaceSecPerKm,
+      minReps: FARTLEK_MIN_REPS, maxReps: FARTLEK_MAX_REPS, workExertion: 'moderate',
+      warmupFrac: 0.25, warmupMin: 1, warmupMax: 2,
+      cooldownFrac: 0.2, cooldownMin: 1, cooldownMax: 1.5,
+    });
+  }
+
   // Repetition (R-pace) rep-distance variants — same idea as
   // INTERVAL_VARIANT_PROFILES above, just shorter distances (R-pace reps
   // are meant to stay brief/sharp, not a distance workout) and their own
@@ -740,6 +814,8 @@ const PaceForgeGenerator = (() => {
     interval: 'Interval',
     repetition: 'Repetition',
     shakeout: 'Shakeout Run',
+    fartlek: 'Fartlek',
+    evaluation: 'Evaluasi / Time Trial',
     rest: 'Rest',
     // Not a real day.type — a rest day is always 'rest' in the data model.
     // This is a display-only key (see app.js's restDisplayKey) a weekday
@@ -757,7 +833,22 @@ const PaceForgeGenerator = (() => {
       raceDistanceKm, raceLabel, raceKey, raceDate, startDate,
       fitnessLevel, currentWeeklyKm, longestRecentRunKm, daysPerWeek, preferredDays, longRunDay,
       targetTimeSec, recentRaceTimeSec, recentRaceDistanceKm, conservativeMode,
+      // mode: 'race' (default, existing behavior) | 'nonRace'. nonRaceStyle:
+      // 'baseBuilding' | 'maintenance', only meaningful when mode is
+      // 'nonRace'. Non-race callers (js/app.js) pass their chosen `endDate`
+      // in as `raceDate` — a real calendar date the block's own math
+      // (weeksAvailable/planWeeks/phase/cutback below) can anchor to
+      // unchanged, exactly as it already does for a real race. What
+      // actually differs for non-race plans is scoped narrowly below:
+      // taper collapses to a single evaluation week instead of a real
+      // race's multi-week taper, there's no race-pace rehearsal long run,
+      // the final day is an "Evaluasi" self-test instead of "RACE DAY!",
+      // and Maintenance additionally holds volume flat and ramps VDOT only
+      // a token amount instead of progressing toward a goal.
+      mode, nonRaceStyle,
     } = settings;
+    const isNonRace = mode === 'nonRace';
+    const isMaintenance = isNonRace && nonRaceStyle === 'maintenance';
 
     // Anchor for "how many weeks do I actually have before race day" — the
     // date the runner wants to start training, not necessarily today (e.g.
@@ -795,7 +886,10 @@ const PaceForgeGenerator = (() => {
     // and only scheduled during the Peak phase — the block of build weeks
     // with the highest long-run distances, right before taper (see
     // buildPhaseForWeek).
-    const usesRaceSpecificLongRun = profile === RACE_PROFILES.full || profile === RACE_PROFILES.half;
+    // Race-pace rehearsal only makes sense against a real race — non-race
+    // plans have no actual race pace to rehearse for, so this is forced off
+    // regardless of which "gaya latihan" template the user picked.
+    const usesRaceSpecificLongRun = !isNonRace && (profile === RACE_PROFILES.full || profile === RACE_PROFILES.half);
     const raceSpecificPaceLabel = isFullMarathonPlan ? 'Marathon' : 'Half Marathon';
 
     // Weeks always run Monday-Sunday (the conventional training-plan grid,
@@ -814,7 +908,13 @@ const PaceForgeGenerator = (() => {
     const weeksAvailable = Math.max(1, Math.floor((raceWeekMonday - startWeekMonday) / MS_PER_DAY / 7) + 1);
 
     let planWeeks = Math.min(weeksAvailable, profile.recWeeks);
-    let taperWeeks = Math.min(profile.taperWeeks, Math.max(planWeeks - 1, 0));
+    // Non-race plans don't taper for a race — they end in a single
+    // deload + optional self-test ("Evaluasi") week instead of the
+    // real race's multi-week taper (profile.taperWeeks), so this is
+    // forced to at most 1 week regardless of "gaya latihan".
+    let taperWeeks = isNonRace
+      ? Math.min(1, Math.max(planWeeks - 1, 0))
+      : Math.min(profile.taperWeeks, Math.max(planWeeks - 1, 0));
     let buildWeeks = Math.max(planWeeks - taperWeeks, 1);
 
     // Where the Peak phase starts within the build block, and how many
@@ -953,10 +1053,17 @@ const PaceForgeGenerator = (() => {
       // not all three simultaneously.
       const STIMULUS_MULTIPLIER_CAP = 1.3;
       const stimulusMultiplier = Math.min(STIMULUS_MULTIPLIER_CAP, qualityGainMultiplier * volumeGainMultiplier * paceLevelMultiplier);
-      const gainFraction = CONSERVATIVE_FITNESS_GAIN_PCT[fitnessLevel]
-        * clamp(buildWeeks / profile.recWeeks, 0, 1)
-        * (conservativeMode ? 0.5 : 1)
-        * stimulusMultiplier;
+      // Maintenance mode skips this whole multi-factor stack (quality-
+      // session count, volume headroom, current pace level) and its
+      // per-fitness-level base rate — none of that "how much room is there
+      // to chase a goal" reasoning applies when there's no goal being
+      // chased, just a token improvement (see MAINTENANCE_FITNESS_GAIN_PCT).
+      const gainFraction = isMaintenance
+        ? MAINTENANCE_FITNESS_GAIN_PCT
+        : CONSERVATIVE_FITNESS_GAIN_PCT[fitnessLevel]
+          * clamp(buildWeeks / profile.recWeeks, 0, 1)
+          * (conservativeMode ? 0.5 : 1)
+          * stimulusMultiplier;
       goalPaceSec = currentEquivPaceSec * (1 - gainFraction);
       goalPaceSource = 'recentRace';
     } else {
@@ -1174,7 +1281,18 @@ const PaceForgeGenerator = (() => {
       let longRunTargetKm; // this week's long run before the ramp-safety clamp further below
       let phase;
       let paceProgress; // 0 (currentFitnessPaceSec) -> 1 (goalPaceSec); see weekPaces below
-      if (!isTaperWeek) {
+      if (!isTaperWeek && isMaintenance) {
+        // Maintenance: volume stays flat at the runner's own current base
+        // (no WEEKLY_GROWTH_RATE compounding, no cutback week) — the
+        // "rest" mechanism here is the periodic Fartlek swap-in
+        // (resolveQualitySlot above), not a volume dip. See generatePlan's
+        // isMaintenance destructuring comment for why.
+        const progress = buildWeeks === 1 ? 1 : (w + 1) / buildWeeks;
+        paceProgress = Math.min(1, progress * PACE_PROGRESS_MULTIPLIER);
+        weekKm = currentWeeklyKm;
+        longRunTargetKm = longRunStartKm;
+        phase = 'Maintenance';
+      } else if (!isTaperWeek) {
         const progress = buildWeeks === 1 ? 1 : (w + 1) / buildWeeks;
         paceProgress = Math.min(1, progress * PACE_PROGRESS_MULTIPLIER);
         let linearKm = currentWeeklyKm + (peakWeeklyKm - currentWeeklyKm) * progress;
@@ -1189,6 +1307,18 @@ const PaceForgeGenerator = (() => {
         weekKm = isCutback ? linearKm * 0.8 : linearKm;
         longRunTargetKm = isCutback ? linearLongRunKm * 0.8 : linearLongRunKm;
         phase = isCutback ? 'Cutback' : buildPhaseForWeek(w, buildWeeks);
+      } else if (isMaintenance) {
+        // Maintenance's evaluation week deloads off its own flat baseline
+        // (currentWeeklyKm/longRunStartKm — what every other week in this
+        // mode actually ran), NOT peakWeeklyKm/peakLongRunKm — those are
+        // leftover progressive-growth figures Maintenance never schedules
+        // toward, so factoring off them here would make the "deload" week
+        // land HIGHER than the flat weeks preceding it.
+        const factor = taperFactors[0] ?? 0.55;
+        weekKm = currentWeeklyKm * factor;
+        longRunTargetKm = longRunStartKm * factor;
+        phase = 'Evaluasi';
+        paceProgress = 1;
       } else {
         const taperIdx = w - buildWeeks;
         const factor = taperFactors[taperIdx] ?? 0.5;
@@ -1197,7 +1327,7 @@ const PaceForgeGenerator = (() => {
         // than through weekKm*longRunShare — standard taper design (e.g.
         // "75% of peak long run" in the first taper week).
         longRunTargetKm = peakLongRunKm * factor;
-        phase = isRaceWeek ? 'Race Week' : 'Taper';
+        phase = isNonRace ? 'Evaluasi' : (isRaceWeek ? 'Race Week' : 'Taper');
         // Taper is about cutting volume, not intensity/precision — by now
         // the runner should be able to hold goal pace, so pace targets
         // don't taper back down with the mileage.
@@ -1247,6 +1377,10 @@ const PaceForgeGenerator = (() => {
         // publish instead of inventing a number he didn't.
         weekPaces.longRun = weekPaces.easy;
         weekPaces.recovery = weekZones.easy.slowSec;
+        // Fartlek's work segments reference Interval zone as a ceiling/
+        // reference pace (see buildFartlekStructure's own comment) — reuses
+        // the Interval zone number directly rather than a new zone.
+        weekPaces.fartlek = weekPaces.interval;
       } else {
         // Defensive fallback only — shouldn't occur given the pace floors
         // enforced above (MIN_PLAUSIBLE_PACE_SEC_PER_KM etc.), but the old
@@ -1255,6 +1389,7 @@ const PaceForgeGenerator = (() => {
         Object.keys(PACE_MULTIPLIERS).forEach(zone => {
           weekPaces[zone] = currentPaces[zone] + (paces[zone] - currentPaces[zone]) * paceProgress;
         });
+        weekPaces.fartlek = weekPaces.interval;
       }
 
       // Which specific workout (type + variant) fills this week's 1st/2nd
@@ -1262,8 +1397,8 @@ const PaceForgeGenerator = (() => {
       // *where* each type lands) and the per-day structure builder further
       // below (deciding *what shape* that type's session takes) always
       // agree, instead of picking the rotation twice and risking drift.
-      const qualityPrimary = qualityPick(w, 0, conservativeMode, qualityRotation);
-      const qualitySecondary = qualityPick(w, Math.floor(qualityRotation.length / 2), conservativeMode, qualityRotation);
+      const qualityPrimary = resolveQualitySlot(w, 0, conservativeMode, qualityRotation, isMaintenance);
+      const qualitySecondary = resolveQualitySlot(w, Math.floor(qualityRotation.length / 2), conservativeMode, qualityRotation, isMaintenance);
 
       // Build the list of workout slots for this week.
       const template = isRaceWeek
@@ -1419,6 +1554,18 @@ const PaceForgeGenerator = (() => {
         if (!dayObj) return;
 
         if (type === 'race') {
+          if (isNonRace) {
+            // No real race to run — this slot becomes a light self-test
+            // instead: a short, moderately-hard effort (not the full
+            // "gaya latihan" distance, and not goal pace) sized off this
+            // block's own peak volume, mainly there as an optional
+            // checkpoint before the next block starts.
+            dayObj.type = 'evaluation';
+            dayObj.km = Math.max(2, Math.round(clamp(peakWeeklyKm * 0.15, 3, 10) * 2) / 2);
+            dayObj.paceSecPerKm = weekPaces.tempo;
+            if (dayObj.km > 0) dayObj.structure = buildSimpleStructure(dayObj.km);
+            return;
+          }
           dayObj.type = 'race';
           dayObj.km = raceDistanceKm;
           dayObj.paceSecPerKm = goalPaceSec;
@@ -1511,6 +1658,13 @@ const PaceForgeGenerator = (() => {
           const built = buildRepetitionStructure(dayObj.km, variant, dayObj.paceSecPerKm, weekPaces.recovery);
           dayObj.workoutVariant = built.resolvedVariant;
           dayObj.structure = built.structure;
+        } else if (type === 'fartlek' && dayObj.km > 0) {
+          // Recovery is genuine easy pace here (weekPaces.easy), NOT
+          // weekPaces.recovery like every other reps-based workout above —
+          // see buildFartlekStructure's own comment for why that's
+          // deliberate, not an oversight.
+          dayObj.recoveryPaceSecPerKm = weekPaces.easy;
+          dayObj.structure = buildFartlekStructure(dayObj.km, dayObj.paceSecPerKm, weekPaces.easy);
         } else if (dayObj.km > 0) {
           dayObj.structure = buildSimpleStructure(dayObj.km);
         }
@@ -1563,6 +1717,7 @@ const PaceForgeGenerator = (() => {
     return {
       meta: {
         raceLabel, raceDistanceKm, raceDate: race,
+        mode: mode || 'race', nonRaceStyle: isNonRace ? nonRaceStyle : null,
         planWeeks, taperWeeks, buildWeeks,
         peakWeeklyKm: Math.round(actualPeakWeeklyKm * 10) / 10,
         peakLongRunKm: Math.round(actualPeakLongRunKm * 10) / 10,
@@ -1608,6 +1763,7 @@ const PaceForgeGenerator = (() => {
     // RACE_PROFILES[key].maxSupportKm above) rather than one flat export —
     // js/app.js reads it off plan.meta.maxSupportKm instead.
     buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure,
+    buildFartlekStructure,
     MAX_REPETITION_SESSION_KM,
   };
 })();

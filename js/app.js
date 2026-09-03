@@ -24,6 +24,13 @@
     // up under instead of plain 'rest' so its badge gets its own color.
     restStrength: 'var(--type-rest-strength)',
     race: 'var(--type-race)',
+    // Fartlek's work effort references Interval zone (see
+    // TYPE_TO_ZONE/weekPaces.fartlek in planGenerator.js), so it reuses
+    // that same color rather than a new one. Evaluation reuses the race
+    // badge's indigo — same role as race day (the block's one checkpoint
+    // date), just for a non-race plan.
+    fartlek: 'var(--type-interval)',
+    evaluation: 'var(--type-race)',
   };
 
   // Distinguishes a week's training phase at a glance in the accordion
@@ -41,6 +48,12 @@
     Cutback: 'var(--type-recovery)',
     Taper: 'var(--type-tempo)',
     'Race Week': 'var(--type-race)',
+    // Non-race phases (see generatePlan's isMaintenance/isNonRace
+    // branches) — Maintenance has no Base/Build/Peak progression of its
+    // own, and both sub-modes end in the same "Evaluasi" checkpoint week
+    // race mode ends in "Race Week".
+    Maintenance: 'var(--type-easy)',
+    Evaluasi: 'var(--type-race)',
   };
 
   // Hex twins of the CSS custom properties above / the exertion colors in
@@ -58,6 +71,8 @@
     rest: '#8b93a3',
     restStrength: '#9d84c9',
     race: '#6366f1',
+    fartlek: '#d97a4f',
+    evaluation: '#6366f1',
   };
 
   // A rest day defaults to nudging toward strength/gym work as a
@@ -105,6 +120,10 @@
     tempo: 'threshold',
     interval: 'interval',
     repetition: 'repetition',
+    // See planGenerator.js's weekPaces.fartlek comment — work segments
+    // reference Interval zone as a loose ceiling/reference, not a strict
+    // target.
+    fartlek: 'interval',
   };
 
   // Short zone labels for the Pace Target column / bar tooltips — matches
@@ -225,6 +244,11 @@
 
   const form = document.getElementById('planForm');
   const submitBtn = form.querySelector('button[type="submit"]');
+  const goalTypeToggle = document.getElementById('goalTypeToggle');
+  const goalTypeHint = document.getElementById('goalTypeHint');
+  const raceFieldsetLegend = document.getElementById('raceFieldsetLegend');
+  const raceDistanceLabel = document.getElementById('raceDistanceLabel');
+  const raceDateLabel = document.getElementById('raceDateLabel');
   const distanceModeToggle = document.getElementById('distanceModeToggle');
   const presetDistanceField = document.getElementById('presetDistanceField');
   const raceDistanceSel = document.getElementById('raceDistance');
@@ -364,6 +388,45 @@
     const cb = dayCheckboxes.querySelector(`input[value="${v}"]`);
     if (cb) cb.checked = true;
   });
+
+  // 'race' (default, existing behavior) | 'baseBuilding' | 'maintenance'.
+  // Drives mode/nonRaceStyle in gatherSettingsFromForm — see
+  // PaceForgeGenerator.generatePlan's own settings-destructuring comment
+  // for what each actually changes under the hood.
+  function getGoalType() {
+    return goalTypeToggle.querySelector('input[name="goalType"]:checked').value;
+  }
+
+  const GOAL_TYPE_COPY = {
+    race: {
+      legend: '1. Detail Race',
+      distanceLabel: 'Jarak target',
+      dateLabel: 'Tanggal race',
+      hint: '',
+    },
+    baseBuilding: {
+      legend: '1. Detail Base Building',
+      distanceLabel: 'Gaya latihan',
+      dateLabel: 'Akhir blok training',
+      hint: 'Belum punya race? Volume mingguan tetap naik bertahap seperti training block biasa, cuma "gaya latihan" di bawah ini dipakai sebagai acuan rasio & variasi sesi — bukan race sungguhan. Blok berakhir di minggu evaluasi (deload + opsional time-trial), bukan hari race.',
+    },
+    maintenance: {
+      legend: '1. Detail Maintenance',
+      distanceLabel: 'Gaya latihan',
+      dateLabel: 'Akhir blok training',
+      hint: 'Cuma mau jaga fitness tanpa target race? Volume mingguan ditahan flat (tidak naik), dan sesi quality (tempo/interval) diselingi Fartlek secara berkala biar tidak monoton.',
+    },
+  };
+
+  function updateGoalTypeUI() {
+    const copy = GOAL_TYPE_COPY[getGoalType()];
+    raceFieldsetLegend.textContent = copy.legend;
+    raceDistanceLabel.textContent = copy.distanceLabel;
+    raceDateLabel.textContent = copy.dateLabel;
+    goalTypeHint.textContent = copy.hint;
+  }
+  goalTypeToggle.addEventListener('change', updateGoalTypeUI);
+  updateGoalTypeUI();
 
   function getDistanceMode() {
     return distanceModeToggle.querySelector('input[name="distanceMode"]:checked').value;
@@ -600,6 +663,13 @@
   // expects otherwise. Pulled out on its own so both the submit handler and
   // the "restore my last plan after login" path can build it identically.
   function gatherSettingsFromForm() {
+    const goalType = getGoalType();
+    // mode/nonRaceStyle passed straight through to PaceForgeGenerator —
+    // see its own settings-destructuring comment. raceDate/raceDistance
+    // are reused as the non-race block's end date / training style (see
+    // GOAL_TYPE_COPY above for the relabeled fields), not a real race.
+    const mode = goalType === 'race' ? 'race' : 'nonRace';
+    const nonRaceStyle = goalType === 'race' ? null : goalType;
     const isCustomDistance = getDistanceMode() === 'custom';
     let raceKey = raceDistanceSel.value;
     let raceDistanceKm = RACE_META[raceKey]?.km;
@@ -614,15 +684,16 @@
       }
     }
 
-    if (!raceDateInput.value) { showError('Pilih tanggal race terlebih dahulu.'); return null; }
+    const dateNoun = mode === 'race' ? 'tanggal race' : 'tanggal akhir blok';
+    if (!raceDateInput.value) { showError(`Pilih ${dateNoun} terlebih dahulu.`); return null; }
     const raceDate = new Date(raceDateInput.value + 'T00:00:00');
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    if (raceDate <= today) { showError('Tanggal race harus di masa depan.'); return null; }
+    if (raceDate <= today) { showError(`${dateNoun.charAt(0).toUpperCase()}${dateNoun.slice(1)} harus di masa depan.`); return null; }
 
     if (!startDateInput.value) { showError('Pilih tanggal mulai training terlebih dahulu.'); return null; }
     const startDate = new Date(startDateInput.value + 'T00:00:00');
     if (startDate < today) { showError('Tanggal mulai training tidak boleh di masa lalu.'); return null; }
-    if (startDate >= raceDate) { showError('Tanggal mulai training harus sebelum tanggal race.'); return null; }
+    if (startDate >= raceDate) { showError(`Tanggal mulai training harus sebelum ${dateNoun}.`); return null; }
 
     const currentWeeklyKm = Number(currentWeeklyKmInput.value);
     if (currentWeeklyKm < 0 || Number.isNaN(currentWeeklyKm)) {
@@ -689,6 +760,7 @@
     const conservativeMode = conservativeModeInput.checked;
 
     return {
+      mode, nonRaceStyle,
       raceDistanceKm, raceLabel, raceKey, raceDate, startDate,
       fitnessLevel, currentWeeklyKm, longestRecentRunKm, daysPerWeek, preferredDays, longRunDay,
       targetTimeSec, recentRaceTimeSec, recentRaceDistanceKm, conservativeMode,
@@ -700,6 +772,14 @@
   // dependent hint/dropdown in sync exactly like a real user filling it in
   // would. Used only when restoring a plan after login.
   function applySettingsToForm(settings, userNotes) {
+    // Plans saved before goal-type mode existed won't have `mode` at all —
+    // fall back to 'race', same as the old implicit (and still default)
+    // behaviour.
+    const goalTypeValue = !settings.mode || settings.mode === 'race' ? 'race' : settings.nonRaceStyle;
+    const goalTypeRadio = goalTypeToggle.querySelector(`input[value="${goalTypeValue}"]`);
+    if (goalTypeRadio) goalTypeRadio.checked = true;
+    updateGoalTypeUI();
+
     const isCustom = settings.raceKey === 'custom';
     distanceModeToggle.querySelector(`input[value="${isCustom ? 'custom' : 'preset'}"]`).checked = true;
     presetDistanceField.hidden = isCustom;
@@ -934,7 +1014,7 @@
       return;
     }
     day.km = km;
-    const { buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure } = PaceForgeGenerator;
+    const { buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure, buildFartlekStructure } = PaceForgeGenerator;
     if (day.type === 'interval') {
       // day.paceSecPerKm is this day's own I-pace (untouched by the km
       // reduction above) — buildIntervalStructure may re-resolve
@@ -949,6 +1029,11 @@
       const built = buildRepetitionStructure(km, day.workoutVariant, day.paceSecPerKm, day.recoveryPaceSecPerKm);
       day.workoutVariant = built.resolvedVariant;
       day.structure = built.structure;
+    } else if (day.type === 'fartlek') {
+      // day.recoveryPaceSecPerKm is already weekPaces.easy for a fartlek
+      // day (not weekPaces.recovery like interval/repetition) — see
+      // planGenerator.js's buildFartlekStructure comment for why.
+      day.structure = buildFartlekStructure(km, day.paceSecPerKm, day.recoveryPaceSecPerKm);
     } else {
       day.structure = buildSimpleStructure(km);
     }
@@ -2076,10 +2161,15 @@
       resultWarning.hidden = true;
     }
 
-    // Summary
+    // Summary — labels swap for a non-race plan (meta.mode/nonRaceStyle,
+    // see planGenerator.js): "Race"/"Tanggal Race" don't apply when
+    // raceDate is really just the block's own end date.
+    const isNonRacePlan = meta.mode && meta.mode !== 'race';
+    const raceCardLabel = !isNonRacePlan ? 'Race' : (meta.nonRaceStyle === 'maintenance' ? 'Maintenance' : 'Base Building');
+    const dateCardLabel = !isNonRacePlan ? 'Tanggal Race' : 'Akhir Blok';
     summaryCards.innerHTML = `
-      <div class="summary-item"><div class="label">Race</div><div class="value">${meta.raceLabel}</div></div>
-      <div class="summary-item"><div class="label">Tanggal Race</div><div class="value" style="font-size:1rem">${formatDate(meta.raceDate)}</div></div>
+      <div class="summary-item"><div class="label">${raceCardLabel}</div><div class="value">${meta.raceLabel}</div></div>
+      <div class="summary-item"><div class="label">${dateCardLabel}</div><div class="value" style="font-size:1rem">${formatDate(meta.raceDate)}</div></div>
       <div class="summary-item"><div class="label">Durasi Plan</div><div class="value">${meta.planWeeks} minggu</div></div>
       <div class="summary-item"><div class="label">Peak Weekly Volume</div><div class="value">${meta.peakWeeklyKm} km</div></div>
       <div class="summary-item"><div class="label">Peak Long Run</div><div class="value">${meta.peakLongRunKm} km</div></div>
@@ -2228,7 +2318,7 @@
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9.5);
       doc.setTextColor(...mutedColor);
-      doc.text(`Race day: ${formatDate(meta.raceDate)}`, pageWidth - margin, y + 14, { align: 'right' });
+      doc.text(`${meta.mode && meta.mode !== 'race' ? 'Block end' : 'Race day'}: ${formatDate(meta.raceDate)}`, pageWidth - margin, y + 14, { align: 'right' });
 
       y += 26;
       doc.setDrawColor(225, 228, 236);
@@ -2485,7 +2575,7 @@
   // still refuses to touch those). MAX_AI_ADJUSTMENTS caps how many
   // sessions a single review can touch, regardless of how many Claude
   // returns.
-  const AI_ADJUSTABLE_TYPES = new Set(['easy', 'recovery', 'tempo', 'interval', 'repetition']);
+  const AI_ADJUSTABLE_TYPES = new Set(['easy', 'recovery', 'tempo', 'interval', 'repetition', 'fartlek']);
   const MAX_AI_ADJUSTMENTS = 5;
 
   // Applies Claude's suggested per-day distance adjustments to an
@@ -2499,7 +2589,7 @@
   // RACE_PROFILES in planGenerator.js — for everything else) either way.
   function applyAiAdjustments(plan, adjustments) {
     if (!Array.isArray(adjustments) || !adjustments.length) return;
-    const { buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure, MAX_REPETITION_SESSION_KM } = PaceForgeGenerator;
+    const { buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure, buildFartlekStructure, MAX_REPETITION_SESSION_KM } = PaceForgeGenerator;
     const maxSupportKm = plan.meta.maxSupportKm;
 
     let appliedCount = 0;
@@ -2538,6 +2628,8 @@
         const built = buildRepetitionStructure(day.km, day.workoutVariant, day.paceSecPerKm, day.recoveryPaceSecPerKm);
         day.workoutVariant = built.resolvedVariant;
         day.structure = built.structure;
+      } else if (day.type === 'fartlek') {
+        day.structure = buildFartlekStructure(day.km, day.paceSecPerKm, day.recoveryPaceSecPerKm);
       } else {
         day.structure = buildSimpleStructure(day.km);
       }
@@ -2572,6 +2664,12 @@
     const { formatPace } = PaceForgeGenerator;
 
     const payload = {
+      // See api/enhance-plan.js's system prompt for what these change —
+      // raceLabel/raceDate stay in the payload either way (a non-race plan
+      // reuses them as "gaya latihan"/akhir blok, same as the generator
+      // itself does), the prompt is what reinterprets them per mode.
+      mode: meta.mode,
+      nonRaceStyle: meta.nonRaceStyle,
       raceLabel: meta.raceLabel,
       raceDate: meta.raceDate.toISOString().slice(0, 10),
       fitnessLevel: lastFitnessLevel,
@@ -2638,9 +2736,11 @@
         const raceWeekNumber = lastPlan.weeks[lastPlan.weeks.length - 1].weekNumber;
         const block = planWeeksEl.querySelector(`.week-block[data-week-number="${raceWeekNumber}"]`);
         if (block) {
+          const isNonRacePlan = lastPlan.meta.mode && lastPlan.meta.mode !== 'race';
+          const tipsTitle = isNonRacePlan ? 'Tips Minggu Evaluasi' : 'Tips Race Day';
           const tipsEl = document.createElement('div');
           tipsEl.className = 'week-race-tips';
-          tipsEl.innerHTML = `<span class="ai-tips-title">Tips Race Day</span>${data.raceDayTips}`;
+          tipsEl.innerHTML = `<span class="ai-tips-title">${tipsTitle}</span>${data.raceDayTips}`;
           block.appendChild(tipsEl);
         }
       }

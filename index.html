@@ -63,9 +63,28 @@
 
     <form id="planForm" novalidate>
 
+      <!-- Goal type — determines whether this is a real race countdown or
+           a non-race block (Base Building: progressive volume toward a
+           future training style, no race; Maintenance: flat volume, tiny
+           VDOT ramp, Fartlek swapped into the quality rotation). Toggling
+           this relabels the fieldset below (see updateGoalTypeUI in
+           app.js) rather than swapping in a separate set of fields — the
+           same raceDistance/raceDate/startDate inputs are reused for all
+           3 (raceDistance becomes "gaya latihan", raceDate becomes "akhir
+           blok") to keep the form itself simple. -->
+      <div class="field" id="goalTypeField">
+        <label>Tujuan latihan</label>
+        <div class="mode-toggle" id="goalTypeToggle">
+          <label class="mode-chip"><input type="radio" name="goalType" value="race" checked> Ada race</label>
+          <label class="mode-chip"><input type="radio" name="goalType" value="baseBuilding"> Base Building</label>
+          <label class="mode-chip"><input type="radio" name="goalType" value="maintenance"> Maintenance</label>
+        </div>
+        <p class="field-hint" id="goalTypeHint"></p>
+      </div>
+
       <!-- Race details -->
       <fieldset>
-        <legend>1. Detail Race</legend>
+        <legend id="raceFieldsetLegend">1. Detail Race</legend>
 
         <div class="field">
           <label>Cara menentukan jarak</label>
@@ -77,7 +96,7 @@
 
         <div class="field-row">
           <div class="field" id="presetDistanceField">
-            <label for="raceDistance">Jarak target</label>
+            <label for="raceDistance" id="raceDistanceLabel">Jarak target</label>
             <select id="raceDistance" name="raceDistance">
               <option value="5k">5K</option>
               <option value="10k">10K</option>
@@ -92,7 +111,7 @@
           </div>
 
           <div class="field">
-            <label for="raceDate">Tanggal race</label>
+            <label for="raceDate" id="raceDateLabel">Tanggal race</label>
             <input type="date" id="raceDate" name="raceDate" required>
           </div>
         </div>
