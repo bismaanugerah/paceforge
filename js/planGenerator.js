@@ -117,6 +117,17 @@ const PaceForgeGenerator = (() => {
   // since the target itself barely moves from where it started.
   const NON_RACE_FITNESS_GAIN_PCT = 0.02;
 
+  // Where volume-driven gains taper off to essentially flat — recreational-
+  // runner data (Garmin population data + several training-volume studies)
+  // puts the steep-improvement zone under roughly 35-45km/week, tapering
+  // off by ~60km/week. Originally scoped to goalPaceSec's own
+  // volumeGainMultiplier below (a runner already near/above this has little
+  // headroom left for volume-driven pace gains), hoisted here so
+  // generatePlan's own Base-Building-vs-Maintenance suggestion (see
+  // isBaseBuilding below) can reuse the exact same number rather than a
+  // second, potentially-drifting 60.
+  const VOLUME_GAIN_PLATEAU_KM = 60;
+
   // Absolute floor for any pace this generator will ever schedule or treat
   // as a goal, in sec/km — well under the current marathon world record
   // pace (~2:50/km) and every shorter distance's, so it only ever catches a
@@ -1008,6 +1019,21 @@ const PaceForgeGenerator = (() => {
     if (isNonRace && !conservativeMode && taperWeeks > 0) {
       warnings.push('Minggu terakhir ada Time Trial 5K opsional — lari secepat yang bisa kamu jaga (bukan target pace tertentu, ini beda dari sesi lain di plan ini), lalu catat waktumu. Waktu itu bisa dimasukkan sebagai "waktu race terakhir" (pilih jarak 5K) pas generate plan berikutnya, supaya estimasi pace & VDOT-nya makin akurat dari kondisimu yang sekarang — bukan wajib, tapi lebih informatif daripada nebak.');
     }
+    // Base Building's whole point is raising mileage from a lower baseline
+    // — past VOLUME_GAIN_PLATEAU_KM, that headroom is mostly gone (same
+    // reasoning goalPaceSec's volumeGainMultiplier above already applies to
+    // pace gains), and this plan's long-run range (profile.longRunMax) can
+    // end up BELOW the runner's own longestRecentRunKm at this volume,
+    // which clamps the long run down instead of growing it — a Base
+    // Building block essentially can't progress a runner meaningfully past
+    // this point. Maintenance doesn't have that ceiling problem (it never
+    // tries to grow the long run in the first place), so it's the better
+    // fit once volume is already this high. Advisory only — doesn't block
+    // or auto-switch, since the runner may have a real reason to keep
+    // pushing volume regardless.
+    if (isBaseBuilding && currentWeeklyKm >= VOLUME_GAIN_PLATEAU_KM) {
+      warnings.push(`Volume mingguanmu sekarang (${currentWeeklyKm} km) sudah di titik di mana Base Building lewat penambahan volume biasanya makin nggak signifikan hasilnya, dan long run di plan ini bisa malah ketahan di bawah kemampuanmu sekarang (dibatasi ke maks ${profile.longRunMax} km buat gaya latihan ini). Kalau tujuanmu sekarang lebih ke jaga fitness daripada terus naikin mileage, mode Maintenance kemungkinan lebih pas. Base Building tetap bisa dipakai, cuma progresnya bakal kerasa terbatas dari titik ini.`);
+    }
     if (weeksAvailable < profile.recWeeks) {
       // raceLabel is a real race name in race mode, but "Aerobic Base"/
       // "Flat Volume" (see js/app.js's NON_RACE_LABEL) in non-race mode —
@@ -1090,19 +1116,16 @@ const PaceForgeGenerator = (() => {
       const qualityGainMultiplier = qualitySessionsForDays(daysPerWeek) >= 2 ? 1.3 : 1;
       // Aerobic base (weekly volume) is its own driver of fitness gains,
       // separate from quality-session stimulus — but with diminishing
-      // returns as it climbs, not a flat "more is better": recreational-
-      // runner data (Garmin population data + several training-volume
-      // studies) puts the steep-improvement zone under roughly 35-45km/
-      // week, tapering off by ~60km/week, where the improvement curve
-      // goes essentially flat. So this isn't "more growth = more gain"
-      // (that direction doesn't hold up — see the reverted first attempt
-      // at this) but "more *room below the plateau* = more gain": a
-      // runner already running near/above 60km/week has little headroom
-      // left for volume-driven gains regardless of qualityGainMultiplier,
-      // while one starting well under it does. Deliberately modest (up to
-      // +25% at currentWeeklyKm near 0, none at/above the plateau) so it
-      // nudges the projection rather than dominates it.
-      const VOLUME_GAIN_PLATEAU_KM = 60;
+      // returns as it climbs, not a flat "more is better" (see
+      // VOLUME_GAIN_PLATEAU_KM above for the sourcing). So this isn't "more
+      // growth = more gain" (that direction doesn't hold up — see the
+      // reverted first attempt at this) but "more *room below the plateau*
+      // = more gain": a runner already running near/above the plateau has
+      // little headroom left for volume-driven gains regardless of
+      // qualityGainMultiplier, while one starting well under it does.
+      // Deliberately modest (up to +25% at currentWeeklyKm near 0, none
+      // at/above the plateau) so it nudges the projection rather than
+      // dominates it.
       const volumeHeadroom = clamp(1 - currentWeeklyKm / VOLUME_GAIN_PLATEAU_KM, 0, 1);
       const volumeGainMultiplier = 1 + volumeHeadroom * 0.25;
       // Runners already at a fast pace have less room left to get faster
