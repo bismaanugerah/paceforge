@@ -1030,10 +1030,18 @@ const PaceForgeGenerator = (() => {
       // block Aerobic Base standar" reads oddly, and "sebelum race" is
       // literally wrong when there's no race (raceDate is really just the
       // block's own end date — see generatePlan's mode/nonRaceStyle
-      // comment). Non-race phrasing drops both.
-      const deadlineNoun = isNonRace ? 'akhir blok' : 'race';
-      const blockDescriptor = isNonRace ? 'blok yang kamu pilih' : `training block ${raceLabel} standar`;
-      warnings.push(`Kamu punya ${extraWeeks} minggu ekstra sebelum ${deadlineNoun}. Plan detail di bawah mencakup ${planWeeks} minggu terakhir (${blockDescriptor}) — sebelum itu, manfaatkan buat naikkan base mileage bertahap dari ~${Math.round(prepStartKm)} ke sekitar ${prepTargetWeeklyKm} km/minggu (kira-kira +${Math.round((WEEKLY_GROWTH_RATE - 1) * 100)}% tiap minggu, laju kenaikan aman yang sama dipakai di plan ini). Plan di bawah tetap dihitung dari kondisimu sekarang — generate ulang lebih dekat ke tanggal mulai training kalau base mileage-mu sudah naik, supaya peak volume & long run-nya ikut menyesuaikan jadi lebih kuat.`);
+      // comment). Non-race phrasing drops both, AND drops the whole
+      // "manfaatkan buat naikkan base mileage ke ~X km/minggu" prep-target
+      // suggestion below — that's advice for building toward a SEPARATE
+      // race-specific block waiting on the other side of the extra weeks,
+      // which doesn't apply here: Base Building/Maintenance already IS the
+      // base-building block, there's no further structured block it's
+      // prepping the runner for.
+      if (isNonRace) {
+        warnings.push(`Kamu punya ${extraWeeks} minggu ekstra sebelum akhir blok. Plan detail di bawah mencakup ${planWeeks} minggu terakhir (blok yang kamu pilih). Plan di bawah tetap dihitung dari kondisimu sekarang — generate ulang lebih dekat ke tanggal mulai training kalau kondisimu sudah berubah, supaya peak volume & long run-nya ikut menyesuaikan jadi lebih kuat.`);
+      } else {
+        warnings.push(`Kamu punya ${extraWeeks} minggu ekstra sebelum race. Plan detail di bawah mencakup ${planWeeks} minggu terakhir (training block ${raceLabel} standar) — sebelum itu, manfaatkan buat naikkan base mileage bertahap dari ~${Math.round(prepStartKm)} ke sekitar ${prepTargetWeeklyKm} km/minggu (kira-kira +${Math.round((WEEKLY_GROWTH_RATE - 1) * 100)}% tiap minggu, laju kenaikan aman yang sama dipakai di plan ini). Plan di bawah tetap dihitung dari kondisimu sekarang — generate ulang lebih dekat ke tanggal mulai training kalau base mileage-mu sudah naik, supaya peak volume & long run-nya ikut menyesuaikan jadi lebih kuat.`);
+      }
     }
 
     // Goal pace (sec/km), in priority order:
@@ -1368,25 +1376,46 @@ const PaceForgeGenerator = (() => {
         // progression interacts with the support-session caps above.
         let linearLongRunKm = longRunStartKm + (peakLongRunKm - longRunStartKm) * progress;
         const weekNum1based = w + 1;
-        const isCutback = weekNum1based % 4 === 0 && weekNum1based !== buildWeeks;
+        // Base Building cutbacks less often than race-specific training —
+        // research on deload frequency specifically distinguishes the two:
+        // 3-4 week cycles are for race-specific/intensity-heavy training,
+        // while lower-intensity base-building phases (no tempo/interval,
+        // just easy + a weekly marathonPace day — see isBaseBuilding above)
+        // tolerate 6-8 weeks between deloads (Fittux, "How Often Should You
+        // Deload?"). Race mode keeps the original 4-week cadence.
+        const CUTBACK_INTERVAL_WEEKS = isBaseBuilding ? 6 : 4;
+        const isCutback = weekNum1based % CUTBACK_INTERVAL_WEEKS === 0 && weekNum1based !== buildWeeks;
         weekKm = isCutback ? linearKm * 0.8 : linearKm;
         longRunTargetKm = isCutback ? linearLongRunKm * 0.8 : linearLongRunKm;
         phase = isCutback ? 'Cutback' : buildPhaseForWeek(w, buildWeeks);
       } else if (isMaintenance) {
-        // Maintenance's evaluation week deloads off its own flat baseline
-        // (currentWeeklyKm/longRunStartKm — what every other week in this
-        // mode actually ran), NOT peakWeeklyKm/peakLongRunKm — those are
-        // leftover progressive-growth figures Maintenance never schedules
-        // toward, so factoring off them here would make the "deload" week
-        // land HIGHER than the flat weeks preceding it.
-        const factor = taperFactors[0] ?? 0.55;
-        weekKm = currentWeeklyKm * factor;
-        longRunTargetKm = longRunStartKm * factor;
+        // weekKm/longRunTargetKm below are NOT what actually sizes this
+        // week's sessions — non-race modes' evaluation week is always also
+        // isRaceWeek (taperWeeks is forced to at most 1, so the lone
+        // "taper" week and the final week are the same week), which uses
+        // buildRaceWeekTemplate's own fixed shakeout+Time-Trial formula
+        // below (shakeoutKm from currentWeeklyKm*0.08, Time Trial fixed at
+        // 5km) instead of weekKm*weeklySplitForDays like every other week —
+        // see the day-assignment loop's `if (isRaceWeek)` branch, which
+        // never reads weightByDow (only populated in its `else`). Kept
+        // assigned anyway since totalKm's actual source (days.reduce
+        // below) doesn't need it, but the week object still does for
+        // consistency/potential future use (e.g. a multi-week non-race
+        // transition, which doesn't exist yet). Deloads off Maintenance's
+        // own flat baseline (currentWeeklyKm/longRunStartKm), not
+        // peakWeeklyKm/peakLongRunKm — those are leftover progressive-
+        // growth figures Maintenance never schedules toward.
+        weekKm = currentWeeklyKm * 0.7;
+        longRunTargetKm = longRunStartKm * 0.7;
         phase = 'Evaluasi';
         paceProgress = 1;
       } else {
         const taperIdx = w - buildWeeks;
-        const factor = taperFactors[taperIdx] ?? 0.5;
+        // See isMaintenance's own comment above re weekKm/longRunTargetKm
+        // being inert for isNonRace here too (same isRaceWeek mechanism) —
+        // this branch also covers Base Building's evaluation week, not
+        // just Race mode's real multi-week taper.
+        const factor = isNonRace ? 0.7 : (taperFactors[taperIdx] ?? 0.5);
         weekKm = peakWeeklyKm * factor;
         // Taper reduces the long run by the same factor directly, rather
         // than through weekKm*longRunShare — standard taper design (e.g.
