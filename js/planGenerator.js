@@ -1284,17 +1284,48 @@ const PaceForgeGenerator = (() => {
       const slotDays = sortedPreferredDays.slice(0, daysPerWeek);
 
       // Which type (and, for non-long/race slots, what share of weekKm —
-      // see weeklySplitForDays) lands on which day-of-week. Race week keeps
-      // its existing index-based mapping (race always on the last slot).
-      // Build/taper weeks instead pin the long run to the user's chosen
-      // long-run day — falling back to the last chronological slot if that
-      // day somehow isn't selected this week — and fill the remaining
-      // slots with the rest of the template, in order, on the other
-      // selected days, each carrying its matching weeklySplitForDays weight.
+      // see weeklySplitForDays) lands on which day-of-week. Race week pins
+      // "race" to the real raceDate's own day-of-week (see raceDow below —
+      // NOT necessarily one of the runner's regular training days, and not
+      // just "whichever preferred day is chronologically last" like the
+      // old index-based mapping assumed). Build/taper weeks instead pin
+      // the long run to the user's chosen long-run day — falling back to
+      // the last chronological slot if that day somehow isn't selected
+      // this week — and fill the remaining slots with the rest of the
+      // template, in order, on the other selected days, each carrying its
+      // matching weeklySplitForDays weight.
       const typeByDow = {};
       const weightByDow = {};
+      // Only meaningful for race week — which specific dows actually got a
+      // typeByDow entry below, so the downstream per-day assignment loop
+      // (see raceWeekDaysToProcess there) touches exactly those and no
+      // others. Deliberately NOT "every preferred day plus raceDow": a
+      // preferred day landing AFTER race day chronologically should stay
+      // 'rest' (nothing scheduled once the race is over), which is already
+      // `days`' own default — including it here with no typeByDow entry
+      // would instead assign it `undefined` (the exact bug this whole
+      // block was rewritten to fix in the first place — see raceDow below).
+      let raceWeekDaysToProcess = [];
+      const raceDow = isRaceWeek ? race.getDay() : null;
       if (isRaceWeek) {
-        slotDays.forEach((dow, idx) => { typeByDow[dow] = template[idx]; });
+        // A real calendar date — the user's own raceDate input — not a
+        // day-of-week pattern. Pinning it directly (rather than mapping
+        // buildRaceWeekTemplate's slots onto slotDays by index, which put
+        // "race" on whichever preferred day happened to fall last that
+        // week) is what makes "RACE DAY!" land on the date the runner
+        // actually entered, even if it's not one of their usual training
+        // days — e.g. a runner training Tue/Thu/Sat who races on Sunday.
+        typeByDow[raceDow] = 'race';
+        // Remaining shakeout slots: every OTHER preferred day that falls
+        // chronologically BEFORE race day (a shakeout scheduled after the
+        // race wouldn't make sense) — not capped to daysPerWeek-1 like
+        // buildRaceWeekTemplate's own slot count assumes, since that count
+        // only holds when raceDow itself was already one of the preferred
+        // days; when it's an extra day instead, all the runner's normal
+        // training days before it still deserve a shakeout.
+        const shakeoutDows = slotDays.filter(dow => dow !== raceDow && chronoRank(dow) < chronoRank(raceDow));
+        shakeoutDows.forEach(dow => { typeByDow[dow] = 'shakeout'; });
+        raceWeekDaysToProcess = [...shakeoutDows, raceDow];
       } else {
         const longRunDow = slotDays.includes(longRunDay) ? longRunDay : slotDays[slotDays.length - 1];
         const restTemplate = template.filter(t => t !== 'longRun');
@@ -1366,7 +1397,15 @@ const PaceForgeGenerator = (() => {
         actualPeakLongRunKm = Math.max(actualPeakLongRunKm, longRunKmThisWeek);
       }
 
-      slotDays.forEach((dow) => {
+      // Race week only ever touches the dows it actually gave a typeByDow
+      // entry (raceWeekDaysToProcess, built above) — which may both omit
+      // some preferred days (any landing after race day chronologically
+      // stay 'rest', their existing default) and include one that isn't a
+      // preferred day at all (raceDow itself, when it falls outside the
+      // runner's usual pattern). Build/taper weeks are unaffected, still
+      // just slotDays.
+      const daysToProcess = isRaceWeek ? raceWeekDaysToProcess : slotDays;
+      daysToProcess.forEach((dow) => {
         const type = typeByDow[dow];
         const dayObj = days.find(x => x.dow === dow);
         if (!dayObj) return;
