@@ -128,10 +128,11 @@ body {
 }
 .tagline {
   margin: 2px 0 0;
-  font-size: 1.02rem;
-  font-weight: 500;
-  letter-spacing: -0.006em;
-  opacity: 0.82;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.004em;
+  opacity: 0.92;
 }
 
 main.container { margin-top: -28px; padding-bottom: 60px; }
