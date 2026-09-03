@@ -1750,41 +1750,35 @@
     if (REQUIRE_LOGIN) prefillFromStrava();
   });
 
-  // Renders the 5-zone VDOT pace table into #paceLegend, using the
-  // runner's CURRENT fitness (week 1's VDOT) — the per-week progression
-  // itself (VDOT climbing as training advances, same endpoints
-  // currentFitnessPaceSec -> goalPaceSec that weekPaces interpolates
-  // between in planGenerator.js) is shown per week in the schedule below
-  // instead (see the "Zona Pace (VDOT ...)" line rendered under each
-  // week's header — weekVdot()), so this card doesn't need to try to
-  // encode a start/end range itself. vdot comes from the runner's actual
-  // recent-race result when the form has one (most accurate — a real
-  // performance), falling back to the generator's own current-fitness pace
-  // estimate otherwise (see PaceForgeVDOT.vdotFromGoalPace). Silently
-  // renders nothing if that's somehow unavailable/invalid rather than
-  // showing a broken table.
-  function renderPaceZones(meta) {
+  // Renders the 5-zone VDOT pace table into #paceLegend, using whichever
+  // week is most relevant right now's own VDOT (week.weekVdot, computed by
+  // planGenerator.js — see its own currentVdot/goalVdot comments) — the
+  // SAME week (and so the exact same number) pickDefaultOpenWeek opens by
+  // default: the week today falls inside, or week 1 if the plan hasn't
+  // started yet, or the last week if it's already over. Used to show a
+  // fixed "day the plan was generated" snapshot instead, which visibly
+  // drifted from the schedule's own per-week "Zona Pace (VDOT ...)" badge
+  // (see weekVdot()) as training progressed — this card now always agrees
+  // with whichever week's badge it sits above/near. Silently renders
+  // nothing if that's somehow unavailable/invalid rather than showing a
+  // broken table.
+  function renderPaceZones(meta, weeks, currentWeek) {
     const { formatDuration } = PaceForgeGenerator;
-    const { vdotFromPerformance, vdotFromGoalPace, paceZonesFromVDOT, formatPaceRange, ZONE_ORDER, ZONE_LABELS, ZONE_PCT_RANGES } = PaceForgeVDOT;
+    const { paceZonesFromVDOT, formatPaceRange, ZONE_ORDER, ZONE_LABELS, ZONE_PCT_RANGES } = PaceForgeVDOT;
 
-    let vdot;
-    let sourceLabel;
-    if (meta.recentRaceTimeSec && meta.recentRaceDistanceKm) {
-      vdot = vdotFromPerformance(meta.recentRaceDistanceKm, meta.recentRaceTimeSec);
-      sourceLabel = `dari waktu race terakhirmu (${formatDuration(meta.recentRaceTimeSec)} / ${meta.recentRaceDistanceKm} km)`;
-    } else {
-      vdot = vdotFromGoalPace(meta.raceDistanceKm, meta.currentFitnessPaceSec);
-      sourceLabel = 'dari estimasi goal pace (belum ada data race terakhir)';
-    }
+    const relevantWeekNumber = pickDefaultOpenWeek(weeks, currentWeek);
+    const relevantWeek = weeks.find(w => w.weekNumber === relevantWeekNumber) || weeks[0];
+    const vdot = relevantWeek ? relevantWeek.weekVdot : null;
+    const sourceLabel = meta.recentRaceTimeSec && meta.recentRaceDistanceKm
+      ? `Minggu ${relevantWeek.weekNumber} • dari waktu race terakhirmu (${formatDuration(meta.recentRaceTimeSec)} / ${meta.recentRaceDistanceKm} km)`
+      : `Minggu ${relevantWeek.weekNumber} • dari estimasi goal pace (belum ada data race terakhir)`;
     const zones = vdot ? paceZonesFromVDOT(vdot) : null;
     if (!zones) { paceLegend.innerHTML = ''; return; }
-
-    const generatedDate = formatLongDate(new Date());
 
     paceLegend.innerHTML = `
       <div class="pace-zone-header">
         <span class="pace-zone-title">🎯 Zona Pace (VDOT ${vdot.toFixed(1)})</span>
-        <span class="pace-zone-source">${sourceLabel} • per ${generatedDate}</span>
+        <span class="pace-zone-source">${sourceLabel} • per ${formatLongDate(relevantWeek.startDate)}</span>
       </div>
       <div class="table-scroll">
         <table class="pace-zone-table">
@@ -1922,14 +1916,13 @@
     renderVolumeChart(weeks, currentWeek);
 
     // Zona Pace — full 5-zone VDOT table (Jack Daniels methodology, same
-    // one popularized by calculators like vdoto2.com), computed from the
-    // runner's actual recent-race performance when available, or from the
-    // generator's own goal pace otherwise (see PaceForgeVDOT.vdotFromGoalPace)
-    // so the table is always shown. Distinct from the schedule's own
-    // recovery/easy/tempo/interval pace targets above (which ramp week to
-    // week toward goal pace) — this is a fitness-level reference table, not
-    // a per-week target.
-    renderPaceZones(meta);
+    // one popularized by calculators like vdoto2.com). Tracks whichever
+    // week is relevant right now (see renderPaceZones) rather than a fixed
+    // day-1 snapshot — this table is what the runner is meant to actually
+    // train by week to week, so it needs to agree with THIS week's own
+    // "Zona Pace (VDOT ...)" badge below, not describe a fitness level
+    // that's already out of date once training has progressed.
+    renderPaceZones(meta, weeks, currentWeek);
 
     // Weeks — each one collapses into just its header (phase/dates/total,
     // still scannable at a glance) so a long plan (a marathon block runs
@@ -2100,24 +2093,20 @@
 
       // --- Zona Pace (VDOT) table -----------------------------------------
       // Mirrors the on-screen "Zona Pace" table (see renderPaceZones) —
-      // same VDOT derivation (recent race if given, else the generator's
-      // own goal pace, see PaceForgeVDOT.vdotFromGoalPace) and same 5
+      // same relevant-week VDOT (week.weekVdot, whichever week today falls
+      // inside, or week 1/the last week before/after the block) and same 5
       // Daniels training zones, so the PDF and on-screen result stay
       // consistent with each other.
       {
-        const { vdotFromPerformance, vdotFromGoalPace, paceZonesFromVDOT, formatPaceRange, ZONE_ORDER, ZONE_LABELS, ZONE_PCT_RANGES } = PaceForgeVDOT;
-        let vdot, zoneSourceLabel;
-        if (meta.recentRaceTimeSec && meta.recentRaceDistanceKm) {
-          vdot = vdotFromPerformance(meta.recentRaceDistanceKm, meta.recentRaceTimeSec);
-          zoneSourceLabel = `dari waktu race terakhir (${PaceForgeGenerator.formatDuration(meta.recentRaceTimeSec)} / ${meta.recentRaceDistanceKm} km)`;
-        } else {
-          vdot = vdotFromGoalPace(meta.raceDistanceKm, meta.currentFitnessPaceSec);
-          zoneSourceLabel = 'dari estimasi goal pace (belum ada data race terakhir)';
-        }
+        const { paceZonesFromVDOT, formatPaceRange, ZONE_ORDER, ZONE_LABELS, ZONE_PCT_RANGES } = PaceForgeVDOT;
+        const relevantWeekNumber = pickDefaultOpenWeek(weeks, findCurrentWeek(weeks));
+        const relevantWeek = weeks.find(w => w.weekNumber === relevantWeekNumber) || weeks[0];
+        const vdot = relevantWeek ? relevantWeek.weekVdot : null;
+        const zoneSourceLabel = meta.recentRaceTimeSec && meta.recentRaceDistanceKm
+          ? `Minggu ${relevantWeek.weekNumber} • dari waktu race terakhir (${PaceForgeGenerator.formatDuration(meta.recentRaceTimeSec)} / ${meta.recentRaceDistanceKm} km)`
+          : `Minggu ${relevantWeek.weekNumber} • dari estimasi goal pace (belum ada data race terakhir)`;
         const zones = vdot ? paceZonesFromVDOT(vdot) : null;
         if (zones) {
-          const generatedDate = formatLongDate(new Date());
-
           doc.setFont('helvetica', 'bold');
           doc.setFontSize(11);
           doc.setTextColor(...inkColor);
@@ -2125,7 +2114,7 @@
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(8);
           doc.setTextColor(...mutedColor);
-          doc.text(pdfSafeText(`${zoneSourceLabel} • per ${generatedDate}`), margin, y + 12);
+          doc.text(pdfSafeText(`${zoneSourceLabel} • per ${formatLongDate(relevantWeek.startDate)}`), margin, y + 12);
           y += 18;
 
           // Zone name cells get a left inset (see columnStyles below) so
