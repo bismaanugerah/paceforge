@@ -996,7 +996,27 @@ const PaceForgeGenerator = (() => {
     // "prep phase" suggestion (extraWeeks below) so both give a
     // consistent, evidence-based sense of how fast weekly mileage can
     // safely grow, rather than two different numbers.
-    const WEEKLY_GROWTH_RATE = conservativeMode ? 1.05 : 1.08;
+    //
+    // Tiered by the runner's OWN currentWeeklyKm rather than one flat rate
+    // for everyone: a lower-volume runner has more adaptive headroom and
+    // tolerates faster relative growth, while a higher-volume runner is
+    // closer to their individual ceiling and needs a more conservative
+    // pace — total weekly-volume growth itself isn't strongly injury-
+    // predictive on its own (see MAX_LONG_RUN_JUMP_RATIO's own BJSM
+    // citation, which is why that ratio is tuned separately and doesn't
+    // move with this), but it should still track the same "steep zone
+    // under ~35-45km/week, tapering off by ~60km/week" shape
+    // VOLUME_GAIN_PLATEAU_KM is sourced from, rather than treating a
+    // 20km/week beginner and a 55km/week regular runner identically.
+    // Breakpoints at 40/50 (not 45/60, VOLUME_GAIN_PLATEAU_KM's own points)
+    // are deliberately a bit earlier — this rate governs the runner's
+    // ENTIRE remaining ramp, not just how close they already are to the
+    // plateau, so easing off starts a little ahead of it.
+    // conservativeMode scales the same 3 tiers down by the same ratio
+    // (0.625) its own flat 5%-vs-8% already implied, rather than a
+    // separate flat rate that ignores volume entirely.
+    const baseGrowthRate = currentWeeklyKm < 40 ? 1.10 : (currentWeeklyKm < 50 ? 1.08 : 1.05);
+    const WEEKLY_GROWTH_RATE = conservativeMode ? 1 + (baseGrowthRate - 1) * 0.625 : baseGrowthRate;
 
     const warnings = [];
     if (conservativeMode) {
