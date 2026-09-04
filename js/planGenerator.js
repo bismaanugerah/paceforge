@@ -1012,10 +1012,24 @@ const PaceForgeGenerator = (() => {
     // are deliberately a bit earlier — this rate governs the runner's
     // ENTIRE remaining ramp, not just how close they already are to the
     // plateau, so easing off starts a little ahead of it.
+    //
+    // Calibrated against a typical ~10-build-week block (the common case —
+    // an 11-12 week plan minus 1-2 taper weeks) rather than picked as
+    // round weekly numbers first: <40 stays at the original flat rate
+    // (1.08^10 ≈ 2.16x — close to the doubling a 20km/week runner reaching
+    // ~40km/week over such a block already validated as reasonable), but
+    // 40-50 and >=50 needed to be much gentler than a naive "just step the
+    // percentage down a bit" — 8%/5% weekly (the first attempt at this
+    // tiering) still compounds to 2.16x/1.63x over 10 weeks, i.e. a
+    // 45km/week runner targeting ~97km/week and a 55km/week runner
+    // targeting ~90km/week, both confirmed too aggressive. 2.5%/1.5%
+    // instead compound to ~1.28x/~1.16x over the same 10 weeks (45→~57.6,
+    // 55→~63.9) — the 40-50 figure lands in the "~55-60km, +25%" range
+    // confirmed reasonable for that tier specifically.
     // conservativeMode scales the same 3 tiers down by the same ratio
     // (0.625) its own flat 5%-vs-8% already implied, rather than a
     // separate flat rate that ignores volume entirely.
-    const baseGrowthRate = currentWeeklyKm < 40 ? 1.10 : (currentWeeklyKm < 50 ? 1.08 : 1.05);
+    const baseGrowthRate = currentWeeklyKm < 40 ? 1.08 : (currentWeeklyKm < 50 ? 1.025 : 1.015);
     const WEEKLY_GROWTH_RATE = conservativeMode ? 1 + (baseGrowthRate - 1) * 0.625 : baseGrowthRate;
 
     const warnings = [];
