@@ -39,6 +39,11 @@
     // Marathon zone already reuses the longRun badge color everywhere else
     // (see ZONE_TYPE_COLOR_KEY below) — same here, for the same reason.
     marathonPace: 'var(--type-longrun)',
+    // First-timer mode only — a run/walk session is easy-effort throughout
+    // (see generateFirstTimerPlan in planGenerator.js), so it reuses the
+    // Easy badge color rather than a new one, same reasoning as fartlek/
+    // marathonPace above.
+    runWalk: 'var(--type-easy)',
   };
 
   // Distinguishes a week's training phase at a glance in the accordion
@@ -82,6 +87,7 @@
     fartlek: '#d97a4f',
     evaluation: '#6366f1',
     marathonPace: '#3aa98c',
+    runWalk: '#74b358',
   };
 
   // A rest day defaults to nudging toward strength/gym work as a
@@ -141,6 +147,11 @@
     // instead, keyed off day.paceSecPerKm being unset rather than this
     // zone mapping (see renderDayRow/the PDF export).
     evaluation: 'threshold',
+    // First-timer only — just feeds roleColorCss' 'work' segment color
+    // (Easy green) for the structure bar; the Pace Target column itself
+    // never reaches this mapping for runWalk (see paceTargetLabel, which
+    // special-cases it to "Run/Walk" before falling through here).
+    runWalk: 'easy',
   };
 
   // Short zone labels for the Pace Target column / bar tooltips — matches
@@ -163,9 +174,20 @@
   // at all (see planGenerator.js's 'race'-day-type branch) — it wouldn't
   // make sense to hit a target on a day whose whole point is discovering
   // your own current pace by racing it.
-  function paceTargetLabel(day, zone) {
+  // 'Time Trial' reads as too daunting for a total-beginner First-timer
+  // plan (user feedback) — same day.type ('evaluation') as Base Building/
+  // Maintenance's own evaluation week, just a gentler label for this one
+  // mode specifically (those two keep "Time Trial"). isFirstTimerPlan is
+  // passed in rather than read from module state here so this stays a
+  // plain function of its arguments, like the rest of this file's label
+  // helpers.
+  function paceTargetLabel(day, zone, isFirstTimerPlan) {
     if (day.type === 'race') return 'Race Pace';
-    if (day.type === 'evaluation' && day.paceSecPerKm == null) return 'Time Trial';
+    if (day.type === 'evaluation' && day.paceSecPerKm == null) return isFirstTimerPlan ? '5K' : 'Time Trial';
+    // No prescribed pace at all for a run/walk session — the target is the
+    // time interval (see structureToSegments), not a pace, so this doesn't
+    // fall through to a zone label (which would misleadingly show "Easy").
+    if (day.type === 'runWalk') return 'Run/Walk';
     return zone ? ZONE_SHORT_LABEL[zone] : '—';
   }
 
@@ -289,11 +311,15 @@
   const raceDateInput = document.getElementById('raceDate');
   const raceDateHint = document.getElementById('raceDateHint');
   const startDateInput = document.getElementById('startDate');
+  const fitnessFieldset = document.getElementById('fitnessFieldset');
   const daysPerWeekInput = document.getElementById('daysPerWeek');
   const daysPerWeekOutput = document.getElementById('daysPerWeekOutput');
+  const firstTimerDaysHint = document.getElementById('firstTimerDaysHint');
   const dayCheckboxes = document.getElementById('dayCheckboxes');
   const dayCountHint = document.getElementById('dayCountHint');
+  const longRunDayField = document.getElementById('longRunDayField');
   const longRunDaySelect = document.getElementById('longRunDay');
+  const recentRaceFieldset = document.getElementById('recentRaceFieldset');
   const recentRaceDistanceSel = document.getElementById('recentRaceDistance');
   const recentRaceCustomField = document.getElementById('recentRaceCustomField');
   const recentRaceCustomKm = document.getElementById('recentRaceCustomKm');
@@ -352,6 +378,9 @@
   const missedWeekText = document.getElementById('missedWeekText');
   const missedWeekApplyBtn = document.getElementById('missedWeekApplyBtn');
   const missedWeekDismissBtn = document.getElementById('missedWeekDismissBtn');
+  const blockHistorySection = document.getElementById('blockHistorySection');
+  const blockHistoryChart = document.getElementById('blockHistoryChart');
+  const blockHistoryList = document.getElementById('blockHistoryList');
 
   // Kept around so the AI review step can send the currently-generated plan
   // (and retry on demand) without recomputing anything.
@@ -406,12 +435,20 @@
   // Set a sensible default race date: 12 weeks from today.
   const defaultRaceDate = new Date();
   defaultRaceDate.setDate(defaultRaceDate.getDate() + 12 * 7);
-  raceDateInput.value = defaultRaceDate.toISOString().slice(0, 10);
-  raceDateInput.min = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 10);
+  // dateKey (LOCAL calendar fields), not toISOString().slice(0,10) — see
+  // dateKey's own comment. Matters concretely here: for any timezone ahead
+  // of UTC (e.g. WIB/UTC+7), toISOString() reads a day EARLIER than the
+  // runner's actual local "today" whenever local time is still before
+  // midnight UTC (i.e. before 07:00 WIB) — a very real time of day for
+  // someone opening this app first thing in the morning to plan today's
+  // run. Was silently wrong for every one of this file's date defaults/
+  // persistence points before this fix.
+  raceDateInput.value = dateKey(defaultRaceDate);
+  raceDateInput.min = dateKey(new Date(Date.now() + 24 * 3600 * 1000));
 
   // Default start date: today — the runner can push it later if they're
   // not starting right away. Can't be set in the past.
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = dateKey(new Date());
   startDateInput.value = todayStr;
   startDateInput.min = todayStr;
 
@@ -445,6 +482,11 @@
       dateLabel: 'Akhir blok training',
       hint: 'Cuma mau jaga fitness tanpa target race? Volume mingguan ditahan flat (tidak naik), dan sesi quality (tempo/interval) diselingi Fartlek secara berkala biar tidak monoton.',
     },
+    firstTimer: {
+      legend: '1. Detail Program Pemula',
+      dateLabel: 'Lulus (perkiraan)',
+      hint: 'Belum pernah lari sama sekali? Program 9 minggu, 3 hari/minggu, run/walk interval yang makin panjang tiap minggu, diakhiri Time Trial 5K sungguhan di minggu terakhir. Tidak butuh data lari sebelumnya — mulai dari nol.',
+    },
   };
 
   // Both non-race modes default internally to this "gaya latihan" — see
@@ -458,13 +500,62 @@
   // a fixed, un-editable value — nothing left to show the user.
   const NON_RACE_DEFAULT_RACE_KEY = 'medium';
 
+  // Locked at exactly 3 for First-timer (see FIRST_TIMER_DAYS_PER_WEEK in
+  // planGenerator.js) — not a preference, part of the program itself.
+  const FIRST_TIMER_DAYS_PER_WEEK = 3;
+  // 8 build weeks + 1 evaluation week (see FIRST_TIMER_PROGRAM in
+  // planGenerator.js) — the actual generator derives every date from
+  // startDate itself and never reads raceDateInput's value for this mode;
+  // this only keeps the (disabled, display-only) field showing the right
+  // "Lulus (perkiraan)" date so the runner isn't left staring at some
+  // unrelated leftover date from whatever goalType was selected before.
+  const FIRST_TIMER_TOTAL_DAYS = 9 * 7 - 1;
+
+  function updateFirstTimerRaceDate() {
+    if (getGoalType() !== 'firstTimer' || !startDateInput.value) return;
+    const start = new Date(`${startDateInput.value}T00:00:00`);
+    // dateKey (LOCAL calendar fields), not toISOString().slice(0,10) — the
+    // latter reads UTC fields, which silently lands on the wrong calendar
+    // day for any timezone ahead of UTC (e.g. WIB/UTC+7 rolls back a full
+    // day). Caught live: Sep 4 + 62 days should read Nov 5, toISOString
+    // showed Nov 4.
+    raceDateInput.value = dateKey(new Date(start.getTime() + FIRST_TIMER_TOTAL_DAYS * 24 * 3600 * 1000));
+  }
+  startDateInput.addEventListener('input', updateFirstTimerRaceDate);
+
   function updateGoalTypeUI() {
     const goalType = getGoalType();
     const isRace = goalType === 'race';
+    const isFirstTimer = goalType === 'firstTimer';
     const copy = GOAL_TYPE_COPY[goalType];
     raceFieldsetLegend.textContent = copy.legend;
     raceDateLabel.textContent = copy.dateLabel;
     goalTypeHint.textContent = copy.hint;
+
+    // Whole fieldsets/fields First-timer has no use for at all — a total
+    // beginner has no baseline mileage/recent race to report, no long run
+    // (nothing in the program is a long run), and no volume/speedwork ramp
+    // for conservativeMode to soften. Their underlying inputs are left
+    // untouched (still whatever they last held) rather than cleared —
+    // gatherSettingsFromForm simply never reads them for this mode (see its
+    // own settings-building comment), same "hidden but harmless" approach
+    // longRunDayField already uses.
+    fitnessFieldset.hidden = isFirstTimer;
+    recentRaceFieldset.hidden = isFirstTimer;
+    longRunDayField.hidden = isFirstTimer;
+
+    daysPerWeekInput.disabled = isFirstTimer;
+    firstTimerDaysHint.hidden = !isFirstTimer;
+    if (isFirstTimer) {
+      daysPerWeekInput.value = String(FIRST_TIMER_DAYS_PER_WEEK);
+      daysPerWeekInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    // Also display-only for First-timer — see updateFirstTimerRaceDate's
+    // own comment for why the generator itself never reads this field's
+    // value for this mode regardless.
+    raceDateInput.disabled = isFirstTimer;
+    updateFirstTimerRaceDate();
 
     presetDistanceField.hidden = !isRace;
     distanceModeField.hidden = !isRace;
@@ -727,8 +818,13 @@
     // non-race block's end date, not a real race (see GOAL_TYPE_COPY
     // above); raceDistance stays fixed at NON_RACE_DEFAULT_RACE_KEY (see
     // updateGoalTypeUI) since neither non-race mode exposes a choice here.
-    const mode = goalType === 'race' ? 'race' : 'nonRace';
-    const nonRaceStyle = goalType === 'race' ? null : goalType;
+    // First-timer is its own top-level `mode` (not a `nonRaceStyle`, unlike
+    // baseBuilding/maintenance) — see planGenerator.js's generatePlan,
+    // which dispatches it to a fully independent generator rather than
+    // threading it through the shared race/non-race machinery those two
+    // still reuse.
+    const mode = goalType === 'race' ? 'race' : goalType === 'firstTimer' ? 'firstTimer' : 'nonRace';
+    const nonRaceStyle = mode === 'nonRace' ? goalType : null;
     const isCustomDistance = getDistanceMode() === 'custom';
     let raceKey = raceDistanceSel.value;
     let raceDistanceKm = RACE_META[raceKey]?.km;
@@ -738,7 +834,9 @@
     // NON_RACE_DEFAULT_RACE_KEY), so showing "Medium Distance" here would
     // just be a confusing, unexplained constant.
     const NON_RACE_LABEL = { baseBuilding: 'Aerobic Base', maintenance: 'Flat Volume' };
-    let raceLabel = mode === 'race' ? RACE_META[raceKey]?.label : NON_RACE_LABEL[nonRaceStyle];
+    let raceLabel = mode === 'race' ? RACE_META[raceKey]?.label
+      : mode === 'firstTimer' ? '5K Pemula'
+      : NON_RACE_LABEL[nonRaceStyle];
     if (isCustomDistance) {
       raceKey = 'custom';
       raceDistanceKm = Number(customDistanceKm.value);
@@ -851,7 +949,9 @@
     // Plans saved before goal-type mode existed won't have `mode` at all —
     // fall back to 'race', same as the old implicit (and still default)
     // behaviour.
-    const goalTypeValue = !settings.mode || settings.mode === 'race' ? 'race' : settings.nonRaceStyle;
+    const goalTypeValue = !settings.mode || settings.mode === 'race' ? 'race'
+      : settings.mode === 'firstTimer' ? 'firstTimer'
+      : settings.nonRaceStyle;
     const goalTypeRadio = goalTypeToggle.querySelector(`input[value="${goalTypeValue}"]`);
     if (goalTypeRadio) goalTypeRadio.checked = true;
     updateGoalTypeUI();
@@ -874,12 +974,12 @@
       raceDistanceSel.value = settings.raceKey;
     }
 
-    raceDateInput.value = settings.raceDate.toISOString().slice(0, 10);
+    raceDateInput.value = dateKey(settings.raceDate);
     // Plans saved before the start-date field existed won't have it —
     // fall back to today, same as the old implicit behaviour.
     startDateInput.value = settings.startDate
-      ? settings.startDate.toISOString().slice(0, 10)
-      : new Date().toISOString().slice(0, 10);
+      ? dateKey(settings.startDate)
+      : dateKey(new Date());
 
     // fitnessLevel sendiri tidak punya field di form lagi — diturunkan
     // ulang otomatis dari currentWeeklyKm begitu plan digenerate lagi.
@@ -947,6 +1047,25 @@
   // regardless of where the caller found this function mid-flow (a fresh
   // form submit, or restoring a saved plan right after login).
   async function generateAndShowPlan(settings, { restoring = false } = {}) {
+    // A genuine rolling-block transition — this call is about to replace
+    // an already-generated plan (not a restore-on-login, and not one of
+    // the in-place tweaks like day-swap/feedback/missed-week adjustment,
+    // none of which ever re-run generatePlan or reach this function at
+    // all), AND the block it's replacing has already ended. That combo is
+    // what "the runner finished/moved past their previous block and is
+    // starting the next one" actually looks like — editing an upcoming
+    // plan's numbers and resubmitting does NOT count (raceDate is still in
+    // the future), so it never spams plan_history with abandoned edits.
+    // Snapshotted BEFORE lastPlan/lastSettings get overwritten below;
+    // never awaited — a history-save failure must never block the new
+    // plan the runner actually asked for.
+    if (!restoring && lastPlan && lastSettings) {
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      if (lastSettings.raceDate < today) {
+        archivePreviousBlock(lastPlan, lastSettings).catch(() => {});
+      }
+    }
+
     const plan = PaceForgeGenerator.generatePlan(settings);
     lastPlan = plan;
     lastSettings = settings;
@@ -973,7 +1092,141 @@
 
     renderPlan(lastPlan); // hides loadingSection, shows resultSection — see renderPlan
     applyPendingAiReviewToDom();
+    // Independent of this specific plan's own content (it's a cross-block
+    // view), so it's fetched once per plan display rather than threaded
+    // through renderPlan's own DOM-building — fire-and-forget, same
+    // best-effort spirit as the archive call above.
+    loadAndRenderBlockHistory().catch(() => {});
     return plan;
+  }
+
+  // Snapshots a just-superseded block into plan_history (see
+  // api/plan-history.js) so loadAndRenderBlockHistory below has a rolling
+  // trend to show. `plan`/`settings` here are the OLD block's — the
+  // caller (generateAndShowPlan) calls this before overwriting lastPlan/
+  // lastSettings with the new ones.
+  async function archivePreviousBlock(plan, settings) {
+    if (!paceforgeAuth) return;
+    // Start/end VDOT (not peak) — only meaningful for Race mode: Base
+    // Building/Maintenance keep VDOT nearly flat by design (same reasoning
+    // that hides the Goal Pace card for non-race plans, see renderPlan),
+    // so there's no genuine growth to report for them.
+    const startVdot = settings.mode === 'race' ? weekVdot(plan.weeks[0]) || null : null;
+    const endVdot = settings.mode === 'race' ? weekVdot(plan.weeks[plan.weeks.length - 1]) || null : null;
+    const entry = {
+      mode: settings.mode,
+      nonRaceStyle: settings.nonRaceStyle || null,
+      raceLabel: settings.raceLabel,
+      raceDistanceKm: settings.raceDistanceKm,
+      blockStart: dateKey(settings.startDate),
+      blockEnd: dateKey(settings.raceDate),
+      // Total km across every week in the block — sensible to compare
+      // across different block TYPES (Race/Base Building/Maintenance),
+      // unlike a single peak-week number that depends heavily on each
+      // type's own volume-curve shape (see the schema.sql comment on
+      // total_km for the fuller reasoning).
+      totalKm: Math.round(plan.weeks.reduce((sum, w) => sum + (w.totalKm || 0), 0) * 10) / 10,
+      startVdot,
+      endVdot,
+    };
+
+    if (paceforgeAuth.isDummy()) {
+      const raw = localStorage.getItem(DUMMY_PLAN_HISTORY_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      const history = Array.isArray(parsed) ? parsed : [];
+      history.unshift({ id: `dummy-${Date.now()}`, ...entry });
+      // Same cap as HISTORY_LIMIT in api/plan-history.js — keeps dummy mode's
+      // behavior representative of the real one instead of growing forever.
+      localStorage.setItem(DUMMY_PLAN_HISTORY_KEY, JSON.stringify(history.slice(0, 50)));
+      return;
+    }
+
+    await fetch('/api/plan-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...entry, settings }),
+    });
+  }
+
+  // Fetches and renders the "Riwayat Blok" panel — hidden entirely until
+  // the runner has at least one finished block (see archivePreviousBlock),
+  // so a first-ever plan never shows an empty/awkward "no history yet" box.
+  async function loadAndRenderBlockHistory() {
+    if (!paceforgeAuth) { blockHistorySection.hidden = true; return; }
+
+    let blocks;
+    if (paceforgeAuth.isDummy()) {
+      const raw = localStorage.getItem(DUMMY_PLAN_HISTORY_KEY);
+      blocks = raw ? JSON.parse(raw) : [];
+    } else {
+      const res = await fetch('/api/plan-history');
+      if (!res.ok) { blockHistorySection.hidden = true; return; }
+      const data = await res.json();
+      blocks = Array.isArray(data.blocks) ? data.blocks : [];
+    }
+    if (!blocks.length) { blockHistorySection.hidden = true; return; }
+
+    // Sorted explicitly by blockEnd rather than trusted as-received — both
+    // the real endpoint (order=block_end.desc) and dummy mode's unshift
+    // already return newest-first in practice, but a chart silently
+    // relying on that assumption would misorder itself the moment
+    // anything ever violates it (a future edit, a data migration, ...).
+    const byBlockEndDesc = blocks.slice().sort((a, b) => (a.blockEnd < b.blockEnd ? 1 : a.blockEnd > b.blockEnd ? -1 : 0));
+
+    const { formatDate } = PaceForgeGenerator;
+    // Chart reads oldest→newest (a trend line's natural direction); the
+    // list below stays newest-first (most relevant block up top) — same
+    // split convention renderVolumeChart's bars vs. the week accordion use.
+    const chronological = byBlockEndDesc.slice().reverse();
+    // Total km, not peak-week km — comparable across block TYPES (see
+    // archivePreviousBlock's own comment on why).
+    const maxKm = Math.max(...chronological.map(b => b.totalKm || 0), 1);
+    // First-timer blocks (b.mode === 'firstTimer', b.nonRaceStyle === null)
+    // fall into the same green as Base Building here — both are "building
+    // aerobic capacity from a lower baseline" in spirit, and a 4th color
+    // isn't worth it for what's already a 3-way distinction.
+    const barColor = b => b.mode === 'race' ? 'var(--type-race)' : (b.nonRaceStyle === 'maintenance' ? 'var(--type-recovery)' : 'var(--type-easy)');
+
+    const cols = chronological.map(b => {
+      const heightPx = Math.max(3, Math.round(((b.totalKm || 0) / maxKm) * 90));
+      // endVdot only exists for Race blocks (see archivePreviousBlock) —
+      // the "(VDOT 40.0)" suffix simply doesn't appear for Base Building/
+      // Maintenance bars rather than showing a meaningless "—".
+      const vdotSuffix = b.endVdot ? ` (VDOT ${b.endVdot.toFixed(1)})` : '';
+      const valueLabel = `${b.totalKm ?? '—'} km${vdotSuffix}`;
+      return `
+        <div class="volume-chart-col" title="${b.raceLabel} • ${formatDate(new Date(b.blockStart + 'T00:00:00'))} – ${formatDate(new Date(b.blockEnd + 'T00:00:00'))} • Total ${valueLabel}">
+          <span class="volume-chart-value">${valueLabel}</span>
+          <div class="volume-chart-track">
+            <span class="volume-chart-fill" style="height:${heightPx}px;background:${barColor(b)}"></span>
+          </div>
+          <span class="volume-chart-week-no">${formatDate(new Date(b.blockEnd + 'T00:00:00'))}</span>
+        </div>
+      `;
+    }).join('');
+
+    blockHistoryChart.innerHTML = `
+      <div class="pace-zone-header">
+        <span class="pace-zone-title">📈 Riwayat Blok</span>
+        <span class="pace-zone-source">${blocks.length} blok selesai • total km per blok</span>
+      </div>
+      <div class="table-scroll"><div class="volume-chart-bars">${cols}</div></div>
+    `;
+
+    blockHistoryList.innerHTML = byBlockEndDesc.map(b => {
+      const dateRange = `${formatDate(new Date(b.blockStart + 'T00:00:00'))} – ${formatDate(new Date(b.blockEnd + 'T00:00:00'))}`;
+      const vdotPart = (b.startVdot && b.endVdot)
+        ? ` · VDOT ${b.startVdot.toFixed(1)}→${b.endVdot.toFixed(1)} (${b.endVdot >= b.startVdot ? '+' : ''}${(b.endVdot - b.startVdot).toFixed(1)})`
+        : '';
+      return `
+        <div class="block-history-row">
+          <span class="block-history-label">${b.raceLabel}</span>
+          <span class="block-history-meta">${dateRange} · Total ${b.totalKm ?? '—'} km${vdotPart}</span>
+        </div>
+      `;
+    }).join('');
+
+    blockHistorySection.hidden = false;
   }
 
   // --- Login gate ---
@@ -1013,6 +1266,11 @@
   // change once a real Strava app + server env vars are wired up.
   const paceforgeAuth = window.PaceForgeAuth;
   const DUMMY_PLAN_KEY = 'paceforge_dummy_plan';
+  // Separate localStorage key from DUMMY_PLAN_KEY above — that one holds
+  // only the current active block (overwritten on every save); this one is
+  // an append-only array, the dummy-mode mirror of the real plan_history
+  // table (see archivePreviousBlock/loadAndRenderBlockHistory below).
+  const DUMMY_PLAN_HISTORY_KEY = 'paceforge_dummy_plan_history';
 
   // Every field a day's session actually carries, as opposed to date/
   // dayName/dow (which belong to the calendar day itself, not whatever
@@ -1512,8 +1770,14 @@
     const payload = {
       settings: {
         ...settings,
-        raceDate: settings.raceDate.toISOString().slice(0, 10),
-        startDate: settings.startDate.toISOString().slice(0, 10),
+        // dateKey (LOCAL calendar fields), not toISOString() — see its own
+        // comment. A real bug here: this used to shift raceDate/startDate
+        // back a full day on every save for any timezone ahead of UTC
+        // (e.g. WIB/UTC+7) — the very next loadSavedPlanForUser would then
+        // restore a plan dated one day earlier than what was actually
+        // generated, every single time.
+        raceDate: dateKey(settings.raceDate),
+        startDate: dateKey(settings.startDate),
         // Carried inside settings (rather than a sibling payload field)
         // so it flows through the existing dummy-mode localStorage blob
         // and the real /api/plan settings jsonb column unchanged — both
@@ -1564,7 +1828,7 @@
         ...data.settings,
         raceDate: new Date(data.settings.raceDate + 'T00:00:00'),
         // Older saved plans predate the start-date field — fall back to today.
-        startDate: new Date((data.settings.startDate || new Date().toISOString().slice(0, 10)) + 'T00:00:00'),
+        startDate: new Date((data.settings.startDate || dateKey(new Date())) + 'T00:00:00'),
       };
       applySettingsToForm(settings, data.user_notes || '');
       await generateAndShowPlan(settings, { restoring: true });
@@ -1599,7 +1863,7 @@
         ...data.settings,
         raceDate: new Date(data.settings.raceDate + 'T00:00:00'),
         // Older saved plans predate the start-date field — fall back to today.
-        startDate: new Date((data.settings.startDate || new Date().toISOString().slice(0, 10)) + 'T00:00:00'),
+        startDate: new Date((data.settings.startDate || dateKey(new Date())) + 'T00:00:00'),
       };
       applySettingsToForm(settings, data.user_notes || '');
       await generateAndShowPlan(settings, { restoring: true });
@@ -2256,8 +2520,10 @@
     // see planGenerator.js): "Race"/"Tanggal Race" don't apply when
     // raceDate is really just the block's own end date.
     const isNonRacePlan = meta.mode && meta.mode !== 'race';
-    const raceCardLabel = !isNonRacePlan ? 'Race' : (meta.nonRaceStyle === 'maintenance' ? 'Maintenance' : 'Base Building');
-    const dateCardLabel = !isNonRacePlan ? 'Tanggal Race' : 'Akhir Blok';
+    const raceCardLabel = !isNonRacePlan ? 'Race'
+      : meta.mode === 'firstTimer' ? 'Program'
+      : (meta.nonRaceStyle === 'maintenance' ? 'Maintenance' : 'Base Building');
+    const dateCardLabel = !isNonRacePlan ? 'Tanggal Race' : meta.mode === 'firstTimer' ? 'Lulus (Perkiraan)' : 'Akhir Blok';
     summaryCards.innerHTML = `
       <div class="summary-item"><div class="label">${raceCardLabel}</div><div class="value">${meta.raceLabel}</div></div>
       <div class="summary-item"><div class="label">${dateCardLabel}</div><div class="value" style="font-size:1rem">${formatDate(meta.raceDate)}</div></div>
@@ -2526,6 +2792,7 @@
       }
 
       // --- Per-week tables --------------------------------------------------
+      const isFirstTimerPlan = meta.mode === 'firstTimer';
       weeks.forEach((week) => {
         // Keep a week's heading from landing right at the bottom edge with
         // no room for its table underneath.
@@ -2561,12 +2828,15 @@
           const displayKey = restDisplayKey(day);
           const label = pdfSafeText((day.type === 'longRun' && day.isMarathonSpecific)
             ? `${TYPE_LABELS.longRun} (Pace ${day.structure?.paceLabel || 'Marathon'})`
+            // See paceTargetLabel's own comment — same gentler "5K" badge
+            // as the on-screen result for First-timer's evaluation day.
+            : (day.type === 'evaluation' && isFirstTimerPlan) ? '5K'
             : (TYPE_LABELS[displayKey] || displayKey));
           const km = day.km ? `${day.km} km` : '—';
           // Shared with renderDayRow (see paceTargetLabel) so the PDF's
           // Pace Target column matches the on-screen result exactly.
           const zone = zoneForDay(day);
-          const pace = paceTargetLabel(day, zone);
+          const pace = paceTargetLabel(day, zone, isFirstTimerPlan);
           body.push([day.dayName, day.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }), label, km, pace]);
           // type here is the display key (see restDisplayKey) so the cell
           // color below (TYPE_HEX[rowInfo.type]) picks up the same
@@ -2756,6 +3026,15 @@
     pendingAiNotes = null;
     aiReviewErrorMessage = null;
     if (!lastPlan) return;
+    // First-timer plans have no goal pace/VDOT/long run at all — every
+    // other field this payload sends (goalPaceSec, peakLongRunKm, ...) is
+    // null/meaningless for this mode (see generateFirstTimerPlan in
+    // planGenerator.js), and the AI coach prompt itself doesn't know about
+    // run/walk sessions yet either. Skipping outright rather than sending
+    // a payload full of nulls the prompt would have to guess at — same
+    // "no AI notes" degraded state the app already falls back to when
+    // ANTHROPIC_API_KEY isn't configured at all.
+    if (lastPlan.meta.mode === 'firstTimer') return;
 
     const { meta, weeks } = lastPlan;
     const { formatPace } = PaceForgeGenerator;
@@ -2768,7 +3047,7 @@
       mode: meta.mode,
       nonRaceStyle: meta.nonRaceStyle,
       raceLabel: meta.raceLabel,
-      raceDate: meta.raceDate.toISOString().slice(0, 10),
+      raceDate: dateKey(meta.raceDate),
       fitnessLevel: lastFitnessLevel,
       planWeeks: meta.planWeeks,
       peakWeeklyKm: meta.peakWeeklyKm,
@@ -2868,8 +3147,12 @@
     const isSwapSelected = !!swapSelection && swapSelection.week === weekNumber && swapSelection.dow === day.dow;
     const rowClass = [isRest ? 'is-rest' : (isRace ? 'is-race' : ''), isSwapSelected ? 'is-swap-selected' : '', isCompleted ? 'is-completed' : ''].filter(Boolean).join(' ');
     const displayKey = restDisplayKey(day);
+    const isFirstTimerPlan = lastPlan?.meta?.mode === 'firstTimer';
     const label = (day.type === 'longRun' && day.isMarathonSpecific)
       ? `${TYPE_LABELS.longRun} (Pace ${day.structure?.paceLabel || 'Marathon'})`
+      // See paceTargetLabel's own comment on why First-timer's evaluation
+      // day gets a gentler "5K" badge instead of "Time Trial".
+      : (day.type === 'evaluation' && isFirstTimerPlan) ? '5K'
       : (TYPE_LABELS[displayKey] || displayKey);
     const km = day.km ? `${day.km} km` : '—';
     // Pace Target names the VDOT zone this session trains at (Easy, Tempo,
@@ -2880,7 +3163,7 @@
     // day"). Race day gets its own label since goal race pace doesn't
     // cleanly belong to one of the 5 training zones.
     const zone = zoneForDay(day);
-    const pace = paceTargetLabel(day, zone);
+    const pace = paceTargetLabel(day, zone, isFirstTimerPlan);
     const color = TYPE_COLORS[displayKey] || 'var(--type-rest)';
     const structureRow = day.structure
       ? `<tr class="structure-row ${rowClass}"><td colspan="5">${renderWorkoutStructure(day.structure, zone)}</td></tr>`
@@ -2954,6 +3237,21 @@
     return `${Math.round(sec)} detik`;
   }
 
+  // Run/walk-only (First-timer mode) — unlike formatRecoveryDuration above
+  // (never past ~2 minutes for every other session type's recovery jog),
+  // a run/walk segment can run up to 25 minutes by the program's final
+  // week, where "1500 detik" reads far worse than "25 menit". Kept
+  // separate from formatRecoveryDuration itself rather than changing that
+  // one's behavior, to avoid altering already-shipped interval/repetition/
+  // fartlek/tempo captions no one asked to change.
+  function formatMinSec(sec) {
+    const m = Math.floor(sec / 60);
+    const s = Math.round(sec % 60);
+    if (m === 0) return `${s} detik`;
+    if (s === 0) return `${m} menit`;
+    return `${m} menit ${s} detik`;
+  }
+
   function structureToSegments(structure) {
     let segments;
     let caption = '';
@@ -2983,6 +3281,28 @@
         { label: `Pace ${structure.paceLabel}`, km: structure.paceKm, role: 'work' },
       ];
       caption = `${formatKm(structure.easyKm)} easy → ${formatKm(structure.paceKm)} pace ${structure.paceLabel}`;
+    } else if (structure.kind === 'runWalk') {
+      // First-timer mode only (see generateFirstTimerPlan in
+      // planGenerator.js). Segments alternate run/walk by TIME, like
+      // interval's recovery segments already do (durationLabel), but here
+      // 'work' is easy-effort running (not a hard rep) and 'recovery' is a
+      // genuine walk, not a jog — see roleColorCss, which already colors
+      // 'work' by the day's own zone (Easy, for runWalk — see
+      // TYPE_TO_ZONE.runWalk) and 'recovery' its own fixed gray, so this
+      // reuses both roles as-is without needing a third one. walkKm/walkSec
+      // of 0 (the program's final week — see FIRST_TIMER_PROGRAM) omits
+      // the walk segment entirely rather than rendering a zero-width one.
+      const runLabel = formatMinSec(structure.runSec);
+      segments = [];
+      for (let i = 0; i < structure.reps; i++) {
+        segments.push({ label: 'Lari', km: structure.runKm, role: 'work', durationLabel: runLabel });
+        if (structure.walkSec > 0) {
+          segments.push({ label: 'Jalan', km: structure.walkKm, role: 'recovery', durationLabel: formatMinSec(structure.walkSec) });
+        }
+      }
+      caption = structure.walkSec > 0
+        ? `${structure.reps}× (lari ${runLabel} + jalan ${formatMinSec(structure.walkSec)})`
+        : `Lari ${runLabel} tanpa henti`;
     } else {
       // 'simple' — a single continuous block, no warm up/cool down split.
       segments = [{ label: 'Run', km: structure.km, role: 'work' }];

@@ -63,6 +63,28 @@ async function upsert(table, row, onConflict) {
   });
 }
 
+// All rows matching filterColumn=filterValue, newest-orderColumn-first,
+// capped at `limit` — for an append-only table (plan_history) where every
+// row is independent, unlike `selectOne`'s single-row-per-key lookup.
+async function selectMany(table, filterColumn, filterValue, orderColumn, limit) {
+  const rows = await restRequest(
+    `${table}?${filterColumn}=eq.${encodeURIComponent(filterValue)}&order=${orderColumn}.desc&limit=${limit}`,
+    { method: 'GET' },
+  );
+  return Array.isArray(rows) ? rows : [];
+}
+
+// Plain INSERT — for an append-only table (plan_history) with no natural
+// conflict key to `upsert` onto (every row is its own independent entry,
+// unlike `plans`' one-row-per-athlete shape).
+async function insert(table, row) {
+  return restRequest(table, {
+    method: 'POST',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify(row),
+  });
+}
+
 // Plain UPDATE of an existing row — unlike `upsert`, `patch` can safely
 // contain only the columns you want to change; every other column
 // (including NOT NULL ones) is left untouched, no insert-path validation
@@ -75,4 +97,4 @@ async function update(table, filterColumn, filterValue, patch) {
   });
 }
 
-module.exports = { selectOne, upsert, update };
+module.exports = { selectOne, selectMany, insert, upsert, update };

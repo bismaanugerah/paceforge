@@ -78,6 +78,7 @@
           <label class="mode-chip"><input type="radio" name="goalType" value="race" checked> Ada race</label>
           <label class="mode-chip"><input type="radio" name="goalType" value="baseBuilding"> Base Building</label>
           <label class="mode-chip"><input type="radio" name="goalType" value="maintenance"> Maintenance</label>
+          <label class="mode-chip"><input type="radio" name="goalType" value="firstTimer"> Belum Pernah Lari</label>
         </div>
         <p class="field-hint" id="goalTypeHint"></p>
       </div>
@@ -139,8 +140,13 @@
         <p class="field-hint" id="raceDateHint"></p>
       </fieldset>
 
-      <!-- Fitness -->
-      <fieldset>
+      <!-- Fitness — hidden entirely for First-timer mode (see
+           updateGoalTypeUI in app.js): a true beginner has no
+           currentWeeklyKm/longestRecentRunKm baseline to report, and
+           there's no volume/speedwork ramp for conservativeMode to soften
+           either — the whole fieldset is irrelevant, not just individual
+           fields. -->
+      <fieldset id="fitnessFieldset">
         <legend>2. Kondisi Saat Ini</legend>
         <div class="field-row">
           <div class="field">
@@ -169,10 +175,15 @@
       <!-- Availability -->
       <fieldset>
         <legend>3. Ketersediaan Waktu Latihan</legend>
-        <div class="field">
+        <div class="field" id="daysPerWeekField">
           <label for="daysPerWeek">Jumlah hari latihan per minggu</label>
           <input type="range" id="daysPerWeek" name="daysPerWeek" min="3" max="6" step="1" value="4">
           <output id="daysPerWeekOutput" for="daysPerWeek">4 hari</output>
+          <!-- Only shown + slider locked/disabled for First-timer (see
+               updateGoalTypeUI) — 3x/minggu itself is part of the program
+               (rest days between runs matter for a beginner's tendons/
+               bones adapting), not a preference to dial up. -->
+          <p class="field-hint" id="firstTimerDaysHint" hidden>Dikunci 3 hari/minggu — jeda di antara sesi lari itu bagian dari programnya sendiri, bukan sekadar preferensi.</p>
         </div>
 
         <div class="field">
@@ -189,6 +200,12 @@
           <p class="field-hint" id="dayCountHint"></p>
         </div>
 
+        <!-- Also hidden entirely for First-timer (see updateGoalTypeUI) —
+             a run/walk program has no long run concept; the underlying
+             select still gets auto-populated/valid (see
+             updateLongRunDayOptions) so gatherSettingsFromForm's existing
+             validation passes untouched, its value is just never read by
+             generateFirstTimerPlan. -->
         <div class="field" id="longRunDayField">
           <label for="longRunDay">Hari untuk long run</label>
           <select id="longRunDay" name="longRunDay"></select>
@@ -205,7 +222,10 @@
            how those two get labeled differently); without a match, the
            note explains the fallback instead of leaving the checkbox
            silently unchecked. -->
-      <fieldset>
+      <!-- Hidden entirely for First-timer (see updateGoalTypeUI) — there's
+           no goal pace/VDOT concept in a run/walk program for a recent
+           race time to feed into at all. -->
+      <fieldset id="recentRaceFieldset">
         <legend>4. Waktu Race Terakhir</legend>
         <p class="field-hint">Dipakai untuk memperkirakan pace &amp; waktu finish race targetmu (rumus Riegel), kalau kamu belum isi target waktu finish spesifik di bawah. Pilih race/lari terdekat jaraknya ke race targetmu — bukan harus 5K — supaya perkiraannya lebih akurat.</p>
         <!-- className is set in JS (js/app.js's setRecentRaceSourceNote) —
@@ -406,6 +426,16 @@
     <div id="paceLegend" class="pace-legend"></div>
 
     <div id="planWeeks" class="plan-weeks"></div>
+
+    <!-- Trend across past FINISHED blocks (see archivePreviousBlock/
+         loadAndRenderBlockHistory in js/app.js and api/plan-history.js) —
+         separate from planWeeks above, which is only ever this one active
+         block. Hidden entirely until the runner has at least one finished
+         block, so a first-ever plan never shows an empty history box. -->
+    <section id="blockHistorySection" class="block-history no-print" hidden>
+      <div id="blockHistoryChart" class="volume-chart"></div>
+      <div id="blockHistoryList" class="block-history-list"></div>
+    </section>
 
     <p class="disclaimer">⚠️ Plan ini dihasilkan otomatis dari aturan umum (rule-based), bukan pengganti saran pelatih lari atau dokter. Dengarkan tubuhmu, dan sesuaikan bila perlu.</p>
   </section>

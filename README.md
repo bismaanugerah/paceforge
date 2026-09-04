@@ -102,11 +102,12 @@ api/session.js            Serverless function — baca cookie session, balas sta
 api/logout.js             Serverless function — hapus cookie session
 api/strava-summary.js     Serverless function — analisis aktivitas Strava jadi ringkasan buat form
 api/plan.js               Serverless function — simpan/muat plan tersimpan (ganti akses langsung Supabase)
+api/plan-history.js       Serverless function — riwayat blok latihan yang sudah selesai (buat panel "Riwayat Blok")
 api/enhance-plan.js       Serverless function — proxy ke Claude API untuk catatan pelatih
 server/session.js         Helper JWT + cookie session (dipakai banyak file di api/)
 server/supabaseAdmin.js   Helper fetch ke Supabase REST pakai service-role key (server-only)
 server/strava.js          Helper OAuth token + fetch/analisis aktivitas Strava
-supabase/schema.sql       Skema tabel `strava_athletes` + `plans`, RLS default-deny (akses cuma dari server)
+supabase/schema.sql       Skema tabel `strava_athletes` + `plans` + `plan_history`, RLS default-deny (akses cuma dari server)
 .claude/launch.json       Config untuk preview server (dipakai tool Claude Code)
 .claude/serve.ps1         Static file server + endpoint AI lokal berbasis PowerShell (dev tanpa Vercel)
 ```

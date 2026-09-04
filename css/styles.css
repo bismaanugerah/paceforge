@@ -685,6 +685,26 @@ input[type="radio"]:focus-visible {
 .volume-chart-legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .volume-chart-legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 
+/* #blockHistoryChart itself already gets the boxed "reference card" look
+   for free by reusing the .volume-chart/.volume-chart-bars/.volume-chart-col
+   classes (see loadAndRenderBlockHistory in js/app.js) — this only styles
+   the plain list of past blocks underneath that chart. */
+.block-history { margin: 20px 0 0; }
+.block-history-list { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
+.block-history-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.85rem;
+}
+.block-history-row:last-child { border-bottom: none; }
+.block-history-label { font-weight: 600; }
+.block-history-meta { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+
 .pace-legend {
   margin: 18px 0 6px;
   padding: 14px;

@@ -863,6 +863,11 @@ const PaceForgeGenerator = (() => {
     shakeout: 'Shakeout Run',
     fartlek: 'Fartlek',
     marathonPace: 'Marathon Pace Run',
+    // First-timer mode only (see generateFirstTimerPlan) — the specific
+    // run/walk split for that week is shown in the structure caption
+    // below this badge (js/app.js's structureToSegments), not baked into
+    // the label itself, since it changes every week.
+    runWalk: 'Run/Walk',
     // Distance shown separately in its own column (5km, or a lighter
     // self-test distance in conservativeMode — see generatePlan's 'race'
     // day-type branch), not baked into this label.
@@ -879,7 +884,179 @@ const PaceForgeGenerator = (() => {
     race: 'RACE DAY! 🏁',
   };
 
+  // ===================== First-timer mode =====================
+  // A total beginner has no currentWeeklyKm/VDOT to anchor ANYTHING
+  // generatePlan's shared race/non-race machinery does (volume ramp, pace
+  // zones, quality-session rotation — all of it assumes some existing
+  // running ability to measure) — so unlike Base Building/Maintenance
+  // (which reuse ~all of that machinery, just retargeted), First-timer
+  // gets its own fully independent generator, dispatched to right at the
+  // top of generatePlan below, per this project's standing "keep Race/
+  // Base Building/Maintenance logic separate" directive taken one step
+  // further. Trains toward a real 5K instead — a fixed, gentle 8-week
+  // run/walk interval build-up (run segments lengthen, walk segments
+  // shorten, in the well-known spirit countless beginner "run/walk"
+  // programs use — this specific week-by-week table is this project's own
+  // design, not a reproduction of any single named program), always
+  // exactly 3 days/week (rest days between runs matter more for a
+  // beginner's tendons/bones adapting than for an experienced runner's
+  // cardio), ending in a real 5K Time Trial — reusing the exact same
+  // 'evaluation' day-type/no-prescribed-pace shape Base Building's own
+  // evaluation week already established (see generatePlan's 'race'-type
+  // branch below), just built directly here rather than called, since that
+  // branch lives inline inside generatePlan's loop, tightly coupled to
+  // state (weekPaces, qualityRotation, ...) First-timer has none of.
+  const FIRST_TIMER_DAYS_PER_WEEK = 3;
+  const FIRST_TIMER_RACE_LABEL = '5K Pemula';
+  // { runSec, walkSec, reps } per week — reps of (run runSec, walk
+  // walkSec). Total session length stays a gentle ~20-25 minutes
+  // throughout; what changes is the run:walk ratio, converging on
+  // continuous running by week 8.
+  const FIRST_TIMER_PROGRAM = [
+    { runSec: 60,   walkSec: 90, reps: 8 }, // week 1: 20 min
+    { runSec: 90,   walkSec: 90, reps: 7 }, // week 2: 21 min
+    { runSec: 120,  walkSec: 90, reps: 6 }, // week 3: 21 min
+    { runSec: 180,  walkSec: 90, reps: 5 }, // week 4: 22.5 min
+    { runSec: 300,  walkSec: 60, reps: 4 }, // week 5: 24 min
+    { runSec: 420,  walkSec: 60, reps: 3 }, // week 6: 24 min
+    { runSec: 600,  walkSec: 60, reps: 2 }, // week 7: 22 min
+    { runSec: 1500, walkSec: 0,  reps: 1 }, // week 8: 25 min continuous, no walk breaks
+  ];
+  // Week 9's non-5K day(s) — a short, easy shakeout (not week 8's full 25
+  // min, not blank rest either) to keep legs loose heading into the real
+  // test rather than sitting idle for most of the week.
+  const FIRST_TIMER_EVALUATION_SHAKEOUT = { runSec: 600, walkSec: 0, reps: 1 }; // 10 min easy continuous
+  // Rough pace ASSUMPTIONS purely so a run/walk session still has a `day.km`
+  // — every other subsystem (volume chart, weekly totals, PDF, Strava
+  // completion-matching by calendar date) already assumes day.km exists and
+  // is meaningful, and forking all of that for "no km" would be a much
+  // bigger, riskier change than accepting an approximate figure here. The
+  // actual PRESCRIBED target stays the run/walk time split (see
+  // structureToSegments' runWalk branch in js/app.js) — km is secondary/FYI,
+  // never shown as something to hit.
+  const FIRST_TIMER_RUN_PACE_SEC_PER_KM = 8 * 60;   // ~8:00/km, a gentle beginner jog
+  const FIRST_TIMER_WALK_PACE_SEC_PER_KM = 12 * 60; // ~12:00/km, a brisk walk
+
+  function buildRunWalkStructure(program) {
+    const runKm = program.runSec / FIRST_TIMER_RUN_PACE_SEC_PER_KM;
+    const walkKm = program.walkSec / FIRST_TIMER_WALK_PACE_SEC_PER_KM;
+    return {
+      structure: { kind: 'runWalk', reps: program.reps, runSec: program.runSec, walkSec: program.walkSec, runKm, walkKm },
+      km: Math.round((runKm + walkKm) * program.reps * 100) / 100,
+    };
+  }
+
+  function generateFirstTimerPlan(settings) {
+    const { startDate, preferredDays, raceLabel } = settings;
+    const planStartAnchor = startOfDay(startDate || new Date());
+    // Re-clamped defensively to exactly 3 days, sorted Mon..Sun (Sunday
+    // last) — js/app.js's form already locks daysPerWeek/preferredDays to
+    // this shape for First-timer, this doesn't trust that blindly.
+    const chronoRank = dow => (dow === 0 ? 7 : dow);
+    const slotDays = (preferredDays || [])
+      .slice()
+      .sort((a, b) => chronoRank(a) - chronoRank(b))
+      .slice(0, FIRST_TIMER_DAYS_PER_WEEK);
+
+    const totalWeeks = FIRST_TIMER_PROGRAM.length + 1; // 8 build weeks + 1 evaluation (5K) week
+    const weeks = [];
+    // Aligned to calendar Monday-Sunday weeks — same formula generatePlan
+    // itself uses for its own startWeekMonday, so a First-timer plan's week
+    // headers read the same "SEN ... – MIN ..." shape as every other mode
+    // rather than an unfamiliar "whatever day you started on" boundary.
+    const firstWeekMonday = addDays(planStartAnchor, -(planStartAnchor.getDay() === 0 ? 6 : planStartAnchor.getDay() - 1));
+
+    for (let w = 0; w < totalWeeks; w++) {
+      const weekStart = addDays(firstWeekMonday, w * 7);
+      const days = [];
+      for (let i = 0; i < 7; i++) {
+        const date = addDays(weekStart, i);
+        // Week 1 only: drop days before the runner's actual start date
+        // instead of showing them as scheduled-but-blank rows — same
+        // trimming generatePlan's own per-week loop already does.
+        if (w === 0 && date < planStartAnchor) continue;
+        const dow = date.getDay();
+        days.push({ date, dayName: DAY_NAMES[dow], dow, type: 'rest', km: 0 });
+      }
+
+      const isEvaluationWeek = w === FIRST_TIMER_PROGRAM.length;
+      // The 5K itself is ONE day, not every slot day that week — pinned to
+      // the LAST selected day (same "takes the place of the runner's own
+      // last training day" convention non-race modes already use for their
+      // own evaluation week — matching how a real week tapers into race
+      // day, not three race attempts in one week). The other slot day(s)
+      // keep training — a short, easy shakeout (FIRST_TIMER_EVALUATION_SHAKEOUT),
+      // lighter than week 8's own program, not full rest — user feedback
+      // was that leaving them blank read as the program abruptly stopping
+      // a week early; per user feedback the last week isn't just the 5K.
+      const evaluationDow = slotDays[slotDays.length - 1];
+      let totalKm = 0;
+      slotDays.forEach(dow => {
+        const dayObj = days.find(d => d.dow === dow);
+        if (!dayObj) return;
+        if (isEvaluationWeek && dow === evaluationDow) {
+          // Same "real Time Trial, no prescribed pace" shape as Base
+          // Building's own evaluation week (see generatePlan's 'race'-type
+          // branch) — deliberately duplicated, not called, per this
+          // function's own header comment.
+          dayObj.type = 'evaluation';
+          dayObj.km = 5;
+          dayObj.structure = buildSimpleStructure(5);
+        } else {
+          const program = isEvaluationWeek ? FIRST_TIMER_EVALUATION_SHAKEOUT : FIRST_TIMER_PROGRAM[w];
+          const { structure, km } = buildRunWalkStructure(program);
+          dayObj.type = 'runWalk';
+          dayObj.km = km;
+          dayObj.structure = structure;
+        }
+        totalKm += dayObj.km;
+      });
+
+      weeks.push({
+        weekNumber: w + 1,
+        startDate: days[0].date,
+        endDate: days[days.length - 1].date,
+        phase: isEvaluationWeek ? 'Evaluasi' : 'Base',
+        totalKm: Math.round(totalKm * 10) / 10,
+        days,
+      });
+    }
+
+    const allDayKm = weeks.flatMap(w => w.days.map(d => d.km || 0));
+
+    return {
+      meta: {
+        raceLabel: raceLabel || FIRST_TIMER_RACE_LABEL,
+        raceDistanceKm: 5,
+        raceDate: weeks[weeks.length - 1].endDate,
+        mode: 'firstTimer', nonRaceStyle: null,
+        planWeeks: totalWeeks, taperWeeks: 1, buildWeeks: FIRST_TIMER_PROGRAM.length,
+        peakWeeklyKm: Math.max(...weeks.map(w => w.totalKm)),
+        peakLongRunKm: Math.round(Math.max(...allDayKm) * 10) / 10,
+        goalPaceSec: null, paces: null,
+        currentFitnessPaceSec: null,
+        goalPaceSource: null,
+        recentRaceTimeSec: null, recentRaceDistanceKm: null, predictedRaceTimeSec: null,
+        planStart: weeks[0].startDate,
+        weeksAvailable: totalWeeks,
+        maxSupportKm: null,
+      },
+      warnings: [
+        'Ini program 9 minggu run/walk buat yang belum pernah lari sama sekali — 3 hari seminggu, interval larinya makin panjang tiap minggu sampai kamu siap lari 5K penuh di minggu terakhir. Dengarkan tubuhmu: kalau satu minggu terasa berat, ulangi minggu yang sama sebelum lanjut, jangan dipaksa naik.',
+        'Minggu 9 diakhiri lari 5K sungguhan (bukan dipatok pace tertentu) — catat waktumu, lalu generate plan baru pakai mode Base Building dan masukkan waktu itu sebagai "waktu race terakhir" biar plan berikutnya dihitung dari kemampuan barumu.',
+      ],
+      weeks,
+    };
+  }
+  // ===================== end First-timer mode =====================
+
   function generatePlan(settings) {
+    // Dispatches away from every race/non-race concept below entirely —
+    // see generateFirstTimerPlan's own header comment for why this can't
+    // just be another isNonRace-style branch inside the function that
+    // follows.
+    if (settings.mode === 'firstTimer') return generateFirstTimerPlan(settings);
+
     const {
       raceDistanceKm, raceLabel, raceKey, raceDate, startDate,
       fitnessLevel, currentWeeklyKm, longestRecentRunKm, daysPerWeek, preferredDays, longRunDay,
