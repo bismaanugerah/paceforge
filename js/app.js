@@ -765,6 +765,17 @@
       showError('Isi rata-rata jarak lari mingguan yang valid (boleh 0 jika baru mulai).');
       return null;
     }
+    // Base Building past this volume has very little room left to actually
+    // build toward (see planGenerator.js's own VOLUME_GAIN_PLATEAU_KM
+    // warning, still shown as a fallback for a plan saved before this
+    // block existed and later restored/regenerated outside this form) — a
+    // hard stop here, not just a warning, since Maintenance is a strictly
+    // better fit at this volume and there's no legitimate reason to talk a
+    // user out of it.
+    if (nonRaceStyle === 'baseBuilding' && currentWeeklyKm >= PaceForgeGenerator.VOLUME_GAIN_PLATEAU_KM) {
+      showError(`Volume mingguanmu sekarang (${currentWeeklyKm} km) sudah di atas ${PaceForgeGenerator.VOLUME_GAIN_PLATEAU_KM} km — di titik ini Base Building nggak banyak lagi yang bisa dinaikkan, jadi mode Maintenance lebih pas buat kondisimu. Pilih "Maintenance" di atas untuk lanjut.`);
+      return null;
+    }
 
     const longestRecentRunKm = Number(longestRecentRunKmInput.value);
     if (longestRecentRunKm < 0 || Number.isNaN(longestRecentRunKm)) {

@@ -2012,5 +2012,9 @@ const PaceForgeGenerator = (() => {
     buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure,
     buildFartlekStructure,
     MAX_REPETITION_SESSION_KM,
+    // Exported so js/app.js's form validation can block Base Building
+    // submission past this same threshold (see gatherSettingsFromForm)
+    // instead of hardcoding a second, potentially-drifting 60.
+    VOLUME_GAIN_PLATEAU_KM,
   };
 })();
