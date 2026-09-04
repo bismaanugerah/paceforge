@@ -1336,9 +1336,29 @@ const PaceForgeGenerator = (() => {
     // volume plan's raw shares are already small on their own, this only
     // ever needs to grow) and capped at 2.5x so an extreme input doesn't
     // blow either ceiling out to an implausible number.
-    const referenceWeeklyKm = profile.longRunMax / weeklySplitForDays(5).longRunShare;
-    const supportKmScaleFactor = clamp(theoreticalPeakWeeklyKm / referenceWeeklyKm, 1, 2.5);
-    maxSupportKm = profile.maxSupportKm * supportKmScaleFactor;
+    //
+    // Two SEPARATE reference volumes/factors, not one shared — an earlier
+    // version of this fix used a single factor (both referenced against
+    // the fixed 5-day Higdon plans' own implied peak volume) and still
+    // reproduced a near-identical flat-growth bug for low-day plans
+    // specifically: confirmed live, 40km/week at 3 days/week peaked at
+    // just 39km (vs 54km at 5 days/week, same currentWeeklyKm). Cause:
+    // longRunShare is 50% at 3 days/week vs 35% at 5, so the RAW long-run
+    // target (theoreticalPeakWeeklyKm * longRunShare) grows faster than a
+    // 5-day-referenced factor scales the ceiling to match — the ceiling
+    // clamped it back down regardless, and since peakWeeklyKm is built
+    // FROM peakLongRunKm, the whole week stayed capped near
+    // currentWeeklyKm. longRunScaleFactor below is referenced against
+    // THIS plan's own actual longRunShare instead, so a low-day plan's
+    // bigger long-run demand gets matched by proportionally more scaling
+    // headroom, not the same headroom a 5-day plan would get.
+    // maxSupportKm's own factor stays 5-day-referenced (reconstructing
+    // what Higdon's own 5-day/week plans peaked at, per RACE_PROFILES'
+    // sourcing comment) since it isn't tied to longRunShare the same
+    // direct multiplicative way a day-count-driven long-run ceiling is.
+    const maxSupportReferenceWeeklyKm = profile.longRunMax / weeklySplitForDays(5).longRunShare;
+    const maxSupportScaleFactor = clamp(theoreticalPeakWeeklyKm / maxSupportReferenceWeeklyKm, 1, 2.5);
+    maxSupportKm = profile.maxSupportKm * maxSupportScaleFactor;
     // Long-run range scaling is non-race-only, unlike maxSupportKm just
     // above — a real race's long run is bounded by the RACE itself, not
     // just "how much volume can fit in one session": scaling it the same
@@ -1352,8 +1372,10 @@ const PaceForgeGenerator = (() => {
     // stays at its Higdon-sourced value regardless of how much extra
     // volume the runner already carries; maxSupportKm scaling still lets
     // that extra volume go into MORE/longer non-long-run sessions instead.
-    const scaledLongRunMin = isNonRace ? profile.longRunMin * supportKmScaleFactor : profile.longRunMin;
-    const scaledLongRunMax = isNonRace ? profile.longRunMax * supportKmScaleFactor : profile.longRunMax;
+    const longRunReferenceWeeklyKm = profile.longRunMax / longRunShare;
+    const longRunScaleFactor = clamp(theoreticalPeakWeeklyKm / longRunReferenceWeeklyKm, 1, 2.5);
+    const scaledLongRunMin = isNonRace ? profile.longRunMin * longRunScaleFactor : profile.longRunMin;
+    const scaledLongRunMax = isNonRace ? profile.longRunMax * longRunScaleFactor : profile.longRunMax;
 
     // Aim for the race's recommended long-run range (now scaled — see
     // above) — longRunShare already reflects a realistic per-days-per-week
