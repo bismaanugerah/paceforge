@@ -1525,32 +1525,28 @@ const PaceForgeGenerator = (() => {
         longRunTargetKm = isCutback ? linearLongRunKm * 0.8 : linearLongRunKm;
         phase = isCutback ? 'Cutback' : buildPhaseForWeek(w, buildWeeks);
       } else if (isMaintenance) {
-        // weekKm/longRunTargetKm below are NOT what actually sizes this
-        // week's sessions — non-race modes' evaluation week is always also
-        // isRaceWeek (taperWeeks is forced to at most 1, so the lone
-        // "taper" week and the final week are the same week), which uses
-        // buildRaceWeekTemplate's own fixed shakeout+Time-Trial formula
-        // below (shakeoutKm from currentWeeklyKm*0.08, Time Trial fixed at
-        // 5km) instead of weekKm*weeklySplitForDays like every other week —
-        // see the day-assignment loop's `if (isRaceWeek)` branch, which
-        // never reads weightByDow (only populated in its `else`). Kept
-        // assigned anyway since totalKm's actual source (days.reduce
-        // below) doesn't need it, but the week object still does for
-        // consistency/potential future use (e.g. a multi-week non-race
-        // transition, which doesn't exist yet). Deloads off Maintenance's
-        // own flat baseline (currentWeeklyKm/longRunStartKm), not
-        // peakWeeklyKm/peakLongRunKm — those are leftover progressive-
-        // growth figures Maintenance never schedules toward.
+        // weekKm feeds this week's "other" easy days (every preferred day
+        // besides the pinned Time Trial — see the day-assignment loop's
+        // `if (isRaceWeek) { if (isNonRace) {...} }` branch, which sizes
+        // them off weekKm × baseSlotWeights) — deliberately NOT the
+        // Time Trial's own distance (fixed at 5km there) or a real long
+        // run (longRunKmThisWeek is forced to 0 for isRaceWeek, so
+        // longRunTargetKm below only matters as an intermediate value, not
+        // a scheduled session). Deloads off Maintenance's own flat baseline
+        // (currentWeeklyKm/longRunStartKm), not peakWeeklyKm/peakLongRunKm
+        // — those are leftover progressive-growth figures Maintenance
+        // never schedules toward.
         weekKm = currentWeeklyKm * 0.7;
         longRunTargetKm = longRunStartKm * 0.7;
         phase = 'Evaluasi';
         paceProgress = 1;
       } else {
         const taperIdx = w - buildWeeks;
-        // See isMaintenance's own comment above re weekKm/longRunTargetKm
-        // being inert for isNonRace here too (same isRaceWeek mechanism) —
-        // this branch also covers Base Building's evaluation week, not
-        // just Race mode's real multi-week taper.
+        // isNonRace here covers Base Building's evaluation week too, not
+        // just Race mode's real multi-week taper — see isMaintenance's own
+        // comment just above for what weekKm actually drives in that case
+        // (this branch's own weekKm plays the identical role for Base
+        // Building/Race).
         const factor = isNonRace ? 0.7 : (taperFactors[taperIdx] ?? 0.5);
         weekKm = peakWeeklyKm * factor;
         // Taper reduces the long run by the same factor directly, rather
@@ -1712,16 +1708,44 @@ const PaceForgeGenerator = (() => {
         // actually entered, even if it's not one of their usual training
         // days — e.g. a runner training Tue/Thu/Sat who races on Sunday.
         typeByDow[raceDow] = 'race';
-        // Remaining shakeout slots: every OTHER preferred day that falls
-        // chronologically BEFORE race day (a shakeout scheduled after the
-        // race wouldn't make sense) — not capped to daysPerWeek-1 like
-        // buildRaceWeekTemplate's own slot count assumes, since that count
-        // only holds when raceDow itself was already one of the preferred
-        // days; when it's an extra day instead, all the runner's normal
-        // training days before it still deserve a shakeout.
-        const shakeoutDows = slotDays.filter(dow => dow !== raceDow && chronoRank(dow) < chronoRank(raceDow));
-        shakeoutDows.forEach(dow => { typeByDow[dow] = 'shakeout'; });
-        raceWeekDaysToProcess = [...shakeoutDows, raceDow];
+        if (isNonRace) {
+          // Unlike a real race, the block's end date isn't an event that
+          // empties the rest of the week's training — so, unlike race
+          // mode just below, EVERY other preferred day gets a real easy
+          // run (not just the ones chronologically before the Time Trial,
+          // and not the tiny shakeout formula) — confirmed live, the old
+          // shared shakeout-only logic produced a jarring near-total drop
+          // (e.g. 38km peak week -> 9km) for the final week, since most
+          // preferred days either got a token ~2-3km shakeout or (if they
+          // fell chronologically after the pinned day) nothing at all.
+          // Sized off weekKm — this week's own already-computed deload
+          // target (peakWeeklyKm/currentWeeklyKm × 0.7, see the
+          // isTaperWeek branches above) — using the SAME non-long-run slot
+          // weights (baseSlotWeights) a normal week distributes across its
+          // easy/quality days, just re-normalized across however many
+          // "other" days this week actually has (no long run or quality
+          // slot this week, so nothing else claims a share).
+          const otherDows = slotDays
+            .filter(dow => dow !== raceDow)
+            .sort((a, b) => chronoRank(a) - chronoRank(b));
+          const weightSum = baseSlotWeights.reduce((s, w) => s + w, 0) || 1;
+          otherDows.forEach((dow, i) => {
+            typeByDow[dow] = 'easy';
+            weightByDow[dow] = baseSlotWeights[i % baseSlotWeights.length] / weightSum;
+          });
+          raceWeekDaysToProcess = [...otherDows, raceDow];
+        } else {
+          // Remaining shakeout slots: every OTHER preferred day that falls
+          // chronologically BEFORE race day (a shakeout scheduled after the
+          // race wouldn't make sense) — not capped to daysPerWeek-1 like
+          // buildRaceWeekTemplate's own slot count assumes, since that count
+          // only holds when raceDow itself was already one of the preferred
+          // days; when it's an extra day instead, all the runner's normal
+          // training days before it still deserve a shakeout.
+          const shakeoutDows = slotDays.filter(dow => dow !== raceDow && chronoRank(dow) < chronoRank(raceDow));
+          shakeoutDows.forEach(dow => { typeByDow[dow] = 'shakeout'; });
+          raceWeekDaysToProcess = [...shakeoutDows, raceDow];
+        }
       } else {
         const longRunDow = slotDays.includes(longRunDay) ? longRunDay : slotDays[slotDays.length - 1];
         const restTemplate = template.filter(t => t !== 'longRun');
