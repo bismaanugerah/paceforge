@@ -991,23 +991,38 @@ const PaceForgeGenerator = (() => {
     const peakStartWeek = peakPhaseStartWeek(buildWeeks);
     const peakWeeksTotal = Math.max(1, buildWeeks - peakStartWeek);
 
-    // Same safe compounding weekly rate used for the race-specific block's
-    // own volume ramp below (peakWeeklyKm) — reused here for the pre-block
-    // "prep phase" suggestion (extraWeeks below) so both give a
-    // consistent, evidence-based sense of how fast weekly mileage can
-    // safely grow, rather than two different numbers.
-    //
-    // Scaled by the runner's OWN currentWeeklyKm rather than one flat rate
-    // for everyone: a lower-volume runner has more adaptive headroom and
-    // tolerates faster relative growth, while a higher-volume runner is
-    // closer to their individual ceiling and needs a more conservative
-    // pace — total weekly-volume growth itself isn't strongly injury-
-    // predictive on its own (see MAX_LONG_RUN_JUMP_RATIO's own BJSM
-    // citation, which is why that ratio is tuned separately and doesn't
-    // move with this), but it should still track the same "steep zone
-    // under ~35-45km/week, tapering off by ~60km/week" shape
+    // Deliberately mode-specific, NOT one shared constant — an earlier
+    // version of this file used the same WEEKLY_GROWTH_RATE for Race and
+    // non-race modes alike (the original design's own reasoning: "so both
+    // give a consistent, evidence-based sense of how fast weekly mileage
+    // can safely grow"), and non-race-specific tuning (see
+    // nonRaceWeeklyGrowthRate below) ended up silently regressing Race
+    // mode: a 16-week full marathon block landed at only ~29km peak long
+    // run (its floor) instead of climbing toward 32km, because the shared
+    // curve's own growth target didn't scale with buildWeeks the way
+    // Race mode's flat rate always did (see growthMultiplier below, whose
+    // whole point is that a longer buildWeeks compounds a flat per-week
+    // rate further — a flat multiplier cap regardless of plan length is
+    // literally the older bug that design exists to prevent). Each mode
+    // now gets its own rate, computed independently, so tuning one can
+    // never again silently move the other.
+    const RACE_WEEKLY_GROWTH_RATE = conservativeMode ? 1.05 : 1.08;
+
+    // Non-race modes' own rate — scaled by the runner's OWN currentWeeklyKm
+    // rather than one flat rate for everyone: a lower-volume runner has
+    // more adaptive headroom and tolerates faster relative growth, while a
+    // higher-volume runner is closer to their individual ceiling and needs
+    // a more conservative pace — total weekly-volume growth itself isn't
+    // strongly injury-predictive on its own (see MAX_LONG_RUN_JUMP_RATIO's
+    // own BJSM citation, which is why that ratio is tuned separately and
+    // doesn't move with this), but it should still track the same "steep
+    // zone under ~35-45km/week, tapering off by ~60km/week" shape
     // VOLUME_GAIN_PLATEAU_KM is sourced from, rather than treating a
-    // 20km/week beginner and a 55km/week regular runner identically.
+    // 20km/week beginner and a 55km/week regular runner identically. Only
+    // Base Building actually schedules progressive growth (Maintenance
+    // holds volume flat regardless — see isMaintenance below), but this is
+    // computed for isNonRace generally so it's available wherever needed
+    // (e.g. a future non-race prep-phase suggestion).
     //
     // A first attempt at this used 3 discrete tiers (flat rate below 40,
     // stepped down at 40, again at 50) and hit a real bug: the step right
@@ -1026,24 +1041,43 @@ const PaceForgeGenerator = (() => {
     // two confirmed reference points — (20km/week → ~40km/week peak, the
     // original "roughly doubling" example) and (45km/week → ~57-58km/week
     // peak, user-confirmed "~55-60km, +25%" specifically for that volume)
-    // — giving q ≈ 0.45, C ≈ 10.39. The existing growthMultiplier clamp
-    // below (1.15-3.2x) still applies on top as an outer safety bound (and
-    // is itself still monotonic in x wherever it binds, so it can't
-    // reintroduce the same bug); WEEKLY_GROWTH_RATE here is derived so
-    // that raising it to buildWeeks reconstructs this target multiplier
-    // exactly, keeping the two in agreement the same way the old flat rate
-    // and clamp always were.
+    // — giving q ≈ 0.45, C ≈ 10.39, calibrated against a REFERENCE block
+    // of GROWTH_CURVE_REFERENCE_WEEKS build weeks specifically (the two
+    // reference points above both came from ~10-build-week test plans —
+    // Base Building's own block length is always close to this in
+    // practice, since 'medium'/'5k'/'10k'/'half' style templates cap
+    // recWeeks at 8-12, but the fixed reference below still protects a
+    // longer non-race block the same way it protects Race mode's marathon
+    // case, rather than assuming that coincidence holds forever).
+    //
+    // WEEKLY_GROWTH_RATE is deliberately derived by dividing by that FIXED
+    // reference week count, NOT the plan's own actual buildWeeks — dividing
+    // by actual buildWeeks would silently erase the "a longer block has
+    // more weeks to compound, so it can reach a realistically higher peak"
+    // property growthMultiplier's own clamp below depends on (raising a
+    // rate back to the exact week count it was derived from always
+    // reconstructs the same target, no matter how long buildWeeks actually
+    // is). Dividing by the fixed reference instead keeps this rate a pure
+    // function of currentWeeklyKm (x), and lets growthMultiplier do what it
+    // always did: a longer buildWeeks compounds this same per-week rate
+    // further. Monotonicity in x still holds for any buildWeeks up to ~18
+    // — raising the monotonic-in-x quantity C·x^(q-1) to any single fixed
+    // power preserves monotonicity, it just changes how steep the curve
+    // is, so a longer block reaching further doesn't reopen the earlier
+    // discrete-tier non-monotonicity bug.
     //
     // conservativeMode scales the target multiplier's excess above 1.0 by
     // the same ratio (0.625) its own flat 5%-vs-8% already implied, rather
     // than a separate curve.
     const GROWTH_CURVE_EXPONENT = 0.45;
     const GROWTH_CURVE_COEFFICIENT = 10.39;
+    const GROWTH_CURVE_REFERENCE_WEEKS = 10;
     const targetGrowthMultiplier = GROWTH_CURVE_COEFFICIENT * Math.pow(Math.max(currentWeeklyKm, 1), GROWTH_CURVE_EXPONENT - 1);
     const adjustedGrowthMultiplier = conservativeMode
       ? 1 + (targetGrowthMultiplier - 1) * 0.625
       : targetGrowthMultiplier;
-    const WEEKLY_GROWTH_RATE = Math.pow(Math.max(adjustedGrowthMultiplier, 1), 1 / buildWeeks);
+    const nonRaceWeeklyGrowthRate = Math.pow(Math.max(adjustedGrowthMultiplier, 1), 1 / GROWTH_CURVE_REFERENCE_WEEKS);
+    const WEEKLY_GROWTH_RATE = isNonRace ? nonRaceWeeklyGrowthRate : RACE_WEEKLY_GROWTH_RATE;
 
     const warnings = [];
     if (conservativeMode) {
@@ -1356,8 +1390,15 @@ const PaceForgeGenerator = (() => {
     // what Higdon's own 5-day/week plans peaked at, per RACE_PROFILES'
     // sourcing comment) since it isn't tied to longRunShare the same
     // direct multiplicative way a day-count-driven long-run ceiling is.
+    //
+    // Non-race-only, same as longRunScaleFactor just below — kept separate
+    // from Race mode for the same "don't let non-race-specific tuning
+    // silently move Race mode" reason WEEKLY_GROWTH_RATE was split above:
+    // Race mode's maxSupportKm stays exactly at its Higdon-sourced value
+    // regardless of the runner's volume, matching how its long-run range
+    // already does.
     const maxSupportReferenceWeeklyKm = profile.longRunMax / weeklySplitForDays(5).longRunShare;
-    const maxSupportScaleFactor = clamp(theoreticalPeakWeeklyKm / maxSupportReferenceWeeklyKm, 1, 2.5);
+    const maxSupportScaleFactor = isNonRace ? clamp(theoreticalPeakWeeklyKm / maxSupportReferenceWeeklyKm, 1, 2.5) : 1;
     maxSupportKm = profile.maxSupportKm * maxSupportScaleFactor;
     // Long-run range scaling is non-race-only, unlike maxSupportKm just
     // above — a real race's long run is bounded by the RACE itself, not
