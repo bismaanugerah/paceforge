@@ -2264,9 +2264,11 @@
       <div class="summary-item"><div class="label">Durasi Plan</div><div class="value">${meta.planWeeks} minggu</div></div>
       <div class="summary-item"><div class="label">Peak Weekly Volume</div><div class="value">${meta.peakWeeklyKm} km</div></div>
       <div class="summary-item"><div class="label">Peak Long Run</div><div class="value">${meta.peakLongRunKm} km</div></div>
+      ${!isNonRacePlan ? `
       <div class="summary-item"><div class="label">Goal Pace</div><div class="value">${formatPace(meta.goalPaceSec)}</div></div>
       ${meta.goalPaceSource === 'recentRace' ? `
       <div class="summary-item"><div class="label">Estimasi dari Race Terakhir</div><div class="value" style="font-size:1rem">${formatDuration(meta.recentRaceTimeSec)} / ${meta.recentRaceDistanceKm} km &rarr; ${formatDuration(meta.predictedRaceTimeSec)} ${meta.raceLabel}</div></div>
+      ` : ''}
       ` : ''}
     `;
 
@@ -2417,11 +2419,15 @@
       y += 20;
 
       // --- Summary stats grid --------------------------------------------
+      // Goal Pace is meaningless for non-race plans (see the on-screen
+      // summary card's own isNonRacePlan check) — VDOT/pace barely moves
+      // in these modes by design, so there's no real "goal" being worked
+      // toward the way a race's goal pace is.
       const summaryItems = [
         ['Durasi Plan', `${meta.planWeeks} minggu`],
         ['Peak Weekly Volume', `${meta.peakWeeklyKm} km`],
         ['Peak Long Run', `${meta.peakLongRunKm} km`],
-        ['Goal Pace', formatPace(meta.goalPaceSec)],
+        ...(meta.mode && meta.mode !== 'race' ? [] : [['Goal Pace', formatPace(meta.goalPaceSec)]]),
       ];
       const summaryColW = usableWidth / summaryItems.length;
       summaryItems.forEach(([label, value], i) => {
