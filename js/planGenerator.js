@@ -1739,15 +1739,19 @@ const PaceForgeGenerator = (() => {
       // would instead assign it `undefined` (the exact bug this whole
       // block was rewritten to fix in the first place — see raceDow below).
       let raceWeekDaysToProcess = [];
-      const raceDow = isRaceWeek ? race.getDay() : null;
+      // Race mode pins to the real calendar date's own day-of-week (the
+      // user's actual raceDate — not necessarily one of their regular
+      // training days, e.g. training Tue/Thu/Sat but racing Sunday: race
+      // day happens regardless). Non-race modes instead pin the Time Trial
+      // to the LAST of the runner's own selected training days (same
+      // fallback slotDays[slotDays.length-1] already uses for longRunDay)
+      // — there's no real external date forcing it onto a specific day the
+      // way an actual race does, so pinning it to a day outside the
+      // runner's own pattern only ever adds an extra, unwanted session:
+      // confirmed live, a 3-day/week plan whose block-end date fell
+      // outside those 3 days scheduled 4 sessions that week instead of 3.
+      const raceDow = isRaceWeek ? (isNonRace ? slotDays[slotDays.length - 1] : race.getDay()) : null;
       if (isRaceWeek) {
-        // A real calendar date — the user's own raceDate input — not a
-        // day-of-week pattern. Pinning it directly (rather than mapping
-        // buildRaceWeekTemplate's slots onto slotDays by index, which put
-        // "race" on whichever preferred day happened to fall last that
-        // week) is what makes "RACE DAY!" land on the date the runner
-        // actually entered, even if it's not one of their usual training
-        // days — e.g. a runner training Tue/Thu/Sat who races on Sunday.
         typeByDow[raceDow] = 'race';
         if (isNonRace) {
           // Unlike a real race, the block's end date isn't an event that
