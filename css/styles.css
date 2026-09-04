@@ -426,6 +426,30 @@ input[type="radio"]:focus-visible {
   color: var(--color-error);
   border: 1px solid var(--color-error-border);
 }
+/* Marks the one input a form error is actually about (see showError in
+   js/app.js, which also scrolls to and focuses it) — the message itself
+   is pinned below the whole form, too far from the box in question to
+   point at it on its own. Also applied to the day-chip group, which is a
+   container rather than a single input: the outline is the point there,
+   the focus() is a no-op. */
+/* A box-shadow ring rather than an outline, so the same rule works on a
+   bordered <input> and on an un-bordered container div (the day-chip
+   group) alike. The :focus variant has to be spelled out because showError
+   focuses the field it marks, and `input:focus` above — which kills the
+   outline and paints its own primary-colored ring — outranks a bare class
+   on specificity, so without it every error ring would render as the
+   ordinary blue focus ring. */
+.has-error {
+  border-color: var(--color-error);
+  box-shadow: 0 0 0 2px var(--color-error);
+  border-radius: 8px;
+}
+input.has-error:focus,
+select.has-error:focus,
+textarea.has-error:focus {
+  border-color: var(--color-error);
+  box-shadow: 0 0 0 3px var(--color-error);
+}
 .form-warning {
   background: var(--color-warning-bg);
   color: var(--color-warning);
@@ -497,6 +521,17 @@ input[type="radio"]:focus-visible {
   text-decoration: underline;
 }
 .btn-link:hover { filter: brightness(1.1); }
+/* The way back out of "Buat Plan Baru" when it was a mis-click (see
+   backToPlanBtn in js/app.js). Muted, not accent-teal: it's an escape
+   hatch above the form's own heading, not something to draw the eye away
+   from the form itself. */
+.back-to-plan {
+  display: block;
+  margin-bottom: 14px;
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+.back-to-plan:hover { color: var(--color-text); }
 .ai-intro, .ai-tips {
   background: var(--color-accent-light);
   border: 1px solid var(--color-accent);
@@ -585,6 +620,142 @@ input[type="radio"]:focus-visible {
 .missed-week-banner p { margin: 0; line-height: 1.5; }
 .missed-week-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 
+/* ---------- In-page replacements for alert()/confirm() ---------- */
+/* Result-level messages (PDF export failures) — sits right under the
+   buttons that raise them, so unlike .week-notice below it never needs to
+   be scrolled to. Dismissed by hand rather than on a timer: an error the
+   runner glanced away from shouldn't quietly disappear. */
+.result-notice {
+  position: relative;
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border: 1px solid var(--color-error-border);
+  border-radius: 8px;
+  padding: 12px 40px 12px 14px;
+  margin: 14px 0;
+  font-size: 0.9rem;
+}
+.result-notice p { margin: 0; line-height: 1.5; }
+.result-notice-dismiss {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 4px;
+}
+.result-notice-dismiss:hover { opacity: 1; }
+
+/* Everything the day-swap flow says, inside the week block it's about
+   (see showWeekNotice in js/app.js) — a page-level banner would be
+   several screens from the ⇄ button by week 5. Neutral primary tint for
+   the "now pick the second day" prompt and the long-run question; the
+   error variant for a swap that was refused outright. */
+.week-notice {
+  margin: 0 16px 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--color-primary-light);
+  border: 1px solid var(--color-primary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.week-notice.is-error {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border-color: var(--color-error-border);
+}
+.week-notice p { margin: 0; }
+.week-notice-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
+/* ---------- Today's session (hero at the top of the result) ---------- */
+/* Sits on --color-bg like the summary tiles below it, but carries a solid
+   left rule in the primary color — the one element on this page that is
+   about a single day rather than the whole block, and the thing a runner
+   opening the app mid-training is actually looking for. */
+.today-card {
+  margin: 20px 0 0;
+  padding: 16px 18px;
+  background: var(--color-bg);
+  border-radius: 12px;
+  border-left: 4px solid var(--color-primary);
+}
+.today-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 14px;
+}
+.today-card-eyebrow {
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-primary-dark);
+}
+.today-card-week { font-size: 0.82rem; color: var(--color-text-muted); }
+.today-card-title {
+  margin: 4px 0 0;
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.today-card-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 10px;
+}
+.today-card-metric { font-size: 0.92rem; color: var(--color-text-muted); }
+.today-card-metric strong { color: var(--color-text); font-variant-numeric: tabular-nums; }
+/* Same accent as the ✅ badge and per-session analysis in the table below
+   — "the app matched this to a real Strava activity". */
+.today-card-done { color: var(--color-accent); }
+.today-card .workout-structure { margin-top: 12px; }
+.today-card-next {
+  margin: 12px 0 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+.today-card-next strong { color: var(--color-text); font-weight: 600; }
+/* Where the runner is in the block, and how much is left — see
+   renderTodayCard. Lives here rather than as two more summary tiles
+   because it's the same "right now" question the rest of this card
+   answers, and it keeps both on the first screen. */
+.today-card-progress { margin-top: 14px; }
+.today-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+.today-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--color-primary);
+}
+.today-progress-label {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+/* 140px, not a hair more: at 150px the two-column phone layout tips over
+   into a single column (a 375px screen leaves ~302px of usable card
+   width here) and the summary block doubles in height. */
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -598,11 +769,19 @@ input[type="radio"]:focus-visible {
    card's own --color-surface so the tiles still read as a distinct
    group, and lifts slightly on hover the way the rest of this pass's
    interactive surfaces do. */
+/* Column + space-between so the VALUES line up along a common bottom edge
+   across the row even when one tile's label wraps to two lines ("Lulus
+   (Perkiraan)", "Estimasi dari Race Terakhir") and its neighbours' don't —
+   grid already stretches every tile to the row's height, this is what puts
+   that extra height above the number instead of below it. */
 .summary-item {
   background: var(--color-bg);
   border-radius: 12px;
   padding: 14px 16px;
   transition: transform 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 .summary-item:hover { transform: translateY(-2px); }
 .summary-item .label { font-size: 0.76rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 4px; }
@@ -614,6 +793,10 @@ input[type="radio"]:focus-visible {
   font-variant-numeric: tabular-nums;
   color: var(--color-primary-dark);
 }
+/* Tiles whose value is a date or a whole phrase rather than a short number
+   — they need the smaller size to fit, but it belongs here next to the
+   base rule, not as an inline style on the markup that sets it. */
+.summary-item .value.is-small { font-size: 1rem; line-height: 1.35; }
 
 /* Reuses .pace-zone-header/.pace-zone-title/.pace-zone-source below for
    its own header row (same "reference card" look as .pace-legend right
@@ -711,6 +894,13 @@ input[type="radio"]:focus-visible {
   background: var(--color-bg);
   border-radius: 10px;
 }
+/* renderPaceZones (js/app.js) empties this container rather than removing
+   it whenever the plan has no VDOT to build a zone table from — most
+   visibly the whole First-timer mode, whose run/walk sessions have no
+   prescribed pace at all. Without this, the padding + background above
+   still paint, leaving a stray empty slab between the volume chart and
+   week 1. */
+.pace-legend:empty { display: none; }
 .pace-zone-header {
   display: flex;
   flex-wrap: wrap;
@@ -844,6 +1034,14 @@ summary.week-header:hover { background: var(--color-surface); }
 }
 .day-table tr:last-child td { border-bottom: none; }
 .day-table tr.is-rest { color: var(--color-text-muted); }
+/* Today's row — the same session the hero card at the top of the result
+   is about (see renderTodayCard in js/app.js), so scrolling down into the
+   schedule lands on something recognizable rather than a wall of
+   identical rows. Declared BEFORE is-race/is-swap-selected/is-completed
+   on purpose: on race day, mid-swap, or once a session is logged, those
+   states are the more useful thing for the row to be saying, and equal
+   specificity means the later rule wins. */
+.day-table tr.is-today { background: var(--color-primary-light); box-shadow: inset 3px 0 0 var(--color-primary); }
 .day-table tr.is-race { background: var(--color-primary-light); font-weight: 700; }
 /* Highlights a row picked as a day-swap's first side while its second
    click is still pending — see handleSwapDayClick in js/app.js. */
@@ -858,7 +1056,7 @@ summary.week-header:hover { background: var(--color-surface); }
    hovering a race/swap-selected row doesn't visually flatten it back to
    neutral) — a plain white/dark row otherwise gives no hint that it's
    draggable or has a swap button tucked in its last cell. */
-.day-table tr[draggable="true"]:not(.is-race):not(.is-swap-selected):hover { background: var(--color-bg); }
+.day-table tr[draggable="true"]:not(.is-race):not(.is-swap-selected):not(.is-today):hover { background: var(--color-bg); }
 .swap-day-btn {
   float: right;
   border: 1px solid var(--color-border);
@@ -998,10 +1196,69 @@ summary.week-header:hover { background: var(--color-surface); }
   .card { padding: 20px 16px 24px; }
   .brand-name { font-size: 1.6rem; }
 
-  /* Tighten the day table so Hari/Tanggal/Sesi/Jarak/Pace all fit on a
-     narrow phone screen without needing to scroll sideways. */
-  .day-table th { padding: 6px 6px; font-size: 0.66rem; }
-  .day-table td { padding: 8px 6px; font-size: 0.8rem; }
+  /* Five columns never actually fit here. .table-scroll kept the page from
+     breaking, but Pace Target — and the ⇄ swap button that lives inside
+     that cell, i.e. the plan's main interaction — sat past the visible
+     edge, invisible unless you knew to swipe sideways. So below this width
+     each day becomes a stacked block instead: day + date, then the session
+     badge, then distance + pace as labelled lines, with the swap button
+     lifted to the block's top-right corner where a thumb can reach it.
+     Same <table> markup either way — every tr/td selector in js/app.js
+     (completed-session matching, swap, drag-and-drop) still finds exactly
+     what it did before; only the layout changes. */
+  .day-table thead { display: none; }
+  .day-table, .day-table tbody, .day-table tr, .day-table td { display: block; }
+  /* tr[data-date] is precisely the day rows — the structure-bar and
+     completed-analysis rows below them carry no data-date and stay plain
+     full-width blocks (their single colspan=5 cell needs no grid). */
+  .day-table tr[data-date] {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      "hari tanggal"
+      "sesi sesi"
+      "km   pace";
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 5px;
+    padding: 10px 6px;
+    /* The separator moves from the cells to the block itself — the cells
+       are no longer a row, so a border on each would draw three lines. */
+    border-bottom: 1px solid var(--color-border);
+    /* Keeps the ⇄ button clear of the text; see its own rule below. */
+    padding-right: 44px;
+  }
+  .day-table tr[data-date] > td { padding: 0; border-bottom: none; font-size: 0.85rem; }
+  .day-table tr[data-date] > td:nth-child(1) { grid-area: hari; font-weight: 600; }
+  .day-table tr[data-date] > td:nth-child(2) { grid-area: tanggal; color: var(--color-text-muted); }
+  .day-table tr[data-date] > td:nth-child(3) { grid-area: sesi; }
+  .day-table tr[data-date] > td:nth-child(4) { grid-area: km; }
+  .day-table tr[data-date] > td:nth-child(5) { grid-area: pace; }
+  /* The <thead> label, reattached per cell now that the header row is
+     hidden — without it the last line reads as two bare values. */
+  .day-table tr[data-date] > td[data-label]::before {
+    content: attr(data-label) " ";
+    color: var(--color-text-muted);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  /* A rest day has no distance and no pace target — "— —" under two
+     labels is noise, so both lines are dropped. The swap button is NOT:
+     rest days are swappable like any other, and it sits in the pace cell,
+     which is why only that cell's text (not the cell) is hidden. */
+  .day-table tr[data-date].is-rest > td:nth-child(4) { display: none; }
+  .day-table tr[data-date].is-rest > td:nth-child(5)::before,
+  .day-table tr[data-date].is-rest .pace-text { display: none; }
+  .day-table tr[data-date] .swap-day-btn {
+    float: none;
+    position: absolute;
+    top: 8px;
+    right: 4px;
+    width: 34px;
+    height: 34px;
+  }
   .type-badge { padding: 3px 7px; font-size: 0.72rem; }
   .structure-row td { padding: 2px 6px 12px; }
   .structure-caption { font-size: 0.72rem; }

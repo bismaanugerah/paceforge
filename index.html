@@ -58,6 +58,12 @@
 
   <!-- ===================== FORM SECTION ===================== -->
   <section id="formSection" class="card form-card" hidden>
+    <!-- "Buat Plan Baru" swaps this form in over an existing plan without
+         destroying it — nothing is actually replaced until this form is
+         submitted. Shown only in that case (see newPlanBtn in js/app.js),
+         so an accidental click has a way back that isn't reloading the
+         page. -->
+    <button type="button" id="backToPlanBtn" class="btn-link back-to-plan no-print" hidden>← Kembali ke plan yang sekarang</button>
     <h1>Buat Training Plan Lari</h1>
     <p class="section-desc">Isi setting di bawah ini, PaceForge akan menyusun jadwal latihan mingguan lengkap dengan jarak dan pace untuk tiap sesi.</p>
 
@@ -85,7 +91,7 @@
 
       <!-- Race details -->
       <fieldset>
-        <legend id="raceFieldsetLegend">1. Detail Race</legend>
+        <legend id="raceFieldsetLegend">Detail Race</legend>
 
         <!-- Hidden entirely for non-race modes (see updateGoalTypeUI in
              app.js) — "custom km" only makes sense as a real race
@@ -147,7 +153,7 @@
            either — the whole fieldset is irrelevant, not just individual
            fields. -->
       <fieldset id="fitnessFieldset">
-        <legend>2. Kondisi Saat Ini</legend>
+        <legend>Kondisi Saat Ini</legend>
         <div class="field-row">
           <div class="field">
             <label for="currentWeeklyKm">Rata-rata jarak lari per minggu saat ini (km)</label>
@@ -174,7 +180,7 @@
 
       <!-- Availability -->
       <fieldset>
-        <legend>3. Ketersediaan Waktu Latihan</legend>
+        <legend>Ketersediaan Waktu Latihan</legend>
         <div class="field" id="daysPerWeekField">
           <label for="daysPerWeek">Jumlah hari latihan per minggu</label>
           <input type="range" id="daysPerWeek" name="daysPerWeek" min="3" max="6" step="1" value="4">
@@ -226,7 +232,7 @@
            no goal pace/VDOT concept in a run/walk program for a recent
            race time to feed into at all. -->
       <fieldset id="recentRaceFieldset">
-        <legend>4. Waktu Race Terakhir</legend>
+        <legend>Waktu Race Terakhir</legend>
         <p class="field-hint">Dipakai untuk memperkirakan pace &amp; waktu finish race targetmu (rumus Riegel), kalau kamu belum isi target waktu finish spesifik di bawah. Pilih race/lari terdekat jaraknya ke race targetmu — bukan harus 5K — supaya perkiraannya lebih akurat.</p>
         <!-- className is set in JS (js/app.js's setRecentRaceSourceNote) —
              "strava-fill-badge" (same badge as section 2's stravaFillBadge)
@@ -268,11 +274,13 @@
       <!-- Goal pace -->
       <!-- Temporarily hidden: the pace-target ramp needs a current-fitness
            baseline (recent race) alongside a target time to make sense, and
-           that pairing isn't in place yet — re-enable once it is (drop
-           `hidden` here and renumber the legend + "6. Catatan Tambahan"
-           below back to 5/6). -->
+           that pairing isn't in place yet — re-enable once it is by just
+           dropping `hidden` here; the "N." prefix on every legend is
+           assigned at runtime from whichever fieldsets are actually
+           visible (see renumberFieldsets in js/app.js), so nothing below
+           needs renumbering by hand. -->
       <fieldset hidden>
-        <legend>5. Target Waktu Finish (opsional)</legend>
+        <legend>Target Waktu Finish (opsional)</legend>
         <div class="field checkbox-field">
           <label class="checkbox-option">
             <input type="checkbox" id="hasTargetTime" name="hasTargetTime">
@@ -323,7 +331,7 @@
 
       <!-- Extra context for AI coaching notes -->
       <fieldset>
-        <legend>5. Catatan Tambahan (opsional)</legend>
+        <legend>Catatan Tambahan (opsional)</legend>
         <div class="field">
           <label for="userNotes">Ada hal khusus yang perlu dipertimbangkan?</label>
           <textarea id="userNotes" name="userNotes" rows="3" placeholder="mis. lutut kadang nyeri saat long run, minggu depan jadwal kerja padat, lebih suka lari pagi, dll."></textarea>
@@ -365,8 +373,6 @@
   <!-- ===================== RESULTS SECTION ===================== -->
   <section id="resultSection" class="card result-card" hidden>
 
-    <div id="resultWarning" class="form-warning" hidden></div>
-
     <!-- Auto-shown (see detectMissedWeek/renderMissedWeekBanner in
          js/app.js) when the week that just ended fell well short of its
          planned volume, per the runner's own Strava data. Offers to back
@@ -388,6 +394,18 @@
         <button id="printBtn" class="btn btn-secondary">📄 Simpan sebagai PDF</button>
         <button id="newPlanBtn" class="btn btn-ghost">↺ Buat Plan Baru</button>
       </div>
+    </div>
+
+    <!-- In-page replacement for the browser's own alert() on the actions
+         just above (PDF export failures) — a native modal dialog reads as
+         a browser error rather than part of this app, and on a phone it
+         hijacks the whole screen for something recoverable. Swap-related
+         messages do NOT come here: those get a notice inside the week
+         block they're about (see showWeekNotice in js/app.js), because a
+         banner up here would be off-screen by week 5. -->
+    <div id="resultNotice" class="result-notice no-print" hidden>
+      <p id="resultNoticeText"></p>
+      <button type="button" id="resultNoticeDismissBtn" class="result-notice-dismiss" aria-label="Tutup pesan">✕</button>
     </div>
 
     <!-- Opened by #feelingOffBtn — tells the AI (or, when it's unavailable,
@@ -415,7 +433,24 @@
     </div>
     <div id="aiIntro" class="ai-intro" hidden></div>
 
+    <!-- "What am I running today?" — the one question this page gets
+         opened for on an ordinary morning, answered before any of the
+         whole-block context below it (see renderTodayCard in js/app.js).
+         Without it, today's session is only reachable by scrolling past
+         the summary cards, volume chart and pace table and then finding
+         today's date inside a week's own table. Hidden entirely once the
+         block is over, when there's no "today" left in it to headline. -->
+    <div id="todayCard" class="today-card" hidden></div>
+
     <div id="summaryCards" class="summary-grid"></div>
+
+    <!-- Moved down from above the result heading, where it used to be the
+         first — and on a phone the only — thing on screen: two paragraphs
+         of safety copy pushing the plan itself two screens down, re-read
+         on every single visit. Nothing is hidden, it just no longer
+         outranks today's session and the plan's own numbers; and it now
+         sits directly above the schedule it's actually about. -->
+    <div id="resultWarning" class="form-warning" hidden></div>
 
     <!-- Whole-plan volume progression at a glance (see renderVolumeChart in
          js/app.js) — the accordion below only shows one week's total at a

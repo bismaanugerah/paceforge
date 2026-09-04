@@ -165,6 +165,21 @@
     return TYPE_TO_ZONE[day.type] || null;
   }
 
+  // The session-type badge's text for a day — shared by the day table
+  // (renderDayRow) and the "today" hero card (renderTodayCard) so those
+  // two can never end up naming the same session differently. See
+  // paceTargetLabel just below for why First-timer's evaluation day gets
+  // a gentler "5K" label than the other modes' "Time Trial".
+  function dayTypeLabel(day, isFirstTimerPlan) {
+    const { TYPE_LABELS } = PaceForgeGenerator;
+    if (day.type === 'longRun' && day.isMarathonSpecific) {
+      return `${TYPE_LABELS.longRun} (Pace ${day.structure?.paceLabel || 'Marathon'})`;
+    }
+    if (day.type === 'evaluation' && isFirstTimerPlan) return '5K';
+    const displayKey = restDisplayKey(day);
+    return TYPE_LABELS[displayKey] || displayKey;
+  }
+
   // Pace Target column text — shared by the on-screen day row and the PDF
   // export so the two never drift. day.type === 'race' always gets "Race
   // Pace" (day.paceSecPerKm is real goal race pace there). 'evaluation' is
@@ -357,6 +372,7 @@
 
   const gateSection = document.getElementById('gateSection');
   const formSection = document.getElementById('formSection');
+  const backToPlanBtn = document.getElementById('backToPlanBtn');
   const loadingSection = document.getElementById('loadingSection');
   const loadingTitle = document.getElementById('loadingTitle');
   const resultSection = document.getElementById('resultSection');
@@ -364,7 +380,10 @@
   const summaryCards = document.getElementById('summaryCards');
   const volumeChart = document.getElementById('volumeChart');
   const paceLegend = document.getElementById('paceLegend');
+  const todayCard = document.getElementById('todayCard');
   const planWeeksEl = document.getElementById('planWeeks');
+  const resultNotice = document.getElementById('resultNotice');
+  const resultNoticeText = document.getElementById('resultNoticeText');
   const aiStatus = document.getElementById('aiStatus');
   const aiRetryBtn = document.getElementById('aiRetryBtn');
   const aiIntro = document.getElementById('aiIntro');
@@ -466,24 +485,29 @@
     return goalTypeToggle.querySelector('input[name="goalType"]:checked').value;
   }
 
+  // `legend` here is the section's NAME only — the "1." / "2." prefix is
+  // assigned at runtime by renumberFieldsets from whichever fieldsets are
+  // actually visible for the current mode, so First-timer (which hides
+  // sections 2 and 4 entirely) reads 1-2-3 instead of the 1-3-5 a
+  // hardcoded number would leave behind.
   const GOAL_TYPE_COPY = {
     race: {
-      legend: '1. Detail Race',
+      legend: 'Detail Race',
       dateLabel: 'Tanggal race',
       hint: '',
     },
     baseBuilding: {
-      legend: '1. Detail Base Building',
+      legend: 'Detail Base Building',
       dateLabel: 'Akhir blok training',
       hint: 'Belum punya race? Sesi mingguannya fokus easy run + 1x lari santai di pace marathon per minggu (bukan tempo/interval kayak race prep) — murni buat naikkan mileage & aerobic base. Volume naik bertahap sepanjang blok, lalu berakhir di minggu evaluasi (deload + opsional time-trial), bukan hari race.',
     },
     maintenance: {
-      legend: '1. Detail Maintenance',
+      legend: 'Detail Maintenance',
       dateLabel: 'Akhir blok training',
       hint: 'Cuma mau jaga fitness tanpa target race? Volume mingguan ditahan flat (tidak naik), dan sesi quality (tempo/interval) diselingi Fartlek secara berkala biar tidak monoton.',
     },
     firstTimer: {
-      legend: '1. Detail Program Pemula',
+      legend: 'Detail Program Pemula',
       dateLabel: 'Lulus (perkiraan)',
       hint: 'Belum pernah lari sama sekali? Program 9 minggu, 3 hari/minggu, run/walk interval yang makin panjang tiap minggu, diakhiri Time Trial 5K sungguhan di minggu terakhir. Tidak butuh data lari sebelumnya — mulai dari nol.',
     },
@@ -523,12 +547,34 @@
   }
   startDateInput.addEventListener('input', updateFirstTimerRaceDate);
 
+  // Numbers every VISIBLE fieldset's legend 1..n in document order, so the
+  // section numbers a runner reads always run consecutively no matter which
+  // sections the current mode hides (First-timer drops "Kondisi Saat Ini"
+  // and "Waktu Race Terakhir" entirely; "Target Waktu Finish" is hidden for
+  // everyone right now — see index.html). The unnumbered name is cached on
+  // the legend itself the first time through so re-running this never
+  // stacks a second prefix onto an already-numbered legend.
+  function renumberFieldsets() {
+    let n = 0;
+    form.querySelectorAll('fieldset').forEach(fs => {
+      const legend = fs.querySelector('legend');
+      if (!legend) return;
+      if (!legend.dataset.baseText) legend.dataset.baseText = legend.textContent.trim();
+      if (fs.hidden) return;
+      n += 1;
+      legend.textContent = `${n}. ${legend.dataset.baseText}`;
+    });
+  }
+
   function updateGoalTypeUI() {
     const goalType = getGoalType();
     const isRace = goalType === 'race';
     const isFirstTimer = goalType === 'firstTimer';
     const copy = GOAL_TYPE_COPY[goalType];
-    raceFieldsetLegend.textContent = copy.legend;
+    // Written to dataset (not textContent) because renumberFieldsets below
+    // is what actually renders this legend — it reads baseText and prefixes
+    // the section number onto it.
+    raceFieldsetLegend.dataset.baseText = copy.legend;
     raceDateLabel.textContent = copy.dateLabel;
     goalTypeHint.textContent = copy.hint;
 
@@ -556,6 +602,11 @@
     // value for this mode regardless.
     raceDateInput.disabled = isFirstTimer;
     updateFirstTimerRaceDate();
+
+    // After every fieldset's own hidden flag above is settled, before the
+    // isRace early-return below (which only touches .field divs, not
+    // fieldsets, so it can't change the numbering).
+    renumberFieldsets();
 
     presetDistanceField.hidden = !isRace;
     distanceModeField.hidden = !isRace;
@@ -752,15 +803,45 @@
     return Array.from(dayCheckboxes.querySelectorAll('input:checked')).map(cb => Number(cb.value));
   }
 
-  function showError(msg) {
+  // `field` is the input the message is actually about. Marking and
+  // focusing it is what makes a message pinned to the bottom of a
+  // five-section form actionable — the text alone left the runner to work
+  // out for themselves which of ~15 boxes it meant. Scrolls to the FIELD,
+  // not the message: the message sits below the whole form, so scrolling
+  // there would push the thing that needs fixing off screen.
+  let erroredField = null;
+  function showError(msg, field) {
+    clearFieldError();
     formError.textContent = msg;
     formError.hidden = false;
-    formError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (field) {
+      erroredField = field;
+      field.classList.add('has-error');
+      field.setAttribute('aria-invalid', 'true');
+      field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // preventScroll so focus() doesn't fight the smooth scroll above
+      // with an instant jump of its own. A non-focusable container (the
+      // day-chip group) just no-ops here and keeps the outline.
+      field.focus({ preventScroll: true });
+    } else {
+      formError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+  function clearFieldError() {
+    if (!erroredField) return;
+    erroredField.classList.remove('has-error');
+    erroredField.removeAttribute('aria-invalid');
+    erroredField = null;
   }
   function clearError() {
     formError.hidden = true;
     formError.textContent = '';
+    clearFieldError();
   }
+  // Any edit anywhere in the form retires the current complaint — leaving
+  // a stale red outline on a box the runner has already fixed is worse
+  // than showing nothing.
+  form.addEventListener('input', () => { if (erroredField) clearError(); });
 
   // "Level kebugaran" used to be a manual dropdown, but it's redundant now
   // that currentWeeklyKm is usually real Strava data rather than a guess —
@@ -842,25 +923,25 @@
       raceDistanceKm = Number(customDistanceKm.value);
       raceLabel = `${raceDistanceKm} km`;
       if (!raceDistanceKm || raceDistanceKm <= 0) {
-        showError('Masukkan jarak custom yang valid (dalam km).');
+        showError('Masukkan jarak custom yang valid (dalam km).', customDistanceKm);
         return null;
       }
     }
 
     const dateNoun = mode === 'race' ? 'tanggal race' : 'tanggal akhir blok';
-    if (!raceDateInput.value) { showError(`Pilih ${dateNoun} terlebih dahulu.`); return null; }
+    if (!raceDateInput.value) { showError(`Pilih ${dateNoun} terlebih dahulu.`, raceDateInput); return null; }
     const raceDate = new Date(raceDateInput.value + 'T00:00:00');
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    if (raceDate <= today) { showError(`${dateNoun.charAt(0).toUpperCase()}${dateNoun.slice(1)} harus di masa depan.`); return null; }
+    if (raceDate <= today) { showError(`${dateNoun.charAt(0).toUpperCase()}${dateNoun.slice(1)} harus di masa depan.`, raceDateInput); return null; }
 
-    if (!startDateInput.value) { showError('Pilih tanggal mulai training terlebih dahulu.'); return null; }
+    if (!startDateInput.value) { showError('Pilih tanggal mulai training terlebih dahulu.', startDateInput); return null; }
     const startDate = new Date(startDateInput.value + 'T00:00:00');
-    if (startDate < today) { showError('Tanggal mulai training tidak boleh di masa lalu.'); return null; }
-    if (startDate >= raceDate) { showError(`Tanggal mulai training harus sebelum ${dateNoun}.`); return null; }
+    if (startDate < today) { showError('Tanggal mulai training tidak boleh di masa lalu.', startDateInput); return null; }
+    if (startDate >= raceDate) { showError(`Tanggal mulai training harus sebelum ${dateNoun}.`, startDateInput); return null; }
 
     const currentWeeklyKm = Number(currentWeeklyKmInput.value);
     if (currentWeeklyKm < 0 || Number.isNaN(currentWeeklyKm)) {
-      showError('Isi rata-rata jarak lari mingguan yang valid (boleh 0 jika baru mulai).');
+      showError('Isi rata-rata jarak lari mingguan yang valid (boleh 0 jika baru mulai).', currentWeeklyKmInput);
       return null;
     }
     // Base Building past this volume has very little room left to actually
@@ -871,13 +952,13 @@
     // better fit at this volume and there's no legitimate reason to talk a
     // user out of it.
     if (nonRaceStyle === 'baseBuilding' && currentWeeklyKm >= PaceForgeGenerator.VOLUME_GAIN_PLATEAU_KM) {
-      showError(`Volume mingguanmu sekarang (${currentWeeklyKm} km) sudah di atas ${PaceForgeGenerator.VOLUME_GAIN_PLATEAU_KM} km — di titik ini Base Building nggak banyak lagi yang bisa dinaikkan, jadi mode Maintenance lebih pas buat kondisimu. Pilih "Maintenance" di atas untuk lanjut.`);
+      showError(`Volume mingguanmu sekarang (${currentWeeklyKm} km) sudah di atas ${PaceForgeGenerator.VOLUME_GAIN_PLATEAU_KM} km — di titik ini Base Building nggak banyak lagi yang bisa dinaikkan, jadi mode Maintenance lebih pas buat kondisimu. Pilih "Maintenance" di atas untuk lanjut.`, goalTypeToggle);
       return null;
     }
 
     const longestRecentRunKm = Number(longestRecentRunKmInput.value);
     if (longestRecentRunKm < 0 || Number.isNaN(longestRecentRunKm)) {
-      showError('Isi jarak lari terjauhmu dalam 3 bulan terakhir yang valid (boleh 0 jika baru mulai).');
+      showError('Isi jarak lari terjauhmu dalam 3 bulan terakhir yang valid (boleh 0 jika baru mulai).', longestRecentRunKmInput);
       return null;
     }
 
@@ -889,7 +970,7 @@
       const s = Number(recentRaceSeconds.value) || 0;
       recentRaceTimeSec = h * 3600 + m * 60 + s;
       recentRaceDistanceKm = getRecentRaceDistanceKm();
-      if (!recentRaceDistanceKm || recentRaceDistanceKm <= 0) { showError('Isi jarak race terakhir yang valid.'); return null; }
+      if (!recentRaceDistanceKm || recentRaceDistanceKm <= 0) { showError('Isi jarak race terakhir yang valid.', recentRaceDistanceSel.value === 'custom' ? recentRaceCustomKm : recentRaceDistanceSel); return null; }
     }
 
     // Bukan lagi field manual — diturunkan dari km mingguan (yang sendirinya
@@ -904,13 +985,13 @@
     const daysPerWeek = Number(daysPerWeekInput.value);
     const preferredDays = getSelectedDays();
     if (preferredDays.length !== daysPerWeek) {
-      showError(`Jumlah hari yang dipilih (${preferredDays.length}) harus sama dengan jumlah hari latihan per minggu (${daysPerWeek}).`);
+      showError(`Jumlah hari yang dipilih (${preferredDays.length}) harus sama dengan jumlah hari latihan per minggu (${daysPerWeek}).`, dayCheckboxes);
       return null;
     }
 
     const longRunDay = longRunDaySelect.value !== '' ? Number(longRunDaySelect.value) : null;
     if (longRunDay === null || !preferredDays.includes(longRunDay)) {
-      showError('Pilih hari untuk long run dari hari latihan yang sudah kamu tandai.');
+      showError('Pilih hari untuk long run dari hari latihan yang sudah kamu tandai.', longRunDaySelect);
       return null;
     }
 
@@ -920,7 +1001,7 @@
         const paceMin = Number(targetPaceMinutesInput.value) || 0;
         const paceSec = Number(targetPaceSecondsInput.value) || 0;
         const paceSecPerKm = paceMin * 60 + paceSec;
-        if (paceSecPerKm <= 0) { showError('Isi target pace yang valid.'); return null; }
+        if (paceSecPerKm <= 0) { showError('Isi target pace yang valid.', targetPaceMinutesInput); return null; }
         targetTimeSec = paceSecPerKm * raceDistanceKm;
       } else {
         const h = Number(targetHoursInput.value) || 0;
@@ -928,7 +1009,7 @@
         const s = Number(targetSecondsInput.value) || 0;
         targetTimeSec = h * 3600 + m * 60 + s;
       }
-      if (targetTimeSec <= 0) { showError('Isi target waktu finish yang valid.'); return null; }
+      if (targetTimeSec <= 0) { showError('Isi target waktu finish yang valid.', targetHoursInput); return null; }
     }
 
     const conservativeMode = conservativeModeInput.checked;
@@ -1241,6 +1322,9 @@
     formSection.hidden = false;
     loadingSection.hidden = true;
     resultSection.hidden = true;
+    // Only "Buat Plan Baru" over an existing plan has somewhere to go
+    // back to — this path is a runner with no plan at all.
+    backToPlanBtn.hidden = true;
   }
   // Used while checking for a saved plan right after login (see
   // onAuthChange below) — showForm() first, then swapping to a saved plan
@@ -1312,6 +1396,10 @@
     const tbody = block?.querySelector('table.day-table tbody');
     if (!week || !tbody) return;
     tbody.innerHTML = week.days.map(day => renderDayRow(day, weekNumber)).join('');
+    // A swap inside this week can move today's session onto a different
+    // day — the hero card at the top mirrors one of these rows, so it has
+    // to be rebuilt from the same just-updated data.
+    renderTodayCard(lastPlan);
   }
 
   // Replays a saved daySwaps list (see savePlanForCurrentUser/
@@ -1658,14 +1746,47 @@
     }
   }
 
-  // Handles a click on a day row's swap button (⇄) — the first click
-  // picks that day as the swap's source (highlighted, see renderDayRow),
-  // the second click on a different day in the *same* week performs the
-  // swap; clicking the already-selected day's button again cancels.
-  // Race day is never swappable (it's tied to the runner's actual
-  // real-world race date, not a slot that can just move); swapping a
-  // long run asks for confirmation first since it's a bigger change to a
-  // week's shape than an easy/quality day moving.
+  // A message slot inside one week's own block, used for everything the
+  // day-swap flow needs to say. Deliberately not a banner at the top of
+  // the page: by week 5 of a 12-week plan that banner is several screens
+  // away from the ⇄ button that triggered it, so the runner would get no
+  // feedback they could actually see. At most one is ever open.
+  //
+  // With `confirm`, resolves true/false on the runner's answer — the
+  // in-page stand-in for window.confirm(), which as a native modal reads
+  // as a browser interruption rather than part of this plan, and on a
+  // phone covers the very rows the question is about. `text` is always
+  // app-authored copy, never user input.
+  function clearWeekNotice() {
+    planWeeksEl.querySelectorAll('.week-notice').forEach(el => el.remove());
+  }
+
+  function showWeekNotice(weekNumber, text, { isError = false, confirm = false } = {}) {
+    clearWeekNotice();
+    const block = planWeeksEl.querySelector(`.week-block[data-week-number="${weekNumber}"]`);
+    if (!block) return Promise.resolve(false);
+    const el = document.createElement('div');
+    el.className = `week-notice${isError ? ' is-error' : ''}`;
+    el.innerHTML = `<p>${text}</p>${confirm ? `
+      <div class="week-notice-actions">
+        <button type="button" class="btn btn-secondary btn-small" data-notice="ok">Lanjutkan</button>
+        <button type="button" class="btn btn-ghost btn-small" data-notice="cancel">Batal</button>
+      </div>` : ''}`;
+    // After <summary> so it reads as part of this week's header rather
+    // than floating loose above the day rows.
+    block.querySelector('summary').insertAdjacentElement('afterend', el);
+    if (!confirm) return Promise.resolve(false);
+    el.querySelector('[data-notice="ok"]').focus();
+    return new Promise(resolve => {
+      el.addEventListener('click', (e) => {
+        const action = e.target.closest('[data-notice]')?.dataset.notice;
+        if (!action) return;
+        el.remove();
+        resolve(action === 'ok');
+      });
+    });
+  }
+
   // Does the actual swap (same guardrails and persistence either
   // interaction path needs) between two days in the same week — shared by
   // the click-click flow (handleSwapDayClick) and drag-and-drop
@@ -1677,7 +1798,12 @@
   // persists on success; callers are responsible for re-rendering on
   // their own to clear whatever selection/drag-over state they were
   // tracking when this returns false.
-  function attemptDaySwap(weekNumber, dowA, dowB) {
+  //
+  // Async only because of the long-run confirmation below — every other
+  // path still resolves immediately. Callers that care about the result
+  // (handleSwapDayClick) await it; handleDayDrop fires and forgets, same
+  // as it did when this was synchronous.
+  async function attemptDaySwap(weekNumber, dowA, dowB) {
     if (!lastPlan || dowA === dowB) return false;
     const week = lastPlan.weeks.find(w => w.weekNumber === weekNumber);
     const dayA = week?.days.find(d => d.dow === dowA);
@@ -1689,9 +1815,9 @@
     // date — neither is a slot that can just move.
     if (dayA.type === 'race' || dayB.type === 'race' || dayA.type === 'evaluation' || dayB.type === 'evaluation') {
       const isEvaluation = dayA.type === 'evaluation' || dayB.type === 'evaluation';
-      alert(isEvaluation
+      showWeekNotice(weekNumber, isEvaluation
         ? 'Minggu evaluasi nggak bisa dipindah — itu tanggal akhir blok, bukan slot latihan.'
-        : 'Race day nggak bisa dipindah — itu tanggal race sungguhan, bukan slot latihan.');
+        : 'Race day nggak bisa dipindah — itu tanggal race sungguhan, bukan slot latihan.', { isError: true });
       return false;
     }
     // Backstops the UI-level guards in renderDayRow/markCompletedSessionsFromStrava
@@ -1700,12 +1826,14 @@
     // reference or a drop onto a completed row, which skips draggable
     // entirely but not being a valid drop *target*.
     if (dayA.isCompleted || dayB.isCompleted) {
-      alert('Sesi yang sudah kamu jalani nggak bisa ditukar lagi — datanya sudah tercatat dari Strava.');
+      showWeekNotice(weekNumber, 'Sesi yang sudah kamu jalani nggak bisa ditukar lagi — datanya sudah tercatat dari Strava.', { isError: true });
       return false;
     }
     if (dayA.type === 'longRun' || dayB.type === 'longRun') {
-      if (!confirm('Ini bakal mindahin long run ke hari lain minggu ini. Lanjutkan?')) return false;
+      const proceed = await showWeekNotice(weekNumber, 'Ini bakal mindahin long run ke hari lain minggu ini. Lanjutkan?', { confirm: true });
+      if (!proceed) return false;
     }
+    clearWeekNotice();
     swapPlanDaySessions(dayA, dayB);
     daySwaps.push({ week: weekNumber, dowA, dowB });
     reRenderWeek(weekNumber);
@@ -1714,11 +1842,22 @@
     return true;
   }
 
-  function handleSwapDayClick(weekNumber, dow) {
+  // The prompt shown while a first day is picked and a second is still
+  // pending. Until this existed, clicking ⇄ only tinted a row — nothing
+  // said a second click was expected, so the half-finished state read as
+  // "the button did nothing".
+  function promptForSwapPartner(weekNumber, dow) {
+    const week = lastPlan.weeks.find(w => w.weekNumber === weekNumber);
+    const dayName = week?.days.find(d => d.dow === dow)?.dayName || 'hari itu';
+    showWeekNotice(weekNumber, `Pilih hari lain di minggu ini untuk ditukar dengan <strong>${dayName}</strong> — atau klik ✕ di baris itu lagi untuk batal.`);
+  }
+
+  async function handleSwapDayClick(weekNumber, dow) {
     if (!lastPlan) return;
     if (!swapSelection) {
       swapSelection = { week: weekNumber, dow };
       reRenderWeek(weekNumber);
+      promptForSwapPartner(weekNumber, dow);
       return;
     }
     const sourceWeek = swapSelection.week;
@@ -1726,16 +1865,20 @@
     if (sourceWeek === weekNumber && sourceDow === dow) {
       swapSelection = null;
       reRenderWeek(weekNumber);
+      clearWeekNotice();
       return;
     }
     if (sourceWeek !== weekNumber) {
       swapSelection = { week: weekNumber, dow };
       reRenderWeek(sourceWeek);
       reRenderWeek(weekNumber);
+      // Re-targeting to another week moves the prompt with it, rather
+      // than leaving it stranded on the week no longer being swapped.
+      promptForSwapPartner(weekNumber, dow);
       return;
     }
     swapSelection = null;
-    if (!attemptDaySwap(weekNumber, sourceDow, dow)) reRenderWeek(weekNumber);
+    if (!await attemptDaySwap(weekNumber, sourceDow, dow)) reRenderWeek(weekNumber);
   }
 
   // Drag-and-drop is the desktop-mouse path to the same swap the ⇄ button
@@ -2257,7 +2400,10 @@
     }
 
     // Every day.isCompleted flag this pass could set is now set — the
-    // exact moment detectMissedWeek's numbers are trustworthy.
+    // exact moment detectMissedWeek's numbers are trustworthy, and the
+    // moment the hero card can say whether today's session is already
+    // logged (it rendered before any of this was known).
+    renderTodayCard(plan);
     renderMissedWeekBanner();
   }
 
@@ -2305,6 +2451,18 @@
 
     await generateAndShowPlan(settings);
     if (REQUIRE_LOGIN) savePlanForCurrentUser(settings);
+  });
+
+  // In-page stand-in for alert() on the result actions (PDF export) — see
+  // #resultNotice in index.html for why a native dialog was the wrong
+  // shape for these. Sits directly under the buttons that raise it, so
+  // unlike the swap messages (showWeekNotice) it's always already in view.
+  function showResultNotice(text) {
+    resultNoticeText.textContent = text;
+    resultNotice.hidden = false;
+  }
+  document.getElementById('resultNoticeDismissBtn').addEventListener('click', () => {
+    resultNotice.hidden = true;
   });
 
   document.getElementById('printBtn').addEventListener('click', downloadPlanAsPdf);
@@ -2363,12 +2521,25 @@
   document.getElementById('newPlanBtn').addEventListener('click', () => {
     resultSection.hidden = true;
     formSection.hidden = false;
+    // Nothing is destroyed by getting here — the current plan is only
+    // replaced once this form is actually submitted — but until this
+    // button existed there was no way back to it short of reloading the
+    // page, which made a mis-click feel like losing the plan.
+    backToPlanBtn.hidden = !lastPlan;
     formSection.scrollIntoView({ behavior: 'smooth' });
     // The form up to now still holds whatever was last loaded (typically
     // the previously-saved plan's numbers) — refresh the Strava-derived
     // fields so starting a new plan reflects current training, not
     // whatever was true when that saved plan was first generated.
     if (REQUIRE_LOGIN) prefillFromStrava();
+  });
+  backToPlanBtn.addEventListener('click', () => {
+    if (!lastPlan) return;
+    clearError();
+    formSection.hidden = true;
+    resultSection.hidden = false;
+    backToPlanBtn.hidden = true;
+    resultSection.scrollIntoView({ behavior: 'smooth' });
   });
 
   // Renders the 5-zone VDOT pace table into #paceLegend, using whichever
@@ -2422,6 +2593,117 @@
       </div>
       <p class="pace-zone-note">Dihitung pakai formula VDOT Jack Daniels (metodologi yang sama dipakai kalkulator seperti vdoto2.com)</p>
     `;
+  }
+
+  // The hero at the top of the result: what this runner is doing TODAY,
+  // spelled out before any of the whole-block context below it. Everything
+  // else on this page answers "what does the block look like"; on an
+  // ordinary morning the question is just "what's on for today", and
+  // without this that answer sits several screens down, inside a week's
+  // table, identified only by its date.
+  //
+  // Reads straight off lastPlan via the same label/color/zone/structure
+  // helpers the day rows use (dayTypeLabel, zoneForDay, paceTargetLabel,
+  // renderWorkoutStructure) rather than formatting its own copy of any of
+  // it — so a swap, an AI adjustment or a Strava match can never leave the
+  // card describing a different session than the row it mirrors.
+  function renderTodayCard(plan) {
+    if (!plan || !plan.weeks.length) { todayCard.hidden = true; return; }
+    const { formatDate } = PaceForgeGenerator;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayKey = dateKey(today);
+
+    // Weeks are in order and so are the days inside each one (see
+    // planGenerator.js), so this flattening is just the plan read back as
+    // one continuous calendar. Date keys are 'YYYY-MM-DD', which compares
+    // correctly as plain strings — no Date math needed to order them.
+    const entries = plan.weeks.flatMap(week => week.days.map(day => ({ week, day })));
+    const lastDay = entries[entries.length - 1].day;
+    // Block already finished (an old saved plan reopened after race day):
+    // there's no "today" left in it to headline, and #blockHistorySection
+    // further down is the part that's actually about a finished block.
+    if (dateKey(lastDay.date) < todayKey) { todayCard.hidden = true; return; }
+
+    const todayEntry = entries.find(e => dateKey(e.day.date) === todayKey);
+    // Plan generated ahead of its own start date — headline the first real
+    // session instead, with how long the wait is, rather than showing
+    // nothing until the block happens to begin.
+    const entry = todayEntry
+      || entries.find(e => dateKey(e.day.date) > todayKey && e.day.km)
+      || entries.find(e => dateKey(e.day.date) > todayKey);
+    if (!entry) { todayCard.hidden = true; return; }
+
+    const { day, week } = entry;
+    const isFirstTimerPlan = plan.meta?.mode === 'firstTimer';
+    const zone = zoneForDay(day);
+    const label = dayTypeLabel(day, isFirstTimerPlan);
+    const color = TYPE_COLORS[restDisplayKey(day)] || 'var(--type-rest)';
+
+    const dayDate = new Date(day.date);
+    dayDate.setHours(0, 0, 0, 0);
+    const daysAway = Math.round((dayDate - today) / 86400000);
+    const eyebrow = daysAway === 0 ? 'Hari ini'
+      : daysAway === 1 ? 'Besok — sesi pertama'
+      : `Sesi pertama — ${daysAway} hari lagi`;
+
+    // A rest day is a legitimate answer to "what's on today", but on its
+    // own it leaves the runner with nothing to plan around — so pair it
+    // with whatever the next actual session is. Only for the day being
+    // headlined; the rest of the plan is right below.
+    const nextSession = entries.find(e => dateKey(e.day.date) > dateKey(day.date) && e.day.km);
+    const nextLine = (!day.km && nextSession)
+      ? `<p class="today-card-next">Berikutnya: <strong>${formatDate(nextSession.day.date)}</strong> · ${dayTypeLabel(nextSession.day, isFirstTimerPlan)}${nextSession.day.km ? ` · ${nextSession.day.km} km` : ''}</p>`
+      : '';
+
+    // "How far in am I, and how long is left" — neither was answerable
+    // anywhere on this page before: the summary showed the target date as
+    // a bare calendar date, and the week number only appeared as a label
+    // on each accordion. Weeks rather than days once there's more than a
+    // fortnight to go, since that's the unit the plan itself is built in.
+    const totalWeeks = plan.weeks.length;
+    const endDate = new Date(plan.meta.raceDate);
+    endDate.setHours(0, 0, 0, 0);
+    const daysLeft = Math.max(0, Math.round((endDate - today) / 86400000));
+    const endNoun = plan.meta.mode === 'race' ? 'Race'
+      : isFirstTimerPlan ? 'Lulus'
+      : 'Akhir blok';
+    const countdown = daysLeft === 0 ? `${endNoun} hari ini`
+      : daysLeft <= 14 ? `${endNoun} ${daysLeft} hari lagi`
+      : `${endNoun} ${Math.round(daysLeft / 7)} minggu lagi`;
+    const progressPct = Math.round((week.weekNumber / totalWeeks) * 100);
+
+    const progress = `
+      <div class="today-card-progress">
+        <div class="today-progress-track"><span class="today-progress-fill" style="width:${progressPct}%"></span></div>
+        <p class="today-progress-label"><span>Minggu ${week.weekNumber} dari ${totalWeeks}</span><span>${countdown}</span></p>
+      </div>
+    `;
+
+    const metrics = [
+      day.km ? `<span class="today-card-metric"><strong>${day.km} km</strong></span>` : '',
+      day.km ? `<span class="today-card-metric">Pace <strong>${paceTargetLabel(day, zone, isFirstTimerPlan)}</strong></span>` : '',
+      // Set by markCompletedSessionsFromStrava, which runs after the first
+      // render and calls back in here — see its tail.
+      day.isCompleted ? '<span class="today-card-metric today-card-done">✅ Sudah dijalani</span>' : '',
+    ].filter(Boolean).join('');
+
+    todayCard.innerHTML = `
+      <div class="today-card-head">
+        <span class="today-card-eyebrow">${eyebrow}</span>
+        <span class="today-card-week">Minggu ${week.weekNumber} · ${week.phase}</span>
+      </div>
+      <p class="today-card-title">${formatDate(day.date)}</p>
+      <div class="today-card-body">
+        <span class="type-badge" style="background:${color}">${label}</span>
+        ${metrics}
+      </div>
+      ${day.structure ? renderWorkoutStructure(day.structure, zone) : ''}
+      ${nextLine}
+      ${progress}
+    `;
+    todayCard.hidden = false;
   }
 
   // Bar chart of every week's totalKm, colored by phase (reuses
@@ -2502,6 +2784,9 @@
     aiRetryBtn.hidden = true;
     aiIntro.hidden = true;
     aiIntro.textContent = '';
+    // A PDF failure (or any other result-level message) was about the
+    // previous plan — it says nothing about this one.
+    resultNotice.hidden = true;
     closeFeedbackPanel();
     // No separate reset for race-day tips (or the per-week AI notes further
     // below) needed — both get appended straight into a week-block's own
@@ -2526,14 +2811,14 @@
     const dateCardLabel = !isNonRacePlan ? 'Tanggal Race' : meta.mode === 'firstTimer' ? 'Lulus (Perkiraan)' : 'Akhir Blok';
     summaryCards.innerHTML = `
       <div class="summary-item"><div class="label">${raceCardLabel}</div><div class="value">${meta.raceLabel}</div></div>
-      <div class="summary-item"><div class="label">${dateCardLabel}</div><div class="value" style="font-size:1rem">${formatDate(meta.raceDate)}</div></div>
+      <div class="summary-item"><div class="label">${dateCardLabel}</div><div class="value is-small">${formatDate(meta.raceDate)}</div></div>
       <div class="summary-item"><div class="label">Durasi Plan</div><div class="value">${meta.planWeeks} minggu</div></div>
       <div class="summary-item"><div class="label">Peak Weekly Volume</div><div class="value">${meta.peakWeeklyKm} km</div></div>
       <div class="summary-item"><div class="label">Peak Long Run</div><div class="value">${meta.peakLongRunKm} km</div></div>
       ${!isNonRacePlan ? `
       <div class="summary-item"><div class="label">Goal Pace</div><div class="value">${formatPace(meta.goalPaceSec)}</div></div>
       ${meta.goalPaceSource === 'recentRace' ? `
-      <div class="summary-item"><div class="label">Estimasi dari Race Terakhir</div><div class="value" style="font-size:1rem">${formatDuration(meta.recentRaceTimeSec)} / ${meta.recentRaceDistanceKm} km &rarr; ${formatDuration(meta.predictedRaceTimeSec)} ${meta.raceLabel}</div></div>
+      <div class="summary-item"><div class="label">Estimasi dari Race Terakhir</div><div class="value is-small">${formatDuration(meta.recentRaceTimeSec)} / ${meta.recentRaceDistanceKm} km &rarr; ${formatDuration(meta.predictedRaceTimeSec)} ${meta.raceLabel}</div></div>
       ` : ''}
       ` : ''}
     `;
@@ -2543,6 +2828,7 @@
     // by default and badge it).
     const currentWeek = findCurrentWeek(weeks);
 
+    renderTodayCard(plan);
     renderVolumeChart(weeks, currentWeek);
 
     // Zona Pace — full 5-zone VDOT table (Jack Daniels methodology, same
@@ -2637,10 +2923,11 @@
   // page.
   async function downloadPlanAsPdf() {
     if (!lastPlan || !window.jspdf || !window.jspdf.jsPDF) {
-      alert('Fitur simpan PDF belum siap (library belum termuat). Coba muat ulang halaman.');
+      showResultNotice('Fitur simpan PDF belum siap (library belum termuat). Coba muat ulang halaman.');
       return;
     }
 
+    resultNotice.hidden = true;
     const btn = document.getElementById('printBtn');
     const originalLabel = btn.textContent;
     btn.disabled = true;
@@ -2900,7 +3187,7 @@
       const fileSafeLabel = (meta.raceLabel || 'Plan').replace(/[^\w]+/g, '-');
       doc.save(`PaceForge-${fileSafeLabel}.pdf`);
     } catch (err) {
-      alert(`Gagal membuat PDF: ${err.message}`);
+      showResultNotice(`Gagal membuat PDF: ${err.message}`);
     } finally {
       btn.disabled = false;
       btn.textContent = originalLabel;
@@ -3132,7 +3419,6 @@
   }
 
   function renderDayRow(day, weekNumber) {
-    const { formatDate, TYPE_LABELS } = PaceForgeGenerator;
     const isRest = day.type === 'rest';
     // 'evaluation' is treated identically to 'race' below (same pinned-to-
     // a-real-date reasoning as attemptDaySwap's own guard) — kept named
@@ -3145,15 +3431,17 @@
     // below can check it directly.
     const isCompleted = !!day.isCompleted;
     const isSwapSelected = !!swapSelection && swapSelection.week === weekNumber && swapSelection.dow === day.dow;
-    const rowClass = [isRest ? 'is-rest' : (isRace ? 'is-race' : ''), isSwapSelected ? 'is-swap-selected' : '', isCompleted ? 'is-completed' : ''].filter(Boolean).join(' ');
+    // Pairs the row with the "today" hero card at the top of the result
+    // (see renderTodayCard) — the same date, findable as one thing once
+    // the runner scrolls down into the schedule itself. Deliberately loses
+    // to is-race/is-swap-selected/is-completed in the stylesheet: on race
+    // day or a session already logged, that state is the more useful thing
+    // for the row to be saying.
+    const isTodayRow = dateKey(day.date) === dateKey(new Date());
+    const rowClass = [isRest ? 'is-rest' : (isRace ? 'is-race' : ''), isTodayRow ? 'is-today' : '', isSwapSelected ? 'is-swap-selected' : '', isCompleted ? 'is-completed' : ''].filter(Boolean).join(' ');
     const displayKey = restDisplayKey(day);
     const isFirstTimerPlan = lastPlan?.meta?.mode === 'firstTimer';
-    const label = (day.type === 'longRun' && day.isMarathonSpecific)
-      ? `${TYPE_LABELS.longRun} (Pace ${day.structure?.paceLabel || 'Marathon'})`
-      // See paceTargetLabel's own comment on why First-timer's evaluation
-      // day gets a gentler "5K" badge instead of "Time Trial".
-      : (day.type === 'evaluation' && isFirstTimerPlan) ? '5K'
-      : (TYPE_LABELS[displayKey] || displayKey);
+    const label = dayTypeLabel(day, isFirstTimerPlan);
     const km = day.km ? `${day.km} km` : '—';
     // Pace Target names the VDOT zone this session trains at (Easy, Tempo,
     // Interval, Repetition, Marathon) instead of that week's specific pace
@@ -3197,8 +3485,14 @@
         <td>${day.dayName}</td>
         <td>${day.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</td>
         <td><span class="type-badge" style="background:${color}">${label}</span><span class="completed-slot"></span></td>
-        <td>${km}</td>
-        <td>${pace}${swapBtn}</td>
+        <!-- data-label carries the column header into the cell itself: on a
+             phone the <thead> is hidden and these stack as labelled lines
+             instead of columns (see the .day-table rules under the 600px
+             media query in css/styles.css). The pace text is wrapped so
+             that layout can drop a rest day's meaningless "—" without also
+             dropping the swap button sharing this cell. -->
+        <td data-label="Jarak">${km}</td>
+        <td data-label="Pace"><span class="pace-text">${pace}</span>${swapBtn}</td>
       </tr>
       ${structureRow}
       ${analysisRow}
