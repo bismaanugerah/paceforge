@@ -197,6 +197,28 @@
     }) || null;
   }
 
+  // Whether a week has actually begun (its first day is today or earlier)
+  // — the only weeks an "actual vs. planned" comparison means anything
+  // for. A week entirely in the future has nothing run yet by definition,
+  // so renderVolumeChart leaves it as the plain planned-only bar it's
+  // always been rather than drawing a zero-height "actual" underneath it.
+  function weekHasStarted(week) {
+    const start = new Date(week.startDate);
+    start.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return start <= today;
+  }
+
+  // Sum of day.actualKm across a week — set by markCompletedSessionsFromStrava
+  // once a day is matched to a real Strava activity (see there). A day with
+  // no match yet contributes nothing, which is exactly "not run" rather
+  // than an assumed zero-distance run, so this under-counts a week whose
+  // Strava match hasn't been fetched yet rather than ever over-counting one.
+  function weekActualKm(week) {
+    return week.days.reduce((sum, d) => sum + (d.actualKm || 0), 0);
+  }
+
   // Which week's accordion (see renderPlan) should start open. Prefers the
   // current week (see findCurrentWeek); if the plan hasn't started yet
   // (generated ahead of time), that's week 1 — the one about to begin, not
@@ -2189,6 +2211,10 @@
         // button/draggable stay suppressed across a later reRenderWeek
         // too (e.g. after swapping a *different* day the same week).
         day.isCompleted = true;
+        // The Strava-matched activity's real distance, kept alongside the
+        // planned day.km — this is what weekActualKm sums to drive the
+        // "actual vs. planned" overlay in renderVolumeChart.
+        day.actualKm = best.km;
         row.classList.add('is-completed');
         row.removeAttribute('draggable');
         // This row was already rendered (with a swap button) before this
@@ -2232,11 +2258,13 @@
       upgradeRecentAnalysisWithSegmentPace(upgradeCandidates).catch(() => {});
     }
 
-    // Every day.isCompleted flag this pass could set is now set — the
-    // exact moment detectMissedWeek's numbers are trustworthy, and the
-    // moment the hero card can say whether today's session is already
-    // logged (it rendered before any of this was known).
+    // Every day.isCompleted/actualKm flag this pass could set is now set —
+    // the exact moment detectMissedWeek's numbers are trustworthy, the
+    // hero card can say whether today's session is already logged, and the
+    // volume chart can draw the actual-vs-planned overlay (all three
+    // rendered before any of this was known).
     renderTodayCard(plan);
+    renderVolumeChart(plan.weeks, findCurrentWeek(plan.weeks));
     renderMissedWeekBanner();
   }
 
@@ -2556,6 +2584,17 @@
   // to expand all of them just to see the plan's overall base-build-peak-
   // taper shape.
   //
+  // For a week that has actually started (weekHasStarted), the phase-
+  // colored bar becomes a dimmed TARGET behind a second, narrower bar in a
+  // single vivid color — the real km logged on Strava so far this week
+  // (weekActualKm), the one number in this chart that isn't "the plan".
+  // Deliberately its own hue (--color-progress) rather than reusing
+  // --color-accent, which Build's own phase bar already sits in — overlaying
+  // a same-colored "actual" bar on a same-colored Build week would erase the
+  // whole comparison for exactly the phase most worth checking progress on.
+  // A future week (hasn't started) keeps the plain single bar it's always
+  // had: there's nothing run yet to compare it against.
+  //
   // Plain flex/CSS bars, not SVG: an SVG viewBox stretched to the
   // container's width with preserveAspectRatio="none" (the first version
   // of this) scales X and Y by different factors, which distorts text —
@@ -2567,22 +2606,56 @@
   function renderVolumeChart(weeks, currentWeek) {
     if (!weeks.length) { volumeChart.innerHTML = ''; return; }
 
-    const maxKm = Math.max(...weeks.map(w => w.totalKm), 1);
+    // Resolved once per week up front — an overshot week's actualKm can
+    // exceed every week's totalKm (a great week, or a stray extra run),
+    // and the chart's own scale (maxKm below) has to stretch to fit that
+    // or its bright bar would just clip against the top of the track.
+    const rows = weeks.map(week => {
+      const hasStarted = weekHasStarted(week);
+      const actualKm = hasStarted ? weekActualKm(week) : 0;
+      return { week, hasStarted, actualKm };
+    });
+
+    const maxKm = Math.max(...rows.map(r => Math.max(r.week.totalKm, r.actualKm)), 1);
     const trackHeight = 90;
 
-    const cols = weeks.map(week => {
+    const cols = rows.map(({ week, hasStarted, actualKm }) => {
       const heightPx = Math.max(3, Math.round((week.totalKm / maxKm) * trackHeight));
       const color = PHASE_COLORS[week.phase] || 'var(--color-text-muted)';
       const isCurrent = currentWeek && week.weekNumber === currentWeek.weekNumber;
-      // Rounded to a whole km for the always-visible label — the exact
-      // figure (which can carry a .1-.9 decimal, see planGenerator's
-      // totalKm) is still available in the hover title below, but doesn't
-      // need to fight for space against a dozen other bars' labels.
+
+      // Only ever non-zero for a started week (see the guard in `rows`
+      // above) — 0 there still renders a visible-but-empty progress bar
+      // (min-height below in CSS), which is the honest state for "this
+      // week just began, nothing logged yet" rather than no bar at all.
+      const actualHeightPx = hasStarted ? Math.max(1, Math.round((actualKm / maxKm) * trackHeight)) : 0;
+      const actualBar = hasStarted
+        ? `<span class="volume-chart-actual" style="height:${actualHeightPx}px"></span>`
+        : '';
+
+      // "Actual/Rencana" once a week has something to report, otherwise
+      // just the plan number as before — matches the title text below,
+      // which spells the same pair out in full for anyone who hovers. The
+      // actual figure gets its own class so it can carry the same vivid
+      // color as its bar; the plan figure next to it stays the chart's
+      // ordinary muted tone, same as a future week's lone number. Rounded
+      // to a whole km same as the plan figure always has been — a dozen+
+      // of these columns already have to share the width .table-scroll
+      // gives them, and the exact decimal is one hover away in `title`.
+      const roundedActual = Math.round(actualKm);
+      const valueLabel = hasStarted
+        ? `<span class="volume-chart-value-actual">${roundedActual}</span><span class="volume-chart-value-sep">/</span>${Math.round(week.totalKm)}`
+        : `${Math.round(week.totalKm)}`;
+      const title = hasStarted
+        ? `Minggu ${week.weekNumber} • ${week.phase} • ${Math.round(actualKm * 10) / 10} dari ${week.totalKm} km sudah dijalani`
+        : `Minggu ${week.weekNumber} • ${week.phase} • ${week.totalKm} km`;
+
       return `
-        <div class="volume-chart-col${isCurrent ? ' is-current' : ''}" title="Minggu ${week.weekNumber} • ${week.phase} • ${week.totalKm} km">
-          <span class="volume-chart-value">${Math.round(week.totalKm)}</span>
+        <div class="volume-chart-col${isCurrent ? ' is-current' : ''}" title="${title}">
+          <span class="volume-chart-value">${valueLabel}</span>
           <div class="volume-chart-track">
-            <span class="volume-chart-fill" style="height:${heightPx}px;background:${color}"></span>
+            <span class="volume-chart-fill${hasStarted ? ' is-target' : ''}" style="height:${heightPx}px;background:${color};color:${color}"></span>
+            ${actualBar}
           </div>
           <span class="volume-chart-week-no">${week.weekNumber}</span>
         </div>
@@ -2604,6 +2677,11 @@
         <span class="volume-chart-legend-dot" style="background:${PHASE_COLORS[phase] || 'var(--color-text-muted)'}"></span>${phase}
       </span>
     `).join('');
+    // Only appears once at least one week has actually started — otherwise
+    // the legend would explain a color nowhere in the chart yet.
+    const actualLegend = rows.some(r => r.hasStarted)
+      ? `<span class="volume-chart-legend-item"><span class="volume-chart-legend-dot volume-chart-legend-dot-actual"></span>Sudah dijalani (Strava)</span>`
+      : '';
 
     volumeChart.innerHTML = `
       <div class="pace-zone-header">
@@ -2611,7 +2689,7 @@
         <span class="pace-zone-source">Peak ${peakWeek.totalKm} km di minggu ${peakWeek.weekNumber}${currentNote}</span>
       </div>
       <div class="table-scroll"><div class="volume-chart-bars">${cols}</div></div>
-      <div class="volume-chart-legend">${legend}</div>
+      <div class="volume-chart-legend">${legend}${actualLegend}</div>
     `;
   }
 

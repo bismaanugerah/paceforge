@@ -15,6 +15,22 @@
      meaning "the app did this for you" at a glance. */
   --color-accent: #4fd6b5;
   --color-accent-light: rgba(79, 214, 181, 0.14);
+  /* Reserved for exactly one thing: real km actually logged on Strava
+     against a plan target, in the "Volume Mingguan" chart's bullet-graph
+     overlay (see renderVolumeChart in js/app.js and .volume-chart-actual
+     below). Deliberately its own hue rather than --color-accent above —
+     PHASE_COLORS already paints the Build phase's own bar in that same
+     teal, so an "actual" overlay in the same color would vanish into a
+     Build week exactly when checking progress on it matters most. A
+     saturated electric blue reads as "measured/real" against this app's
+     otherwise warm exertion palette (greens, ambers, oranges, reds) and
+     is bright enough on --color-bg to carry the glow in the rule below —
+     the "lebih nyala" a flat, unlit bar of the same hue would not give.
+     Print/light-mode media queries redeclare its blue too dark to see on
+     white without redeclaring the glow shadow (kept dark-only — a glow is
+     a screen effect, not something print media benefits from). */
+  --color-progress: #2dd4ff;
+  --color-progress-glow: rgba(45, 212, 255, 0.55);
   /* Formerly one-off hex values inlined into .form-error/.form-warning —
      pulled up here so they sit alongside the rest of the palette instead
      of being the only colors in the file that don't go through a token. */
@@ -1019,9 +1035,13 @@ textarea.has-error:focus {
   gap: 4px;
   margin-top: 4px;
 }
+/* 34px, not the 28px a bare "28"-style label needed — a started week's
+   label is now "24/28", and .table-scroll already exists precisely so a
+   many-week plan pays for this in horizontal scroll rather than in every
+   column's legibility. */
 .volume-chart-col {
   flex: 1 1 0;
-  min-width: 28px;
+  min-width: 34px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1033,33 +1053,84 @@ textarea.has-error:focus {
   color: var(--color-text-muted);
   white-space: nowrap;
 }
+/* The logged-so-far half of an "actual/plan" label — see
+   .volume-chart-value-actual's counterpart, .volume-chart-actual, below.
+   Bright and a touch heavier than the plan figure beside it: this is the
+   number that changes as the week goes on, so it's the one worth the
+   runner's eye landing on first. */
+.volume-chart-value-actual { color: var(--color-progress); font-weight: 700; }
+.volume-chart-value-sep { opacity: 0.5; padding: 0 1px; }
 /* Fixed-height track the bar sits at the bottom of — a real pixel height
    here (set inline per bar in JS) instead of a percentage of some scaled
    viewBox is what keeps the value/week-number text above and below it
-   crisp, unlike the SVG version this replaced. */
-.volume-chart-track { height: 90px; width: 100%; display: flex; align-items: flex-end; }
+   crisp, unlike the SVG version this replaced. Positioned now (rather
+   than a plain flex row) so a started week's target and actual bars can
+   stack as layers sharing the same baseline instead of sitting side by
+   side — see .volume-chart-actual. */
+.volume-chart-track { position: relative; height: 90px; width: 100%; }
 .volume-chart-fill {
-  width: 100%;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   min-width: 16px;
   border-radius: 4px 4px 0 0;
   opacity: 0.82;
-  transition: opacity 0.15s;
+  transition: opacity 0.15s, height 0.2s ease;
 }
-.volume-chart-col:hover .volume-chart-fill { opacity: 1; }
+/* Once a week has an actual bar layered in front of it (see
+   .volume-chart-actual), the phase color behind it is reframed as a
+   TARGET marker rather than the main event — dimmed and outlined instead
+   of solid, so the two bars read as "here's the goal, here's where you
+   actually are" instead of one bar occluding the other. A future week
+   (no .is-target) keeps the original solid full-opacity look untouched. */
+.volume-chart-fill.is-target {
+  opacity: 0.24;
+  border: 1.5px dashed color-mix(in srgb, currentColor 70%, transparent);
+  border-bottom: none;
+  box-sizing: border-box;
+}
+.volume-chart-col:hover .volume-chart-fill:not(.is-target) { opacity: 1; }
+.volume-chart-col:hover .volume-chart-fill.is-target { opacity: 0.4; }
+/* The actual-km-run bar (see weekActualKm/renderVolumeChart) — narrower
+   than the target behind it and centered over it, the classic bullet-graph
+   shape, in the one color this chart reserves for "really happened" (see
+   --color-progress's own comment). The glow is what makes it read as LIVE
+   data rather than a third static phase color: a plain flat fill in the
+   same hue looked like just another muted bar sitting next to the others,
+   which is exactly what this element has to not be mistaken for. */
+.volume-chart-actual {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 0;
+  width: 48%;
+  min-width: 10px;
+  border-radius: 3px 3px 0 0;
+  background: var(--color-progress);
+  box-shadow: 0 0 9px 1px var(--color-progress-glow), 0 0 2px var(--color-progress-glow);
+  transition: height 0.2s ease;
+}
 .volume-chart-week-no { font-size: 0.68rem; color: var(--color-text-muted); }
 /* The current week needs to be unmistakable, not just a slightly brighter
-   bar in a row of a dozen similar ones — a visible ring on the bar plus
-   bolded/colored labels above and below it, backed up by the explicit
-   "Sekarang: Minggu N" text in the header line above (see renderVolumeChart). */
-.volume-chart-col.is-current .volume-chart-fill {
-  opacity: 1;
+   bar in a row of a dozen similar ones — a visible ring on the whole
+   track (not just one of the two possible bars inside it, so this looks
+   identical whether or not the week has started) plus bolded/colored
+   labels above and below it, backed up by the explicit "Sekarang: Minggu
+   N" text in the header line above (see renderVolumeChart). */
+.volume-chart-col.is-current .volume-chart-track {
   box-shadow: 0 0 0 2px var(--color-primary-dark);
+  border-radius: 4px 4px 0 0;
 }
 .volume-chart-col.is-current .volume-chart-value,
 .volume-chart-col.is-current .volume-chart-week-no {
   color: var(--color-primary-dark);
   font-weight: 700;
 }
+/* Keeps the actual figure's own color legible against the current-week
+   highlight above, which would otherwise repaint it the same indigo as
+   every other label on that column. */
+.volume-chart-col.is-current .volume-chart-value-actual { color: var(--color-progress); }
 .volume-chart-legend {
   display: flex;
   flex-wrap: wrap;
@@ -1070,6 +1141,10 @@ textarea.has-error:focus {
 }
 .volume-chart-legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .volume-chart-legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.volume-chart-legend-dot-actual {
+  background: var(--color-progress);
+  box-shadow: 0 0 4px 1px var(--color-progress-glow);
+}
 
 /* #blockHistoryChart itself already gets the boxed "reference card" look
    for free by reusing the .volume-chart/.volume-chart-bars/.volume-chart-col
@@ -1396,9 +1471,18 @@ summary.week-header:hover { background: var(--color-surface); }
     --color-primary-light: #e8eef8;
     --color-accent: #1f6f5c;
     --color-accent-light: #e4f2ee;
+    /* The screen value is a light, glowing cyan meant to pop off a near-
+       black background — unreadable at that lightness on the white page
+       printing switches to, so it gets the same darkening every other
+       token above gets for the same reason. */
+    --color-progress: #0e7fa8;
   }
   .site-header, .site-footer, #formSection, .no-print { display: none !important; }
   body { background: #fff; color: #1c2230; }
+  /* A glow is a screen effect sized for a dark background; on white paper
+     it just blurs the bar's edge. The bar itself still prints in the
+     darkened --color-progress above. */
+  .volume-chart-actual, .volume-chart-legend-dot-actual { box-shadow: none; }
   .card { box-shadow: none; padding: 0; border: none; }
   .week-block { break-inside: avoid; }
   /* The accordion (see .week-block[open] above) is a screen-only reading
