@@ -27,9 +27,14 @@ if (-not (Get-EnvOrRegistry "ANTHROPIC_API_KEY")) {
   Write-Host "NOTE: ANTHROPIC_API_KEY is not set - the '/api/enhance-plan' AI endpoint will return an error until you set it (and, if this server was already running, restart it)."
 }
 
+# charset spelled out on every text type. These files are UTF-8 and full of
+# em dashes and Indonesian copy; without the header a browser falls back to
+# the containing document's encoding, which happens to be right here only
+# because index.html declares <meta charset="UTF-8">. Saying it directly
+# removes the dependency on that accident.
 $mime = @{
-  ".html" = "text/html"; ".css" = "text/css"; ".js" = "application/javascript";
-  ".json" = "application/json"; ".svg" = "image/svg+xml"; ".png" = "image/png";
+  ".html" = "text/html; charset=utf-8"; ".css" = "text/css; charset=utf-8"; ".js" = "application/javascript; charset=utf-8";
+  ".json" = "application/json; charset=utf-8"; ".svg" = "image/svg+xml; charset=utf-8"; ".png" = "image/png";
 }
 
 # The rule-based schedule (days/km/pace) is computed entirely client-side in
@@ -132,10 +137,30 @@ Balas HANYA JSON valid (tanpa code fence, tanpa teks lain), format PERSIS:
 {"adjustments": [{"week": N, "dow": 0-6, "action": "skip|reduce", "suggestedKm": X, "reason": "maks 12 kata"}], "summary": "maks 2 kalimat, jelaskan ke pelari kenapa jadwalnya disesuaikan begini"}
 '@
 
+# Windows PowerShell 5.1 guesses text encodings from Content-Type headers and
+# falls back to a single-byte codepage whenever the charset is missing, which
+# it usually is. That guess is wrong in both directions here, so every hop in
+# this file states UTF-8 explicitly rather than letting it be inferred. Two
+# measured examples of what that cost:
+#
+#   - api.anthropic.com replies "application/json" with no charset, so
+#     Invoke-RestMethod decoded it as ISO-8859-1: an en dash (U+2013, bytes
+#     E2 80 93) arrived as three separate characters and reached the browser
+#     as "25.5<mojibake>37 km/minggu" in the AI coaching note.
+#   - The browser POSTs "application/json" with no charset either, so
+#     HttpListenerRequest.ContentEncoding fell back to the system ANSI
+#     codepage and the runner's own note went into the prompt as
+#     "lutut nyeri 5<mojibake>6 km".
+#
+# Only the local dev server was ever affected. Production runs api/*.js on
+# Node, where fetch() and Response.json() are UTF-8 by specification.
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
 function Send-JsonResponse($res, $statusCode, $jsonText) {
   $res.StatusCode = $statusCode
-  $res.ContentType = "application/json"
+  $res.ContentType = "application/json; charset=utf-8"
   $bytes = [System.Text.Encoding]::UTF8.GetBytes($jsonText)
+  $res.ContentLength64 = $bytes.Length
   $res.OutputStream.Write($bytes, 0, $bytes.Length)
 }
 
@@ -149,13 +174,24 @@ function Send-AiResponse($res, $apiKey, $model, $systemPrompt, $userContent, $ma
     system = $systemPrompt
     messages = @(@{ role = "user"; content = $userContent })
   } | ConvertTo-Json -Depth 10
+  # Sent as bytes, not as a string: handing Invoke-* a string body lets it
+  # pick the encoding, and the prompts above plus the runner's own notes are
+  # full of the punctuation that goes wrong when it picks a single-byte one.
+  $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($requestBody)
 
   try {
-    $aiResponse = Invoke-RestMethod -Uri "https://api.anthropic.com/v1/messages" -Method Post -Headers @{
+    # Invoke-WebRequest rather than Invoke-RestMethod so the response body is
+    # reachable as raw bytes (RawContentStream) and can be decoded as UTF-8
+    # here. Invoke-RestMethod parses the JSON for us, but only after it has
+    # already decoded the bytes with its own charset guess — by the time it
+    # hands back an object the damage is done and is not recoverable without
+    # round-tripping through the wrong codepage on purpose.
+    $webResponse = Invoke-WebRequest -Uri "https://api.anthropic.com/v1/messages" -Method Post -Headers @{
       "x-api-key" = $apiKey
       "anthropic-version" = "2023-06-01"
-      "content-type" = "application/json"
-    } -Body $requestBody -TimeoutSec 60
+    } -ContentType "application/json; charset=utf-8" -Body $bodyBytes -TimeoutSec 60 -UseBasicParsing
+
+    $aiResponse = [System.Text.Encoding]::UTF8.GetString($webResponse.RawContentStream.ToArray()) | ConvertFrom-Json
 
     $textOut = $aiResponse.content[0].text
     $textOut = $textOut -replace '^\s*```json\s*', '' -replace '\s*```\s*$', ''
@@ -167,7 +203,7 @@ function Send-AiResponse($res, $apiKey, $model, $systemPrompt, $userContent, $ma
     if ($_.Exception.Response) {
       try {
         $stream = $_.Exception.Response.GetResponseStream()
-        $streamReader = New-Object System.IO.StreamReader($stream)
+        $streamReader = New-Object System.IO.StreamReader($stream, $Utf8NoBom)
         $errBody = $streamReader.ReadToEnd()
         $streamReader.Close()
         if ($errBody) { $errDetail = $errBody }
@@ -189,7 +225,12 @@ while ($listener.IsListening) {
       if (-not $apiKey) {
         Send-JsonResponse $res 400 (@{ error = "ANTHROPIC_API_KEY belum diset di environment variable server. Set dulu (mis. `$env:ANTHROPIC_API_KEY = 'sk-ant-...') lalu restart server." } | ConvertTo-Json)
       } else {
-        $reader = New-Object System.IO.StreamReader($req.InputStream, $req.ContentEncoding)
+        # NOT $req.ContentEncoding: the browser's fetch() sends
+        # "application/json" with no charset (see js/app.js), and with none
+        # given HttpListener falls back to the machine's ANSI codepage, which
+        # mangles anything the runner typed outside ASCII before it ever
+        # reaches the prompt.
+        $reader = New-Object System.IO.StreamReader($req.InputStream, $Utf8NoBom)
         $bodyText = $reader.ReadToEnd()
         $reader.Close()
 
