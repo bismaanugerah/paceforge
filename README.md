@@ -93,6 +93,10 @@ jalan — `.claude/serve.ps1` sengaja tidak direplikasi untuk endpoint Strava (c
 index.html                Halaman utama (gate login, form input, hasil plan)
 css/styles.css            Semua styling
 js/planGenerator.js       Logika inti pembuatan plan (murni fungsi, tanpa DOM)
+js/vdot.js                Zona pace VDOT (rumus Daniels-Gilbert) — dipakai planGenerator & app
+js/planText.js            Label sesi/zona + caption struktur workout (dipakai layar, PDF, kalender)
+js/planEdits.js           Replay tukar-hari & override "lagi nggak fit" ke plan yang baru digenerate
+js/ics.js                 Bikin feed kalender (iCalendar) dari objek plan — dipakai server, bukan browser
 js/app.js                 Gating login, wiring form, render hasil, simpan/muat plan, auto-fill Strava
 js/config.js              Isi Client ID Strava (lihat setup di atas)
 js/auth.js                Login/logout Strava (atau simulasi mode dummy) + expose status ke app.js
@@ -104,6 +108,9 @@ api/strava-summary.js     Serverless function — analisis aktivitas Strava jadi
 api/plan.js               Serverless function — simpan/muat plan tersimpan (ganti akses langsung Supabase)
 api/plan-history.js       Serverless function — riwayat blok latihan yang sudah selesai (buat panel "Riwayat Blok")
 api/enhance-plan.js       Serverless function — proxy ke Claude API untuk catatan pelatih
+api/calendar.js           Serverless function — feed kalender (.ics) yang selalu ikut plan terbaru
+api/calendar-url.js       Serverless function — kasih link kalender ke user yang sudah login
+server/planEngine.js      Menjalankan engine plan versi browser (js/*.js) di Node, buat api/calendar.js
 server/session.js         Helper JWT + cookie session (dipakai banyak file di api/)
 server/supabaseAdmin.js   Helper fetch ke Supabase REST pakai service-role key (server-only)
 server/strava.js          Helper OAuth token + fetch/analisis aktivitas Strava
@@ -111,6 +118,38 @@ supabase/schema.sql       Skema tabel `strava_athletes` + `plans` + `plan_histor
 .claude/launch.json       Config untuk preview server (dipakai tool Claude Code)
 .claude/serve.ps1         Static file server + endpoint AI lokal berbasis PowerShell (dev tanpa Vercel)
 ```
+
+## Export ke kalender
+
+Tombol **"📅 Hubungkan dengan Kalender"** di halaman hasil memberi link `webcal://` untuk
+disambungkan ke aplikasi kalendermu: satu event all-day per sesi latihan (hari rest sengaja tidak
+dimasukkan), jalan di Google Calendar, Apple Calendar, Outlook, dan aplikasi kalender mana pun yang
+bicara iCalendar.
+
+Sengaja **feed yang tersambung, bukan unduh file** — versi awal fitur ini punya tombol unduh `.ics`
+sekali-pakai dan itu dihapus: salinan mati langsung basi begitu satu sesi ditukar hari atau volume
+satu minggu disesuaikan, sementara feed ikut berubah sendiri. Konsekuensi yang perlu diketahui:
+
+- **Google Calendar**: cuma bisa dihubungkan dari **komputer** (calendar.google.com →
+  Other calendars → From URL) — aplikasi HP-nya di Android maupun iOS tidak punya menu itu sama
+  sekali. Sesudah terhubung, otomatis ikut sync ke HP. Google juga bisa telat sampai ~24 jam
+  menarik perubahan feed.
+- **iPhone / Apple Calendar**: bisa langsung dari HP (Settings → Apps → Calendar → Calendar
+  Accounts → Add Account → Other → Add Subscribed Calendar).
+- **Mode dummy**: tidak ada server, jadi tidak ada feed — tombolnya menjelaskan itu. Fitur kalender
+  baru hidup di versi yang sudah di-deploy.
+
+UID event stabil per tanggal per athlete, jadi refresh feed meng-*update* event yang sudah ada,
+bukan menumpuk salinan kedua.
+
+Event-nya sengaja **all-day**, bukan dipatok jam tertentu — PaceForge tidak pernah menanyakan jam
+berapa kamu latihan, jadi jam berapa pun yang dipasang cuma karangan.
+
+Link kalender itu ditandatangani (HMAC, lihat `buildCalendarToken` di
+[`server/session.js`](server/session.js)) dan **read-only**: dia cuma bisa dipakai membaca jadwal
+latihan athlete itu, tidak bisa dipakai sebagai session login. Tetap perlakukan sebagai link
+pribadi — siapa pun yang punya link-nya bisa melihat jadwal latihanmu. Untuk mencabut semua link
+yang pernah dibagikan, ganti `SESSION_JWT_SECRET` (ini juga akan me-logout semua session).
 
 ## Cara kerja algoritma (`js/planGenerator.js`)
 

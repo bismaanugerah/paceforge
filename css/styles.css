@@ -597,6 +597,31 @@ textarea.has-error:focus {
 .feedback-status { font-size: 0.85rem; color: var(--color-accent); margin: 0; }
 .feedback-status.is-error { color: var(--color-error); }
 
+/* Calendar export panel (see #calendarPanel in index.html) — the two
+   options stack rather than sitting side by side even on desktop: they're
+   a choice between two workflows, not two buttons of equal weight, and
+   the explanation under each is what actually decides it. */
+.calendar-panel { margin: 16px 0; display: flex; flex-direction: column; gap: 18px; }
+.calendar-option h3 { margin: 0 0 4px; font-size: 0.95rem; }
+.calendar-option p { margin: 0 0 10px; font-size: 0.85rem; color: var(--color-text-muted); line-height: 1.55; }
+/* The feed URL is long and unbreakable — wrap it anywhere rather than
+   letting it push the card wider than the phone screen, and make one tap
+   select the whole thing for anyone whose browser blocked the automatic
+   clipboard copy. */
+.calendar-url {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  word-break: break-all;
+  user-select: all;
+}
+
 /* Auto-shown suggestion, not a runner-opened panel — deliberately the
    error palette (same soft/muted red as .form-error), not .form-warning's
    amber: this sits right next to plain informational notices (e.g. "3
@@ -635,8 +660,7 @@ textarea.has-error:focus {
   margin: 14px 0;
   font-size: 0.9rem;
 }
-.result-notice p { margin: 0; line-height: 1.5; }
-.result-notice-dismiss {
+.result-notice p { margin: 0; line-height: 1.5; }.result-notice-dismiss {
   position: absolute;
   top: 6px;
   right: 8px;

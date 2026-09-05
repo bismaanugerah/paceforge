@@ -392,6 +392,7 @@
       <div class="result-actions no-print">
         <button id="feelingOffBtn" class="btn btn-secondary">😔 Lagi nggak fit?</button>
         <button id="printBtn" class="btn btn-secondary">📄 Simpan sebagai PDF</button>
+        <button id="calendarBtn" class="btn btn-secondary">📅 Hubungkan dengan Kalender</button>
         <button id="newPlanBtn" class="btn btn-ghost">↺ Buat Plan Baru</button>
       </div>
     </div>
@@ -425,6 +426,33 @@
         <button type="button" id="feedbackCancelBtn" class="btn btn-ghost btn-small">Batal</button>
       </div>
       <p id="feedbackStatus" class="feedback-status" hidden></p>
+    </div>
+
+    <!-- Opened by #calendarBtn. A panel rather than a plain button
+         because subscribing isn't one click: the steps differ per
+         calendar app, and Google's can only be done from a computer —
+         that has to be readable BEFORE the link is fetched, or an
+         Android user taps the button and then hunts for a menu their
+         phone doesn't have.
+         A one-off .ics download used to sit here as a second option and
+         was removed deliberately (the runner's call): a snapshot that
+         silently goes stale the first time a session is swapped is worse
+         than no export at all. The .ics builder itself (js/ics.js) is
+         still very much alive — it's what api/calendar.js serves — it
+         just no longer runs in the browser. -->
+    <div id="calendarPanel" class="calendar-panel no-print card" hidden>
+      <div class="calendar-option">
+        <h3>Hubungkan dengan kalendermu</h3>
+        <p>Sambungkan link ini ke aplikasi kalendermu. Cukup dihubungkan sekali: tukar hari, penyesuaian volume, atau blok baru ikut berubah sendiri di kalender.</p>
+        <p><strong>Google Calendar:</strong> menghubungkannya harus lewat komputer (calendar.google.com → Other calendars → From URL) — aplikasi HP-nya nggak punya menu itu. Sesudah terhubung, otomatis muncul juga di HP. Update dari PaceForge bisa telat sampai ~24 jam di sisi Google.<br><strong>iPhone:</strong> bisa langsung dari HP — Settings → Apps → Calendar → Calendar Accounts → Add Account → Other → Add Subscribed Calendar.</p>
+        <p>Simpan link ini buat dirimu sendiri — siapa pun yang punya link ini bisa melihat jadwal latihanmu.</p>
+        <button type="button" id="calendarSubscribeBtn" class="btn btn-primary btn-small">🔗 Ambil link kalender</button>
+        <p id="calendarUrlOut" class="calendar-url" hidden></p>
+        <p id="calendarSubscribeStatus" class="feedback-status" hidden></p>
+      </div>
+      <div class="feedback-actions">
+        <button type="button" id="calendarCloseBtn" class="btn btn-ghost btn-small">Tutup</button>
+      </div>
     </div>
 
     <div class="ai-status-row no-print">
@@ -492,6 +520,14 @@
 <script src="js/auth.js"></script>
 <script src="js/vdot.js"></script>
 <script src="js/planGenerator.js"></script>
+<script src="js/planText.js"></script>
+<script src="js/planEdits.js"></script>
+<!-- js/ics.js is deliberately NOT loaded here: the calendar export is a
+     subscribable feed built server-side (api/calendar.js, via
+     server/planEngine.js, which reads that file off disk itself). Nothing
+     in the browser calls it, so shipping it to every visitor would be
+     dead weight. -->
+
 <script src="js/app.js"></script>
 </body>
 </html>

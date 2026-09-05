@@ -3,6 +3,16 @@
  * Wires up the form, validates input, calls PaceForgeGenerator, renders results.
  */
 (() => {
+  // Session-labelling/description helpers — moved out to js/planText.js so
+  // the calendar export (js/ics.js) can reuse them from Node too, where
+  // there's no DOM and none of this file exists. Pulled in under their
+  // original names so every call site below reads exactly as it did when
+  // these lived here.
+  const {
+    restDisplayKey, zoneForDay, dayTypeLabel, paceTargetLabel,
+    structureToSegments, formatKm,
+  } = PaceForgePlanText;
+
   const RACE_META = {
     '5k': { km: 5, label: '5K' },
     '10k': { km: 10, label: '10K' },
@@ -90,22 +100,6 @@
     runWalk: '#74b358',
   };
 
-  // A rest day defaults to nudging toward strength/gym work as a
-  // productive use of the slot — but only on a weekday. Weekend rest is
-  // usually genuine recovery (from the week's harder weekday running, and
-  // often sits right next to the long run), not another slot to fill, so
-  // it's shown as plain "Rest" instead. This is purely a display choice —
-  // day.type is always 'rest' either way, so nothing that touches the data
-  // (applyFeedbackAdjustment, markCompletedSessionsFromStrava's completion
-  // matching, saved-plan persistence, ...) needs to know about it — only
-  // the label/color lookups below (renderDayRow, PDF export) key off this
-  // instead of day.type directly.
-  const WEEKEND_DOWS = new Set([0, 6]);
-  function restDisplayKey(day) {
-    if (day.type !== 'rest') return day.type;
-    return WEEKEND_DOWS.has(day.dow) ? 'rest' : 'restStrength';
-  }
-
   // Maps each VDOT pace zone (js/vdot.js's ZONE_ORDER) onto the closest
   // matching session type, so the Zona Pace table's row dots — and, below,
   // the workout-structure bars and Pace Target column — all reuse the same
@@ -118,93 +112,6 @@
     interval: 'interval',
     repetition: 'repetition',
   };
-
-  // Reverse of the above: which VDOT zone a given session TYPE trains at.
-  // Drives the workout-structure bar's colors (a session's "hard" segments
-  // are colored by its own zone, its warm up/recovery/cool down segments by
-  // the Easy zone — see zoneColorFor/structureToSegments below) and the
-  // Pace Target column (names the zone instead of a specific week's pace
-  // number, which ramps week to week and is less useful to internalize
-  // than "this is an Interval day"). A marathon-specific long run (MSL)
-  // overrides 'longRun' -> 'marathon' per-day — see zoneForDay.
-  const TYPE_TO_ZONE = {
-    recovery: 'easy',
-    easy: 'easy',
-    shakeout: 'easy',
-    longRun: 'easy',
-    tempo: 'threshold',
-    interval: 'interval',
-    repetition: 'repetition',
-    // See planGenerator.js's weekPaces.fartlek comment — work segments
-    // reference Interval zone as a loose ceiling/reference, not a strict
-    // target.
-    fartlek: 'interval',
-    marathonPace: 'marathon',
-    // Only actually used for the conservativeMode variant of 'evaluation'
-    // (a real self-test paced at weekPaces.tempo — see planGenerator.js's
-    // 'race'-day-type branch): a normal, non-conservative Time Trial has
-    // no prescribed pace, so the Pace Target column shows "Time Trial"
-    // instead, keyed off day.paceSecPerKm being unset rather than this
-    // zone mapping (see renderDayRow/the PDF export).
-    evaluation: 'threshold',
-    // First-timer only — just feeds roleColorCss' 'work' segment color
-    // (Easy green) for the structure bar; the Pace Target column itself
-    // never reaches this mapping for runWalk (see paceTargetLabel, which
-    // special-cases it to "Run/Walk" before falling through here).
-    runWalk: 'easy',
-  };
-
-  // Short zone labels for the Pace Target column / bar tooltips — matches
-  // PaceForgeVDOT.ZONE_LABELS except calling the threshold zone "Tempo"
-  // here, since that's the name the day-table's own session-type badges
-  // (TYPE_LABELS in planGenerator.js) use for it.
-  const ZONE_SHORT_LABEL = { easy: 'Easy', marathon: 'Marathon', threshold: 'Tempo', interval: 'Interval', repetition: 'Repetition' };
-
-  function zoneForDay(day) {
-    if (day.type === 'longRun' && day.isMarathonSpecific) return 'marathon';
-    return TYPE_TO_ZONE[day.type] || null;
-  }
-
-  // The session-type badge's text for a day — shared by the day table
-  // (renderDayRow) and the "today" hero card (renderTodayCard) so those
-  // two can never end up naming the same session differently. See
-  // paceTargetLabel just below for why First-timer's evaluation day gets
-  // a gentler "5K" label than the other modes' "Time Trial".
-  function dayTypeLabel(day, isFirstTimerPlan) {
-    const { TYPE_LABELS } = PaceForgeGenerator;
-    if (day.type === 'longRun' && day.isMarathonSpecific) {
-      return `${TYPE_LABELS.longRun} (Pace ${day.structure?.paceLabel || 'Marathon'})`;
-    }
-    if (day.type === 'evaluation' && isFirstTimerPlan) return '5K';
-    const displayKey = restDisplayKey(day);
-    return TYPE_LABELS[displayKey] || displayKey;
-  }
-
-  // Pace Target column text — shared by the on-screen day row and the PDF
-  // export so the two never drift. day.type === 'race' always gets "Race
-  // Pace" (day.paceSecPerKm is real goal race pace there). 'evaluation' is
-  // split on whether paceSecPerKm is actually set: conservativeMode's
-  // variant is a real self-test at weekPaces.tempo (falls through to its
-  // zone label, "Tempo"), while a normal Time Trial has no prescribed pace
-  // at all (see planGenerator.js's 'race'-day-type branch) — it wouldn't
-  // make sense to hit a target on a day whose whole point is discovering
-  // your own current pace by racing it.
-  // 'Time Trial' reads as too daunting for a total-beginner First-timer
-  // plan (user feedback) — same day.type ('evaluation') as Base Building/
-  // Maintenance's own evaluation week, just a gentler label for this one
-  // mode specifically (those two keep "Time Trial"). isFirstTimerPlan is
-  // passed in rather than read from module state here so this stays a
-  // plain function of its arguments, like the rest of this file's label
-  // helpers.
-  function paceTargetLabel(day, zone, isFirstTimerPlan) {
-    if (day.type === 'race') return 'Race Pace';
-    if (day.type === 'evaluation' && day.paceSecPerKm == null) return isFirstTimerPlan ? '5K' : 'Time Trial';
-    // No prescribed pace at all for a run/walk session — the target is the
-    // time interval (see structureToSegments), not a pace, so this doesn't
-    // fall through to a zone label (which would misleadingly show "Easy").
-    if (day.type === 'runWalk') return 'Run/Walk';
-    return zone ? ZONE_SHORT_LABEL[zone] : '—';
-  }
 
   function zoneColorHex(zone) {
     return TYPE_HEX[ZONE_TYPE_COLOR_KEY[zone]] || TYPE_HEX.easy;
@@ -1356,35 +1263,6 @@
   // table (see archivePreviousBlock/loadAndRenderBlockHistory below).
   const DUMMY_PLAN_HISTORY_KEY = 'paceforge_dummy_plan_history';
 
-  // Every field a day's session actually carries, as opposed to date/
-  // dayName/dow (which belong to the calendar day itself, not whatever
-  // session is scheduled on it, and must stay put when swapping). Shared
-  // by swapPlanDaySessions below and nothing else — kept as a flat list
-  // so it's obvious at a glance exactly what does and doesn't move.
-  const SESSION_FIELDS = ['type', 'km', 'paceSecPerKm', 'structure', 'isMarathonSpecific', 'workoutVariant', 'recoveryPaceSecPerKm'];
-
-  // Swaps everything about what's scheduled on two days (type, distance,
-  // pace, workout structure, ...) while leaving each day's own date fixed
-  // — used by handleSwapDayClick below (a user manually moving a session
-  // to a different day) and applySavedDaySwaps (replaying that same move
-  // after the plan's been regenerated from settings on a later load).
-  // Explicitly deletes each field before reassigning rather than relying
-  // on Object.assign alone, since Object.assign only overwrites keys that
-  // exist on the source — a field the destination day doesn't have (e.g.
-  // an easy day has no `structure`) would otherwise survive the swap as a
-  // stale leftover from whatever this day used to be.
-  function swapPlanDaySessions(dayA, dayB) {
-    const sessionA = {};
-    const sessionB = {};
-    SESSION_FIELDS.forEach(field => {
-      if (field in dayA) sessionA[field] = dayA[field];
-      if (field in dayB) sessionB[field] = dayB[field];
-    });
-    SESSION_FIELDS.forEach(field => { delete dayA[field]; delete dayB[field]; });
-    Object.assign(dayA, sessionB);
-    Object.assign(dayB, sessionA);
-  }
-
   // Re-renders one week's day rows in place from lastPlan's current data
   // — used after a swap instead of a full renderPlan() so the accordion's
   // open/closed state, other weeks' rows, and everything outside
@@ -1409,65 +1287,11 @@
   // rather than surviving in the regenerated data on its own.
   function applySavedDaySwaps(savedSwaps) {
     if (!Array.isArray(savedSwaps) || !savedSwaps.length || !lastPlan) return;
-    const touchedWeeks = new Set();
-    savedSwaps.forEach(swap => {
-      const week = lastPlan.weeks.find(w => w.weekNumber === swap.week);
-      if (!week) return;
-      const dayA = week.days.find(d => d.dow === swap.dowA);
-      const dayB = week.days.find(d => d.dow === swap.dowB);
-      if (!dayA || !dayB) return;
-      swapPlanDaySessions(dayA, dayB);
-      touchedWeeks.add(swap.week);
-    });
+    const touchedWeeks = PaceForgePlanEdits.applyDaySwaps(lastPlan, savedSwaps);
     daySwaps = savedSwaps.slice();
     touchedWeeks.forEach(reRenderWeek);
   }
 
-  // Applies one "I'm sick/tired" adjustment to a day in place — either
-  // 'skip' (rest it entirely) or 'reduce' (shrink it to a smaller
-  // distance, rebuilding its workout-structure bar at the new size with
-  // the same type-specific builder the generator itself would use, so an
-  // interval/tempo/repetition session still shows a correctly-sized
-  // warm-up/work/cooldown breakdown rather than a stale one sized for the
-  // original distance). Long run uses buildSimpleStructure rather than
-  // its usual race-specific builder — this is a one-off runner-approved
-  // exception to the plan, not a re-run of the generator's own long-run
-  // logic, so losing the race-pace-segment detail here is an acceptable
-  // simplification.
-  function applyFeedbackAdjustment(day, action, suggestedKm) {
-    const km = action === 'skip' ? 0 : Math.max(0, Math.round(suggestedKm * 2) / 2);
-    const SESSION_FIELDS_TO_CLEAR = ['structure', 'isMarathonSpecific', 'workoutVariant', 'recoveryPaceSecPerKm'];
-    if (action === 'skip' || km <= 0) {
-      SESSION_FIELDS_TO_CLEAR.forEach(field => delete day[field]);
-      day.type = 'rest';
-      day.km = 0;
-      return;
-    }
-    day.km = km;
-    const { buildSimpleStructure, buildIntervalStructure, buildTempoStructure, buildRepetitionStructure, buildFartlekStructure } = PaceForgeGenerator;
-    if (day.type === 'interval') {
-      // day.paceSecPerKm is this day's own I-pace (untouched by the km
-      // reduction above) — buildIntervalStructure may re-resolve
-      // day.workoutVariant against it if the requested variant no longer
-      // fits under its duration cap (see planGenerator.js).
-      const built = buildIntervalStructure(km, lastFitnessLevel, lastConservativeMode, day.workoutVariant, day.paceSecPerKm, day.recoveryPaceSecPerKm);
-      day.workoutVariant = built.resolvedVariant;
-      day.structure = built.structure;
-    } else if (day.type === 'tempo') {
-      day.structure = buildTempoStructure(km, day.workoutVariant, day.recoveryPaceSecPerKm);
-    } else if (day.type === 'repetition') {
-      const built = buildRepetitionStructure(km, day.workoutVariant, day.paceSecPerKm, day.recoveryPaceSecPerKm);
-      day.workoutVariant = built.resolvedVariant;
-      day.structure = built.structure;
-    } else if (day.type === 'fartlek') {
-      // day.recoveryPaceSecPerKm is already weekPaces.easy for a fartlek
-      // day (not weekPaces.recovery like interval/repetition) — see
-      // planGenerator.js's buildFartlekStructure comment for why.
-      day.structure = buildFartlekStructure(km, day.paceSecPerKm, day.recoveryPaceSecPerKm);
-    } else {
-      day.structure = buildSimpleStructure(km);
-    }
-  }
 
   // Replays a saved feedbackOverrides list against a just-regenerated
   // lastPlan — same reasoning as applySavedDaySwaps above: restoring a
@@ -1475,23 +1299,23 @@
   // none of a runner-approved override on its own.
   function applySavedFeedbackOverrides(savedOverrides) {
     if (!Array.isArray(savedOverrides) || !savedOverrides.length || !lastPlan) return;
-    const touchedWeeks = new Set();
-    savedOverrides.forEach(entry => {
-      const week = lastPlan.weeks.find(w => w.weekNumber === entry.week);
-      const day = week?.days.find(d => d.dow === entry.dow);
-      if (!day) return;
-      // structure isn't saved (large, and cheaply rebuildable) — just
-      // reconstruct it the same way applyFeedbackAdjustment does rather
-      // than duplicating that logic here. Also relies on it (rather than
-      // setting day.type/day.km directly) to clear stale fields left over
-      // from whatever this day was regenerated as — a 'rest' override
-      // still needs its old structure/workoutVariant/etc wiped, same as
-      // a fresh 'skip' does.
-      applyFeedbackAdjustment(day, entry.type === 'rest' ? 'skip' : 'reduce', entry.km);
-      touchedWeeks.add(entry.week);
-    });
+    const touchedWeeks = PaceForgePlanEdits.applyFeedbackOverrides(lastPlan, savedOverrides, planEditOpts());
     feedbackOverrides = savedOverrides.slice();
     touchedWeeks.forEach(reRenderWeek);
+  }
+
+  // The two generator inputs js/planEdits.js needs but deliberately
+  // doesn't hold itself (it's stateless so api/calendar.js can share it)
+  // — kept in one place here so every call site passes the same thing.
+  function planEditOpts() {
+    return { fitnessLevel: lastFitnessLevel, conservativeMode: lastConservativeMode };
+  }
+
+  // Thin wrapper so the several direct callers below (the "feeling off"
+  // flow, the missed-week re-plan) keep their original 3-argument shape
+  // rather than each threading planEditOpts() through by hand.
+  function applyFeedbackAdjustment(day, action, suggestedKm) {
+    PaceForgePlanEdits.applyFeedbackAdjustment(day, action, suggestedKm, planEditOpts());
   }
 
   // Deterministic stand-in for the AI endpoint when it's unavailable
@@ -1834,7 +1658,7 @@
       if (!proceed) return false;
     }
     clearWeekNotice();
-    swapPlanDaySessions(dayA, dayB);
+    PaceForgePlanEdits.swapPlanDaySessions(dayA, dayB);
     daySwaps.push({ week: weekNumber, dowA, dowB });
     reRenderWeek(weekNumber);
     markCompletedSessionsFromStrava(lastPlan).catch(() => {});
@@ -2466,6 +2290,16 @@
   });
 
   document.getElementById('printBtn').addEventListener('click', downloadPlanAsPdf);
+
+  const calendarPanel = document.getElementById('calendarPanel');
+  const calendarUrlOut = document.getElementById('calendarUrlOut');
+  const calendarSubscribeStatus = document.getElementById('calendarSubscribeStatus');
+  document.getElementById('calendarBtn').addEventListener('click', () => {
+    calendarPanel.hidden = !calendarPanel.hidden;
+    if (!calendarPanel.hidden) calendarPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+  document.getElementById('calendarCloseBtn').addEventListener('click', () => { calendarPanel.hidden = true; });
+  document.getElementById('calendarSubscribeBtn').addEventListener('click', showCalendarSubscribeUrl);
   // Delegated (rows are rebuilt via innerHTML on every render/re-render,
   // see renderPlan/reRenderWeek) rather than bound per-button.
   planWeeksEl.addEventListener('click', (e) => {
@@ -2911,6 +2745,57 @@
       .replace(/🏁/g, '')
       .replace(/✨/g, '')
       .trim();
+  }
+
+  // Fetches this athlete's subscribable feed URL (api/calendar-url.js) and
+  // shows it, copying it to the clipboard in the same click so the common
+  // case is paste-and-done. The URL is shown as selectable text either
+  // way — clipboard access is denied often enough (insecure origin, a
+  // browser setting, an in-app webview) that it can't be the only way to
+  // get the link out of here.
+  async function showCalendarSubscribeUrl() {
+    const setStatus = (text, isError = false) => {
+      calendarSubscribeStatus.textContent = text;
+      calendarSubscribeStatus.classList.toggle('is-error', isError);
+      calendarSubscribeStatus.hidden = !text;
+    };
+
+    // Dummy mode has no server behind it at all (see js/auth.js), so the
+    // feed has nothing to serve it — say so plainly instead of firing a
+    // fetch that can only 404. There's no local fallback to offer since
+    // the one-off .ics download was removed.
+    if (paceforgeAuth?.isDummy()) {
+      calendarUrlOut.hidden = true;
+      setStatus('Menghubungkan kalender butuh PaceForge yang sudah di-deploy (server + login Strava sungguhan). Di mode dummy belum ada feed yang bisa dihubungkan.', true);
+      return;
+    }
+
+    setStatus('Menyiapkan link kalender...');
+    try {
+      const res = await fetch('/api/calendar-url');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Server merespons status ${res.status}`);
+
+      calendarUrlOut.textContent = data.webcalUrl;
+      calendarUrlOut.hidden = false;
+
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(data.webcalUrl);
+        copied = true;
+      } catch { /* clipboard diblokir — link-nya tetap tampil di bawah */ }
+
+      // Deliberately short: the how-to for each calendar app is already
+      // spelled out in the panel above this line (see index.html), and
+      // repeating a trimmed version of it here would be the copy people
+      // read first and the one that's missing the Google desktop caveat.
+      setStatus(copied
+        ? '✓ Link disalin ke clipboard — tempel sesuai langkah di atas.'
+        : 'Salin link di bawah ini, lalu tempel sesuai langkah di atas.');
+    } catch (err) {
+      calendarUrlOut.hidden = true;
+      setStatus(`Gagal mengambil link kalender: ${err.message}`, true);
+    }
   }
 
   // Builds the currently-shown plan into a proper structured A4 PDF — real
@@ -3512,98 +3397,6 @@
   // folded into either. A plain continuous run (easy/recovery/long run/
   // shakeout) renders as a single solid block in its own zone's color;
   // interval/tempo sessions break down into their segments.
-  function formatKm(km) {
-    return km < 1 ? `${Math.round(km * 1000)} m` : `${Math.round(km * 10) / 10} km`;
-  }
-
-  // Turns a day.structure object into plain { segments, caption } data —
-  // shared by the HTML bar (renderWorkoutStructure, below) and the PDF bar
-  // (drawStructureBar) so the two never drift apart. Each segment carries a
-  // `role` ('work' | 'easy' | 'recovery') rather than a literal color,
-  // since the two renderers need different color formats (CSS var vs. hex
-  // for jsPDF) — each resolves role -> color itself via roleColorCss/
-  // roleColorHex, using the day's own zone (see zoneForDay) for 'work'.
-  // Recovery segments show their DURATION (recoverySec), not distance —
-  // real interval recoveries are jogged/walked for a set time, not a set
-  // distance (see buildRepsStructure in planGenerator.js for how
-  // recoverySec still gets a km equivalent purely for the bar's width).
-  function formatRecoveryDuration(sec) {
-    return `${Math.round(sec)} detik`;
-  }
-
-  // Run/walk-only (First-timer mode) — unlike formatRecoveryDuration above
-  // (never past ~2 minutes for every other session type's recovery jog),
-  // a run/walk segment can run up to 25 minutes by the program's final
-  // week, where "1500 detik" reads far worse than "25 menit". Kept
-  // separate from formatRecoveryDuration itself rather than changing that
-  // one's behavior, to avoid altering already-shipped interval/repetition/
-  // fartlek/tempo captions no one asked to change.
-  function formatMinSec(sec) {
-    const m = Math.floor(sec / 60);
-    const s = Math.round(sec % 60);
-    if (m === 0) return `${s} detik`;
-    if (s === 0) return `${m} menit`;
-    return `${m} menit ${s} detik`;
-  }
-
-  function structureToSegments(structure) {
-    let segments;
-    let caption = '';
-    if (structure.kind === 'interval') {
-      const recoveryLabel = formatRecoveryDuration(structure.recoverySec);
-      segments = [{ label: 'Warm Up', km: structure.warmupKm, role: 'easy' }];
-      for (let i = 0; i < structure.reps; i++) {
-        segments.push({ label: `Set ${i + 1}`, km: structure.workKm, role: 'work' });
-        segments.push({ label: 'Recovery', km: structure.recoveryKm, role: 'recovery', durationLabel: recoveryLabel });
-      }
-      segments.push({ label: 'Cool Down', km: structure.cooldownKm, role: 'easy' });
-      caption = `Warm up ${formatKm(structure.warmupKm)} → ${structure.reps}× (${formatKm(structure.workKm)} hard + ${recoveryLabel} recovery) → Cool down ${formatKm(structure.cooldownKm)}`;
-    } else if (structure.kind === 'tempo') {
-      segments = [
-        { label: 'Warm Up', km: structure.warmupKm, role: 'easy' },
-        { label: 'Tempo', km: structure.tempoKm, role: 'work' },
-        { label: 'Cool Down', km: structure.cooldownKm, role: 'easy' },
-      ];
-      caption = `Warm up ${formatKm(structure.warmupKm)} → Tempo ${formatKm(structure.tempoKm)} → Cool down ${formatKm(structure.cooldownKm)}`;
-    } else if (structure.kind === 'racePace') {
-      // Race-specific long run (MSL / its half-marathon equivalent) — easy
-      // buildup FIRST, race pace to FINISH, see
-      // buildRaceSpecificLongRunStructure in planGenerator.js for why that
-      // order specifically.
-      segments = [
-        { label: 'Easy', km: structure.easyKm, role: 'easy' },
-        { label: `Pace ${structure.paceLabel}`, km: structure.paceKm, role: 'work' },
-      ];
-      caption = `${formatKm(structure.easyKm)} easy → ${formatKm(structure.paceKm)} pace ${structure.paceLabel}`;
-    } else if (structure.kind === 'runWalk') {
-      // First-timer mode only (see generateFirstTimerPlan in
-      // planGenerator.js). Segments alternate run/walk by TIME, like
-      // interval's recovery segments already do (durationLabel), but here
-      // 'work' is easy-effort running (not a hard rep) and 'recovery' is a
-      // genuine walk, not a jog — see roleColorCss, which already colors
-      // 'work' by the day's own zone (Easy, for runWalk — see
-      // TYPE_TO_ZONE.runWalk) and 'recovery' its own fixed gray, so this
-      // reuses both roles as-is without needing a third one. walkKm/walkSec
-      // of 0 (the program's final week — see FIRST_TIMER_PROGRAM) omits
-      // the walk segment entirely rather than rendering a zero-width one.
-      const runLabel = formatMinSec(structure.runSec);
-      segments = [];
-      for (let i = 0; i < structure.reps; i++) {
-        segments.push({ label: 'Lari', km: structure.runKm, role: 'work', durationLabel: runLabel });
-        if (structure.walkSec > 0) {
-          segments.push({ label: 'Jalan', km: structure.walkKm, role: 'recovery', durationLabel: formatMinSec(structure.walkSec) });
-        }
-      }
-      caption = structure.walkSec > 0
-        ? `${structure.reps}× (lari ${runLabel} + jalan ${formatMinSec(structure.walkSec)})`
-        : `Lari ${runLabel} tanpa henti`;
-    } else {
-      // 'simple' — a single continuous block, no warm up/cool down split.
-      segments = [{ label: 'Run', km: structure.km, role: 'work' }];
-    }
-    return { segments, caption };
-  }
-
   function renderWorkoutStructure(structure, zone) {
     const { segments, caption } = structureToSegments(structure);
 
