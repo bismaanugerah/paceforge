@@ -2451,6 +2451,28 @@
     if (!btn) return;
     handleSwapDayClick(Number(btn.dataset.week), Number(btn.dataset.dow));
   });
+  // Per-week swap mode. The per-row swap buttons used to be permanently
+  // visible — seven outlined boxes down a week that is mostly about
+  // distances and paces, on a phone where there is no hover to hide them
+  // behind. They are now off until this asks for them, so the default
+  // reading of a week carries no controls at all.
+  planWeeksEl.addEventListener('click', (e) => {
+    const toggle = e.target.closest('.week-swap-toggle');
+    if (!toggle) return;
+    const block = toggle.closest('.week-block');
+    const on = !block.classList.contains('is-swapping');
+    block.classList.toggle('is-swapping', on);
+    toggle.setAttribute('aria-pressed', String(on));
+    // Turning the mode off mid-swap would leave a row highlighted as a
+    // pending source with no way left to click its partner — same reset
+    // handleSwapDayClick does when a source day is clicked a second time.
+    const weekNumber = Number(toggle.dataset.swapToggle);
+    if (!on && swapSelection && swapSelection.week === weekNumber) {
+      swapSelection = null;
+      reRenderWeek(weekNumber);
+      clearWeekNotice();
+    }
+  });
   // Drag-and-drop day swap (desktop mouse only — see handleDayDragStart's
   // comment) — delegated the same way the click handler above is, since
   // every row is rebuilt via innerHTML on each render/re-render.
@@ -2963,9 +2985,19 @@
     const defaultOpenWeekNumber = pickDefaultOpenWeek(weeks, currentWeek);
     planWeeksEl.innerHTML = weeks.map(week => {
       const vdot = weekVdot(week);
-      const vdotLine = vdot
-        ? `<div class="week-vdot">${icon('target')} Zona Pace (VDOT ${vdot.toFixed(1)}) per ${formatLongDate(week.startDate)}</div>`
-        : '';
+      // The VDOT line and the swap toggle share one strip under the header.
+      // The toggle lives here rather than in the <summary> for two
+      // reasons: the buttons it governs only exist while the week is open,
+      // and a <button> inside a <summary> has to fight that summary's own
+      // click handling to avoid folding the week away underneath itself.
+      const vdotText = vdot
+        ? `<span class="week-vdot-text">${icon('target')} Zona Pace (VDOT ${vdot.toFixed(1)})<span class="week-vdot-date"> per ${formatLongDate(week.startDate)}</span></span>`
+        : '<span></span>';
+      const weekToolbar = `
+        <div class="week-toolbar">
+          ${vdotText}
+          <button type="button" class="week-swap-toggle" data-swap-toggle="${week.weekNumber}" aria-pressed="false">${icon('swap')}Tukar hari</button>
+        </div>`;
       const isOpen = week.weekNumber === defaultOpenWeekNumber;
       const currentWeekBadge = currentWeek && week.weekNumber === currentWeek.weekNumber
         ? '<span class="week-current-badge">Saat ini</span>'
@@ -2991,7 +3023,7 @@
           <span class="week-total">Total: ${week.totalKm} km</span>
           <span class="week-toggle-icon" aria-hidden="true">▾</span>
         </summary>
-        ${vdotLine}
+        ${weekToolbar}
         <div class="table-scroll">
           <table class="day-table">
             <thead>
@@ -3629,6 +3661,25 @@
     const zone = zoneForDay(day);
     const pace = paceTargetLabel(day, zone, isFirstTimerPlan);
     const color = TYPE_COLORS[displayKey] || 'var(--type-rest)';
+    // A rest day's badge is the longest string in the table ("Rest /
+    // Strength Training") and appears three times in a typical week —
+    // rendered as a filled pill it outshouted the actual sessions around
+    // it, which is exactly backwards. It keeps its color (that violet is
+    // what says "strength training" rather than plain rest) and loses the
+    // fill. Only in this table: the hero card at the top shows one badge,
+    // as the subject of that card, and a filled pill is right there.
+    const badgeHtml = isRest
+      ? `<span class="type-badge type-badge-quiet" style="color:${color}">${label}</span>`
+      : `<span class="type-badge" style="background:${color}">${label}</span>`;
+    // "Tempo Run … Pace Tempo", "Easy Run … Pace Easy" — for most session
+    // types the pace zone repeats the name of the session verbatim, since
+    // both come from the same zone. The value stays in the DOM (the
+    // desktop table has a Pace Target column with a header, and a blank
+    // cell under a header reads as missing data); the phone layout, which
+    // has no header to answer to, hides the ones that say nothing new.
+    // Long Run at Easy pace and Recovery Run at Easy pace are the cases
+    // this deliberately keeps.
+    const paceRedundant = !!pace && label.toLowerCase().startsWith(pace.toLowerCase());
     // renderWorkoutStructure returns nothing for a shapeless session (see
     // its own comment), so the row is built from the result rather than
     // from `day.structure` being present — otherwise an Easy Run would
@@ -3665,15 +3716,19 @@
       <tr class="${rowClass}" data-date="${dateKey(day.date)}" data-week="${weekNumber}" data-dow="${day.dow}"${swapDisabled ? '' : ' draggable="true"'}>
         <td>${day.dayName}</td>
         <td>${day.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</td>
-        <td><span class="type-badge" style="background:${color}">${label}</span><span class="completed-slot"></span></td>
+        <td>${badgeHtml}<span class="completed-slot"></span></td>
         <!-- data-label carries the column header into the cell itself: on a
              phone the <thead> is hidden and these stack as labelled lines
              instead of columns (see the .day-table rules under the 600px
-             media query in css/styles.css). The pace text is wrapped so
-             that layout can drop a rest day's meaningless "—" without also
-             dropping the swap button sharing this cell. -->
-        <td data-label="Jarak">${km}</td>
-        <td data-label="Pace"><span class="pace-text">${pace}</span>${swapBtn}</td>
+             media query in css/styles.css). Only the pace cell still
+             carries one — "10,5 km" says what it is on its own, and after
+             the redundancy rule above a pace value on a phone is the rare
+             case rather than every row, so it is worth naming. The pace
+             text is wrapped so that layout can drop a rest day's
+             meaningless "—" without also dropping the swap button sharing
+             this cell. -->
+        <td>${km}</td>
+        <td data-label="Pace"><span class="pace-text${paceRedundant ? ' is-redundant' : ''}">${pace}</span>${swapBtn}</td>
       </tr>
       ${structureRow}
       ${analysisRow}

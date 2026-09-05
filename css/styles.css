@@ -1571,11 +1571,48 @@ summary.week-header:hover { background: var(--color-surface); }
   transition: transform 0.15s ease;
 }
 .week-block[open] > summary .week-toggle-icon { transform: rotate(180deg); }
-.week-vdot {
+/* The strip between a week's header and its table: the VDOT the week is
+   paced from, and the control that turns this week's swap buttons on.
+   min-width: 0 on the text so a long VDOT line wraps rather than pushing
+   the button off the right edge of a phone. */
+.week-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 8px 16px 0;
+}
+.week-vdot-text {
+  min-width: 0;
   font-size: 0.78rem;
   color: var(--color-text-muted);
 }
+/* Quiet until pressed — this is a mode switch for one week, not an action
+   competing with the schedule it sits above. */
+.week-swap-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.week-swap-toggle .icon { width: 13px; height: 13px; vertical-align: 0; }
+.week-swap-toggle:hover { color: var(--color-text); border-color: var(--color-text-muted); }
+.week-swap-toggle[aria-pressed="true"] {
+  color: var(--color-primary-dark);
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+.week-swap-toggle:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
 /* Lets the table scroll horizontally on its own if it's ever too wide for
    the screen (long labels, very small phones) instead of silently clipping
@@ -1631,12 +1668,10 @@ summary.week-header:hover { background: var(--color-surface); }
    row. Touch has no hover, so the mobile rules further down restore a
    permanently visible (and larger) version — see .day-table tr[data-date]
    .swap-day-btn under the 600px query. */
-/* Was a borderless glyph at 0.32 opacity, i.e. all but invisible until a
-   row happened to be hovered — and swapping a day is the plan's main
-   interaction, not a power-user secret. It keeps a faint outline at rest
-   so it reads as a control that is there to be pressed, and still steps
-   fully forward on row hover/focus so it never competes with the session
-   text beside it. */
+/* Fully opaque, unlike the near-invisible hover-to-reveal glyph this used
+   to be: it now only exists while the runner has explicitly asked for it
+   (see .week-swap-toggle), and a control you just switched on should not
+   then hide from you. */
 .swap-day-btn {
   float: right;
   border: 1px solid var(--color-border);
@@ -1645,19 +1680,22 @@ summary.week-header:hover { background: var(--color-surface); }
   border-radius: 6px;
   width: 26px;
   height: 26px;
-  display: inline-flex;
   align-items: center;
   justify-content: center;
   line-height: 1;
   cursor: pointer;
-  opacity: 0.5;
-  transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  transition: border-color 0.12s ease, color 0.12s ease;
 }
 .swap-day-btn .icon { width: 15px; height: 15px; vertical-align: 0; }
-.day-table tr:hover .swap-day-btn,
-.swap-day-btn:focus-visible { opacity: 1; }
-.swap-day-btn:hover { opacity: 1; border-color: var(--color-primary); color: var(--color-primary); }
-.is-swap-selected .swap-day-btn { opacity: 1; border-color: var(--color-primary); color: var(--color-primary); }
+/* Hidden until this week's "Tukar hari" toggle is on (see .week-toolbar
+   above). Seven outlined boxes down every open week were a permanent
+   fixture for an occasional action, with no hover on a phone to hide
+   them behind. Rows stay draggable regardless, so the desktop
+   drag-and-drop path is untouched by this. */
+.swap-day-btn { display: none; }
+.week-block.is-swapping .swap-day-btn { display: inline-flex; }
+.swap-day-btn:hover,
+.is-swap-selected .swap-day-btn { border-color: var(--color-primary); color: var(--color-primary); }
 
 .type-badge {
   display: inline-block;
@@ -1667,6 +1705,22 @@ summary.week-header:hover { background: var(--color-surface); }
   font-weight: 700;
   letter-spacing: -0.005em;
   color: #fff;
+}
+/* Rest days in the schedule table (see renderDayRow in js/app.js — the
+   hero card's own badge is deliberately NOT this). "Rest / Strength
+   Training" is the longest string in the table and shows up three times
+   in a typical week; as a filled pill it was the loudest thing on the
+   screen, louder than the sessions it sits between. It keeps its color,
+   set inline as `color` instead of `background`, and drops the fill and
+   the horizontal padding so it reads as a label rather than an object. */
+/* Doubled-up selector so it outranks the plain .type-badge padding the
+   phone block at the bottom of this file sets, whichever order they end
+   up in. */
+.type-badge.type-badge-quiet {
+  padding-left: 0;
+  padding-right: 0;
+  font-weight: 600;
+  background: none;
 }
 
 /* Marks a day whose scheduled session has a matching completed Strava
@@ -1787,6 +1841,9 @@ summary.week-header:hover { background: var(--color-surface); }
      only cause a repeated header at a page break. Same for the reveal
      animation, which has nothing to reveal in a printed document. */
   summary.week-header { position: static; }
+  /* Controls, not content — the swap toggle has nothing to do on paper,
+     and the buttons it governs are already hidden by default. */
+  .week-swap-toggle { display: none; }
   .week-block[open] > *:not(summary),
   .result-warning[open] > *:not(summary) { animation: none; }
   /* Same reasoning for the plan warnings: folding them away is a
@@ -1852,32 +1909,51 @@ summary.week-header:hover { background: var(--color-surface); }
   /* tr[data-date] is precisely the day rows — the structure-bar and
      completed-analysis rows below them carry no data-date and stay plain
      full-width blocks (their single colspan=5 cell needs no grid). */
+  /* Two rows, not three. The session badge used to get a line to itself
+     with distance and pace on a third line below it, which made every
+     ordinary session four lines tall once its structure bar is counted.
+     Badge, distance and pace now share row two as three aligned columns,
+     so they read down the week as a small table rather than as seven
+     stacked paragraphs. Column 1 is sized by the widest badge, which is
+     what puts every day name and every badge on a common left edge. */
   .day-table tr[data-date] {
     position: relative;
     display: grid;
-    grid-template-columns: auto 1fr;
+    /* A fixed first column so the dates line up down the week. Every <tr>
+       is its own independent grid, so with an auto first column each row
+       sized it to its own day name and the dates came out ragged. 60px
+       clears the longest ("Minggu"). */
+    grid-template-columns: 60px 1fr auto auto;
     grid-template-areas:
-      "hari tanggal"
-      "sesi sesi"
-      "km   pace";
+      "hari tanggal tanggal tanggal"
+      "sesi sesi    km      pace";
     align-items: center;
-    column-gap: 8px;
-    row-gap: 5px;
+    column-gap: 10px;
+    row-gap: 4px;
     padding: 10px 6px;
     /* The separator moves from the cells to the block itself — the cells
        are no longer a row, so a border on each would draw three lines. */
     border-bottom: 1px solid var(--color-border);
-    /* Keeps the swap button clear of the text; see its own rule below. */
-    padding-right: 44px;
   }
+  /* Only while this week's swap buttons are showing — the reserved gutter
+     is dead space the rest of the time. */
+  .week-block.is-swapping .day-table tr[data-date] { padding-right: 44px; }
   .day-table tr[data-date] > td { padding: 0; border-bottom: none; font-size: 0.85rem; }
   .day-table tr[data-date] > td:nth-child(1) { grid-area: hari; font-weight: 600; }
   .day-table tr[data-date] > td:nth-child(2) { grid-area: tanggal; color: var(--color-text-muted); }
   .day-table tr[data-date] > td:nth-child(3) { grid-area: sesi; }
-  .day-table tr[data-date] > td:nth-child(4) { grid-area: km; }
-  .day-table tr[data-date] > td:nth-child(5) { grid-area: pace; }
-  /* The <thead> label, reattached per cell now that the header row is
-     hidden — without it the last line reads as two bare values. */
+  /* Right-aligned so the distances form a clean number column down the
+     week (the cells already carry tabular-nums), with the pace, on the
+     rows that still show one, hanging off the end of it. */
+  .day-table tr[data-date] > td:nth-child(4) { grid-area: km; text-align: right; font-weight: 600; }
+  .day-table tr[data-date] > td:nth-child(5) { grid-area: pace; text-align: right; }
+  /* The <thead> label, reattached to the pace cell now that the header row
+     is hidden. Only that one: "10,5 km" carries its own unit and needed no
+     label, and the pair of them repeated on every session was eight
+     uppercase micro-labels per week. And with the redundant paces hidden
+     just below, a labelled pace is now the exception in a week rather
+     than every row — so it stays labelled, and the label collapses away
+     with the value it belongs to. */
   .day-table tr[data-date] > td[data-label]::before {
     content: attr(data-label) " ";
     color: var(--color-text-muted);
@@ -1885,6 +1961,12 @@ summary.week-header:hover { background: var(--color-surface); }
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
+  .day-table tr[data-date] > td[data-label]:has(.pace-text.is-redundant)::before { content: none; }
+  /* "Tempo Run … Pace Tempo" — see renderDayRow in js/app.js. The value is
+     kept in the DOM for the desktop table, which has a Pace Target column
+     with a header to answer to; here there is no header, so a value that
+     only repeats the badge two columns to its left is dropped. */
+  .day-table tr[data-date] .pace-text.is-redundant { display: none; }
   /* A rest day has no distance and no pace target — "— —" under two
      labels is noise, so both lines are dropped. The swap button is NOT:
      rest days are swappable like any other, and it sits in the pace cell,
@@ -1898,21 +1980,21 @@ summary.week-header:hover { background: var(--color-surface); }
      seven blocks given the weight of a training day for saying "nothing
      today" — so day, date and badge collapse onto a single row and the
      whole block gets a tighter rhythm. */
+  /* Fixed date column here too (session rows get theirs from the 1fr):
+     with it auto-sized, "7 Sep" and "11 Sep" started the label at
+     different x and the rest days read as a ragged column. */
   .day-table tr[data-date].is-rest {
-    grid-template-columns: auto auto 1fr;
+    grid-template-columns: 60px 58px 1fr;
     grid-template-areas: "hari tanggal sesi";
     padding-top: 7px;
     padding-bottom: 7px;
     row-gap: 0;
   }
-  .day-table tr[data-date].is-rest > td:nth-child(3) { justify-self: end; }
-  .day-table tr[data-date].is-rest .type-badge { font-size: 0.68rem; padding: 2px 8px; }
   /* The absolute top: 8px below is measured for a three-row block; on a
      single-row one it would hang past the bottom edge. */
   .day-table tr[data-date].is-rest .swap-day-btn { top: 50%; transform: translateY(-50%); }
-  /* Touch has no hover to reveal the quiet desktop version, so here it
-     stays visible — but at a lower opacity than the content it sits
-     beside, and with the border back so a 34px tap target is legible. */
+  /* Lifted out of the pace cell to the block's top-right corner, where a
+     thumb can reach it, and sized to a 34px tap target. */
   .day-table tr[data-date] .swap-day-btn {
     float: none;
     position: absolute;
@@ -1920,8 +2002,6 @@ summary.week-header:hover { background: var(--color-surface); }
     right: 4px;
     width: 34px;
     height: 34px;
-    opacity: 0.5;
-    border-color: var(--color-border);
   }
   .type-badge { padding: 3px 7px; font-size: 0.72rem; }
   .structure-row td { padding: 2px 6px 12px; }
@@ -1936,6 +2016,10 @@ summary.week-header:hover { background: var(--color-surface); }
   .pace-zone-table td { padding: 6px 3px; font-size: 0.71rem; }
   .pace-zone-table .zone-name { gap: 4px; }
   .pace-zone-table .zone-dot { width: 8px; height: 8px; }
+  /* "per 7 September 2026" repeats the date range in the week header two
+     lines above, and on a phone it is what pushes this line onto a second
+     row beside the swap toggle. */
+  .week-vdot-date { display: none; }
   /* The fixed-width title/total columns (see .week-header above) are
      sized for desktop — on a narrow phone screen they'd squeeze the phase
      text down to almost nothing, so stack title / phase / (total +
