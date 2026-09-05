@@ -273,8 +273,33 @@
   const raceDateHint = document.getElementById('raceDateHint');
   const startDateInput = document.getElementById('startDate');
   const fitnessFieldset = document.getElementById('fitnessFieldset');
-  const daysPerWeekInput = document.getElementById('daysPerWeek');
-  const daysPerWeekOutput = document.getElementById('daysPerWeekOutput');
+  // Four radio chips, not the range slider + <output> pair this was: see
+  // #daysPerWeekToggle in index.html. Everything below goes through these
+  // three helpers rather than touching .value/.disabled on a single
+  // element, since "the chosen value" is now spread across four inputs.
+  const DEFAULT_DAYS_PER_WEEK = 4;
+  const daysPerWeekToggle = document.getElementById('daysPerWeekToggle');
+  const daysPerWeekRadios = Array.from(daysPerWeekToggle.querySelectorAll('input[name="daysPerWeek"]'));
+  function getDaysPerWeek() {
+    const checked = daysPerWeekRadios.find(r => r.checked);
+    return checked ? Number(checked.value) : DEFAULT_DAYS_PER_WEEK;
+  }
+  // `silent` for the restore paths (a saved plan's settings, a First-timer
+  // lock), which run their own updateDayCountHint/updateLongRunDayOptions
+  // afterwards — firing the change listener too would do that work twice.
+  function setDaysPerWeek(n, { silent = false } = {}) {
+    const target = String(n);
+    const match = daysPerWeekRadios.find(r => r.value === target);
+    if (!match) return;
+    match.checked = true;
+    if (!silent) daysPerWeekToggle.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  // Disabling the inputs alone would leave the chips looking clickable —
+  // .mode-toggle.is-disabled in css/styles.css is what actually says so.
+  function setDaysPerWeekDisabled(flag) {
+    daysPerWeekRadios.forEach(r => { r.disabled = flag; });
+    daysPerWeekToggle.classList.toggle('is-disabled', flag);
+  }
   const firstTimerDaysHint = document.getElementById('firstTimerDaysHint');
   const dayCheckboxes = document.getElementById('dayCheckboxes');
   const dayCountHint = document.getElementById('dayCountHint');
@@ -536,12 +561,9 @@
     recentRaceFieldset.hidden = isFirstTimer;
     longRunDayField.hidden = isFirstTimer;
 
-    daysPerWeekInput.disabled = isFirstTimer;
+    setDaysPerWeekDisabled(isFirstTimer);
     firstTimerDaysHint.hidden = !isFirstTimer;
-    if (isFirstTimer) {
-      daysPerWeekInput.value = String(FIRST_TIMER_DAYS_PER_WEEK);
-      daysPerWeekInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
+    if (isFirstTimer) setDaysPerWeek(FIRST_TIMER_DAYS_PER_WEEK);
 
     // Also display-only for First-timer — see updateFirstTimerRaceDate's
     // own comment for why the generator itself never reads this field's
@@ -668,8 +690,7 @@
   raceDistanceSel.addEventListener('change', updateRecentRaceHint);
   customDistanceKm.addEventListener('input', updateRecentRaceHint);
 
-  daysPerWeekInput.addEventListener('input', () => {
-    daysPerWeekOutput.textContent = `${daysPerWeekInput.value} hari`;
+  daysPerWeekToggle.addEventListener('change', () => {
     updateDayCountHint();
     updateLongRunDayOptions();
   });
@@ -681,7 +702,7 @@
 
   function updateDayCountHint() {
     const selected = getSelectedDays().length;
-    const needed = Number(daysPerWeekInput.value);
+    const needed = getDaysPerWeek();
     if (selected === needed) {
       dayCountHint.innerHTML = `${icon('check')} ${selected} hari dipilih.`;
       dayCountHint.style.color = 'var(--color-accent)';
@@ -928,7 +949,7 @@
     // proyeksi kenaikan pace yang konservatif.
     const fitnessLevel = deriveFitnessLevel(currentWeeklyKm, recentRaceTimeSec, recentRaceDistanceKm);
 
-    const daysPerWeek = Number(daysPerWeekInput.value);
+    const daysPerWeek = getDaysPerWeek();
     const preferredDays = getSelectedDays();
     if (preferredDays.length !== daysPerWeek) {
       showError(`Jumlah hari yang dipilih (${preferredDays.length}) harus sama dengan jumlah hari latihan per minggu (${daysPerWeek}).`, dayCheckboxes);
@@ -1014,8 +1035,7 @@
     longestRecentRunKmInput.value = settings.longestRecentRunKm;
     conservativeModeInput.checked = settings.conservativeMode;
 
-    daysPerWeekInput.value = settings.daysPerWeek;
-    daysPerWeekOutput.textContent = `${settings.daysPerWeek} hari`;
+    setDaysPerWeek(settings.daysPerWeek, { silent: true });
     dayCheckboxes.querySelectorAll('input').forEach(cb => {
       cb.checked = settings.preferredDays.includes(Number(cb.value));
     });
@@ -1256,18 +1276,31 @@
     blockHistorySection.hidden = false;
   }
 
+  // Which of the four top-level sections is on screen, published on <body>
+  // so CSS can react to it. Only the header needs this today: the tagline
+  // and the generous top padding are a first-impression element, and on a
+  // phone they were 212px of chrome re-read on every single visit to a
+  // plan the runner has already seen — measured against a #todayCard that
+  // was landing at y=715 on a 780px-tall screen. See body[data-screen] in
+  // css/styles.css.
+  function setScreen(name) {
+    document.body.dataset.screen = name;
+  }
+
   // --- Login gate ---
   function showGate() {
     gateSection.hidden = false;
     formSection.hidden = true;
     loadingSection.hidden = true;
     resultSection.hidden = true;
+    setScreen('gate');
   }
   function showForm() {
     gateSection.hidden = true;
     formSection.hidden = false;
     loadingSection.hidden = true;
     resultSection.hidden = true;
+    setScreen('form');
     // Only "Buat Plan Baru" over an existing plan has somewhere to go
     // back to — this path is a runner with no plan at all.
     backToPlanBtn.hidden = true;
@@ -1282,6 +1315,7 @@
     formSection.hidden = true;
     resultSection.hidden = true;
     loadingSection.hidden = false;
+    setScreen('loading');
     if (loadingTitle) loadingTitle.textContent = title || 'Menyusun training plan-mu...';
   }
 
@@ -1317,6 +1351,9 @@
     // day — the hero card at the top mirrors one of these rows, so it has
     // to be rebuilt from the same just-updated data.
     renderTodayCard(lastPlan);
+    // An override that skips a session (km → 0) changes the denominator of
+    // this week's "3/4 sesi" count, so it can't be left as rendered.
+    updateWeekProgress(lastPlan);
   }
 
   // Replays a saved daySwaps list (see savePlanForCurrentUser/
@@ -1976,7 +2013,7 @@
       setRecentRaceSourceNote('Belum ada race atau sesi cepat (≥3km) yang terdeteksi dari Strava-mu dalam 90 hari terakhir. Isi manual di bawah kalau ada, atau kosongkan — plan akan pakai pace default sesuai level fitnessmu.', false);
     }
     if (Array.isArray(summary.suggestedDaysOfWeek) && summary.suggestedDaysOfWeek.length) {
-      const daysPerWeek = Number(daysPerWeekInput.value);
+      const daysPerWeek = getDaysPerWeek();
       const picks = summary.suggestedDaysOfWeek.slice(0, daysPerWeek);
       dayCheckboxes.querySelectorAll('input').forEach(cb => {
         cb.checked = picks.includes(Number(cb.value));
@@ -2275,8 +2312,37 @@
     // volume chart can draw the actual-vs-planned overlay (all three
     // rendered before any of this was known).
     renderTodayCard(plan);
-    renderVolumeChart(plan.weeks, findCurrentWeek(plan.weeks));
+    renderVolumeChart(plan.weeks, findCurrentWeek(plan.weeks), plan.meta);
+    updateWeekProgress(plan);
     renderMissedWeekBanner();
+  }
+
+  // "3/4 sesi" on each week header that has anything to count — i.e. every
+  // week that has already started. Collapsed, a week header said what was
+  // PLANNED for it and nothing about whether any of it actually happened,
+  // so the only way to find out was to open each one and look for
+  // checkmarks. Future weeks are left blank rather than shown as "0/4":
+  // nothing is missing from a week that hasn't begun.
+  function updateWeekProgress(plan) {
+    if (!plan) return;
+    plan.weeks.forEach(week => {
+      const el = planWeeksEl.querySelector(`[data-week-progress="${week.weekNumber}"]`);
+      if (!el) return;
+      const status = weekTimeStatus(week);
+      const sessions = week.days.filter(d => d.km);
+      if (status === 'future' || !sessions.length) {
+        el.hidden = true;
+        el.textContent = '';
+        return;
+      }
+      const done = sessions.filter(d => d.isCompleted).length;
+      el.textContent = `${done}/${sessions.length} sesi`;
+      // Full marks read as an achievement rather than a bare count; a
+      // finished week that fell short stays neutral instead of being
+      // scolded in red — the missed-week banner is what escalates that.
+      el.classList.toggle('is-complete', done === sessions.length);
+      el.hidden = false;
+    });
   }
 
   if (!REQUIRE_LOGIN) {
@@ -2335,6 +2401,36 @@
   }
   document.getElementById('resultNoticeDismissBtn').addEventListener('click', () => {
     resultNotice.hidden = true;
+  });
+
+  // --- Overflow menu for the three occasional result actions ---
+  // See .result-actions in index.html for why they moved behind one
+  // button. Each item keeps its own id and its own listener below; all
+  // this does is open/close the container and close it again once
+  // something in it has been clicked, so a tap never leaves an open menu
+  // covering the panel it just opened.
+  const moreActionsBtn = document.getElementById('moreActionsBtn');
+  const moreActionsMenu = document.getElementById('moreActionsMenu');
+  function setMoreActionsOpen(open) {
+    moreActionsMenu.hidden = !open;
+    moreActionsBtn.setAttribute('aria-expanded', String(open));
+  }
+  moreActionsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setMoreActionsOpen(moreActionsMenu.hidden);
+  });
+  moreActionsMenu.addEventListener('click', () => setMoreActionsOpen(false));
+  // Anywhere outside closes it — including a click on the page behind,
+  // which is what someone who opened it by accident will reach for first.
+  document.addEventListener('click', (e) => {
+    if (moreActionsMenu.hidden) return;
+    if (e.target.closest('.actions-more')) return;
+    setMoreActionsOpen(false);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || moreActionsMenu.hidden) return;
+    setMoreActionsOpen(false);
+    moreActionsBtn.focus();
   });
 
   document.getElementById('printBtn').addEventListener('click', downloadPlanAsPdf);
@@ -2403,6 +2499,7 @@
   document.getElementById('newPlanBtn').addEventListener('click', () => {
     resultSection.hidden = true;
     formSection.hidden = false;
+    setScreen('form');
     // Nothing is destroyed by getting here — the current plan is only
     // replaced once this form is actually submitted — but until this
     // button existed there was no way back to it short of reloading the
@@ -2420,6 +2517,7 @@
     clearError();
     formSection.hidden = true;
     resultSection.hidden = false;
+    setScreen('result');
     backToPlanBtn.hidden = true;
     resultSection.scrollIntoView({ behavior: 'smooth' });
   });
@@ -2437,7 +2535,7 @@
   // nothing if that's somehow unavailable/invalid rather than showing a
   // broken table.
   function renderPaceZones(meta, weeks, currentWeek) {
-    const { formatDuration } = PaceForgeGenerator;
+    const { formatDuration, formatPace } = PaceForgeGenerator;
     const { paceZonesFromVDOT, formatPaceRange, ZONE_ORDER, ZONE_LABELS, ZONE_PCT_RANGES } = PaceForgeVDOT;
 
     const relevantWeekNumber = pickDefaultOpenWeek(weeks, currentWeek);
@@ -2448,6 +2546,24 @@
       : `Minggu ${relevantWeek.weekNumber} • dari estimasi goal pace (belum ada data race terakhir)`;
     const zones = vdot ? paceZonesFromVDOT(vdot) : null;
     if (!zones) { paceLegend.innerHTML = ''; return; }
+
+    // Both of these used to be summary tiles at the top of the page, in a
+    // row of plain facts about the block (race name, dates, peak volume).
+    // They are not that kind of fact — they are the two pace numbers this
+    // very table exists to put in context, so they read here, under it,
+    // rather than several hundred pixels above it. Race plans only: for a
+    // base-building or maintenance block there is no goal pace to hit and
+    // no race time to predict (see meta.mode in planGenerator.js).
+    const isRacePlan = !meta.mode || meta.mode === 'race';
+    const goalPaceRow = isRacePlan && meta.goalPaceSec
+      ? `<div class="pace-goal-item"><span class="label">Goal pace race</span><span class="value">${formatPace(meta.goalPaceSec)}</span></div>`
+      : '';
+    const riegelRow = isRacePlan && meta.goalPaceSource === 'recentRace'
+      ? `<div class="pace-goal-item"><span class="label">Estimasi dari race terakhir</span><span class="value">${formatDuration(meta.recentRaceTimeSec)} / ${meta.recentRaceDistanceKm} km &rarr; ${formatDuration(meta.predictedRaceTimeSec)} ${meta.raceLabel}</span></div>`
+      : '';
+    const goalPaceFooter = (goalPaceRow || riegelRow)
+      ? `<div class="pace-goal-row">${goalPaceRow}${riegelRow}</div>`
+      : '';
 
     paceLegend.innerHTML = `
       <div class="pace-zone-header">
@@ -2473,6 +2589,7 @@
           </tbody>
         </table>
       </div>
+      ${goalPaceFooter}
       <p class="pace-zone-note">Dihitung pakai formula VDOT Jack Daniels (metodologi yang sama dipakai kalkulator seperti vdoto2.com)</p>
     `;
   }
@@ -2627,7 +2744,7 @@
   // items given a real pixel height inside a fixed-height track sidestep
   // that entirely, at the cost of needing JS instead of the SVG's own
   // coordinate math.
-  function renderVolumeChart(weeks, currentWeek) {
+  function renderVolumeChart(weeks, currentWeek, meta) {
     if (!weeks.length) { volumeChart.innerHTML = ''; return; }
 
     // Resolved once per week up front — an overshot week's actualKm can
@@ -2738,10 +2855,16 @@
     // itself is legible enough on the bars directly (and spelled out in
     // words in each bar's own `title`) without a third pair of dots
     // competing for space here too.
+    // Peak long run used to be a seventh summary tile up top, where it was
+    // one of five near-identical numbers competing for the same attention.
+    // It belongs to the same "how big does this block get" question the
+    // peak weekly volume beside it answers, so it reads better as part of
+    // this chart's own header than as another tile.
+    const longRunNote = meta?.peakLongRunKm ? ` • long run terjauh ${meta.peakLongRunKm} km` : '';
     volumeChart.innerHTML = `
       <div class="pace-zone-header">
         <span class="pace-zone-title">${icon('trend')} Volume Mingguan (km)</span>
-        <span class="pace-zone-source">Peak ${peakWeek.totalKm} km di minggu ${peakWeek.weekNumber}${currentNote}</span>
+        <span class="pace-zone-source">Peak ${peakWeek.totalKm} km di minggu ${peakWeek.weekNumber}${longRunNote}${currentNote}</span>
       </div>
       <div class="table-scroll"><div class="volume-chart-bars">${cols}</div></div>
       <div class="volume-chart-legend">${legend}</div>
@@ -2751,7 +2874,7 @@
   function renderPlan(plan) {
     lastPlan = plan;
     const { meta, warnings, weeks } = plan;
-    const { formatPace, formatDate, formatDuration, TYPE_LABELS } = PaceForgeGenerator;
+    const { formatDate } = PaceForgeGenerator;
 
     // Reset any AI notes from a previous plan — they don't apply to this one.
     aiStatus.hidden = true;
@@ -2798,18 +2921,20 @@
       : meta.mode === 'firstTimer' ? 'Program'
       : (meta.nonRaceStyle === 'maintenance' ? 'Maintenance' : 'Base Building');
     const dateCardLabel = !isNonRacePlan ? 'Tanggal Race' : meta.mode === 'firstTimer' ? 'Lulus (Perkiraan)' : 'Akhir Blok';
+    // Exactly four tiles, and deliberately so. This grid ran to seven,
+    // which auto-fit laid out 4-and-3 on a desktop and 2-2-2-1 on a phone
+    // — a ragged last row either way, with the widest label of the set
+    // ("Estimasi dari Race Terakhir") orphaned in the leftover slot with
+    // its value wrapped over three lines. The three that left are not
+    // gone, they moved to where their own subject already lives: peak
+    // long run into the volume chart's header (see renderVolumeChart),
+    // goal pace and the Riegel estimate into the pace-zone card (see
+    // renderPaceZones), which is the card about pace.
     summaryCards.innerHTML = `
       <div class="summary-item"><div class="label">${raceCardLabel}</div><div class="value">${meta.raceLabel}</div></div>
       <div class="summary-item"><div class="label">${dateCardLabel}</div><div class="value is-small">${formatDate(meta.raceDate)}</div></div>
       <div class="summary-item"><div class="label">Durasi Plan</div><div class="value">${meta.planWeeks} minggu</div></div>
       <div class="summary-item"><div class="label">Peak Weekly Volume</div><div class="value">${meta.peakWeeklyKm} km</div></div>
-      <div class="summary-item"><div class="label">Peak Long Run</div><div class="value">${meta.peakLongRunKm} km</div></div>
-      ${!isNonRacePlan ? `
-      <div class="summary-item"><div class="label">Goal Pace</div><div class="value">${formatPace(meta.goalPaceSec)}</div></div>
-      ${meta.goalPaceSource === 'recentRace' ? `
-      <div class="summary-item"><div class="label">Estimasi dari Race Terakhir</div><div class="value is-small">${formatDuration(meta.recentRaceTimeSec)} / ${meta.recentRaceDistanceKm} km &rarr; ${formatDuration(meta.predictedRaceTimeSec)} ${meta.raceLabel}</div></div>
-      ` : ''}
-      ` : ''}
     `;
 
     // Hoisted above renderVolumeChart/the weeks loop below — both need to
@@ -2818,7 +2943,7 @@
     const currentWeek = findCurrentWeek(weeks);
 
     renderTodayCard(plan);
-    renderVolumeChart(weeks, currentWeek);
+    renderVolumeChart(weeks, currentWeek, meta);
 
     // Zona Pace — full 5-zone VDOT table (Jack Daniels methodology, same
     // one popularized by calculators like vdoto2.com). Tracks whichever
@@ -2845,12 +2970,22 @@
       const currentWeekBadge = currentWeek && week.weekNumber === currentWeek.weekNumber
         ? '<span class="week-current-badge">Minggu saat ini</span>'
         : '';
+      // The phase color already carried by this week's bar in the volume
+      // chart and by its own phase label, brought out to the block's left
+      // edge as well — collapsed, twelve of these rows were otherwise
+      // identical strips, and the base-to-peak-to-taper shape the chart
+      // shows had no counterpart in the list itself.
+      // The .week-progress span is left empty here and filled in by
+      // updateWeekProgress once Strava matching has run — at render time
+      // nothing is known yet about which sessions were actually done.
+      const phaseColor = PHASE_COLORS[week.phase] || 'var(--color-border)';
       return `
-      <details class="week-block" data-week-number="${week.weekNumber}"${isOpen ? ' open' : ''}>
+      <details class="week-block" data-week-number="${week.weekNumber}" style="--week-phase-color:${phaseColor}"${isOpen ? ' open' : ''}>
         <summary class="week-header">
           <span class="week-title-group">
             <span class="week-title">Minggu ${week.weekNumber}</span>
             ${currentWeekBadge}
+            <span class="week-progress" data-week-progress="${week.weekNumber}" hidden></span>
           </span>
           <span class="week-phase"><span class="phase-label" style="color:${PHASE_COLORS[week.phase] || 'inherit'}">${week.phase}</span> • ${formatDate(week.startDate)} – ${formatDate(week.endDate)}</span>
           <span class="week-total">Total: ${week.totalKm} km</span>
@@ -2874,6 +3009,7 @@
     loadingSection.hidden = true;
     resultSection.hidden = false;
     formSection.hidden = true;
+    setScreen('result');
     resultSection.scrollIntoView({ behavior: 'smooth' });
 
     // Best-effort, not awaited — the schedule above is already fully

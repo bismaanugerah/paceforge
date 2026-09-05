@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/styles.css">
 </head>
-<body>
+<body data-screen="gate">
 
 <!-- Icon sprite. Every icon in the app is a <use> reference into this,
      drawn as a 24×24 stroke path that inherits currentColor — so an icon
@@ -83,6 +83,38 @@
     <div class="gate-actions">
       <button data-action="login" class="btn btn-primary btn-large">Login dengan Strava</button>
     </div>
+
+    <!-- A miniature of what the schedule below actually looks like, so this
+         screen shows the thing being offered instead of only describing it.
+         Deliberately static markup and aria-hidden: it is decoration, not
+         data — every number here is invented, which is what the caption
+         underneath says out loud so it can never be mistaken for a real
+         plan belonging to whoever is looking at it. -->
+    <div class="gate-preview" aria-hidden="true">
+      <div class="gate-preview-head">
+        <span class="gate-preview-week">Minggu 4</span>
+        <span class="gate-preview-phase">BUILD</span>
+        <span class="gate-preview-total">38.5 km</span>
+      </div>
+      <div class="gate-preview-rows">
+        <div class="gate-preview-row">
+          <span class="gate-preview-day">Sel</span>
+          <span class="type-badge" style="background: var(--type-tempo)">Tempo Run</span>
+          <span class="gate-preview-km">8 km</span>
+        </div>
+        <div class="gate-preview-row">
+          <span class="gate-preview-day">Kam</span>
+          <span class="type-badge" style="background: var(--type-easy)">Easy Run</span>
+          <span class="gate-preview-km">6 km</span>
+        </div>
+        <div class="gate-preview-row">
+          <span class="gate-preview-day">Min</span>
+          <span class="type-badge" style="background: var(--type-longrun)">Long Run</span>
+          <span class="gate-preview-km">16 km</span>
+        </div>
+      </div>
+    </div>
+    <p class="gate-preview-caption">Contoh tampilan jadwal — angkanya ilustrasi, plan-mu dihitung dari datamu sendiri.</p>
     <p id="dummyModeNote" class="dummy-note" hidden><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg> Mode dummy: app Strava belum disambungkan. Tombol di atas mensimulasikan login (data & plan tersimpan lokal di browser ini saja, angka Strava-nya juga contoh/palsu) supaya alur login &amp; auto-fill-nya bisa dicoba dulu — belum akun Strava sungguhan. Lihat README untuk sambungkan Strava &amp; Supabase asli.</p>
   </section>
 
@@ -159,7 +191,7 @@
 
           <div class="field" id="customDistanceField" hidden>
             <label for="customDistanceKm">Jarak custom (km)</label>
-            <input type="number" id="customDistanceKm" name="customDistanceKm" min="1" max="200" step="0.1" placeholder="mis. 15">
+            <input type="number" inputmode="numeric" id="customDistanceKm" name="customDistanceKm" min="1" max="200" step="0.1" placeholder="mis. 15">
           </div>
 
           <div class="field">
@@ -187,15 +219,15 @@
         <div class="field-row">
           <div class="field">
             <label for="currentWeeklyKm">Rata-rata jarak lari per minggu saat ini (km)</label>
-            <input type="number" id="currentWeeklyKm" name="currentWeeklyKm" min="0" max="200" step="1" value="15" required>
+            <input type="number" inputmode="numeric" id="currentWeeklyKm" name="currentWeeklyKm" min="0" max="200" step="1" value="15" required>
           </div>
           <div class="field">
             <label for="longestRecentRunKm">Lari terjauh dalam 3 bulan terakhir (km)</label>
-            <input type="number" id="longestRecentRunKm" name="longestRecentRunKm" min="0" max="200" step="0.5" value="8" required>
+            <input type="number" inputmode="numeric" id="longestRecentRunKm" name="longestRecentRunKm" min="0" max="200" step="0.5" value="8" required>
           </div>
         </div>
         <p id="stravaFillBadge" class="strava-fill-badge" hidden>Data di atas diambil otomatis dari Strava-mu — cek dulu, boleh diedit kalau kurang sesuai.</p>
-        <p class="field-hint">Dipakai supaya kenaikan jarak lari jauh di plan tidak melompat terlalu drastis dari kemampuanmu sekarang — kalau kamu login dengan Strava, kedua angka ini otomatis terisi dari histori lari-mu (tetap bisa diedit).</p>
+        <details class="field-help"><summary>Kenapa ini ditanya?</summary><p>Dipakai supaya kenaikan jarak lari jauh di plan tidak melompat terlalu drastis dari kemampuanmu sekarang — kalau kamu login dengan Strava, kedua angka ini otomatis terisi dari histori lari-mu (tetap bisa diedit).</p></details>
 
         <div class="field checkbox-field">
           <label class="checkbox-option">
@@ -211,11 +243,22 @@
       <!-- Availability -->
       <fieldset>
         <legend>Ketersediaan Waktu Latihan</legend>
+        <!-- Four discrete choices, so four chips — not the range slider
+             this used to be. A slider spanning the full card width for a
+             3-to-6 pick was the one control on this form that needed a
+             separate <output> underneath just to say what it was set to,
+             and it took a drag where every other choice here takes a tap.
+             Same .mode-chip pattern as the rest of the form; the value is
+             readable from the chip itself. -->
         <div class="field" id="daysPerWeekField">
-          <label for="daysPerWeek">Jumlah hari latihan per minggu</label>
-          <input type="range" id="daysPerWeek" name="daysPerWeek" min="3" max="6" step="1" value="4">
-          <output id="daysPerWeekOutput" for="daysPerWeek">4 hari</output>
-          <!-- Only shown + slider locked/disabled for First-timer (see
+          <label id="daysPerWeekLabel">Jumlah hari latihan per minggu</label>
+          <div class="mode-toggle" id="daysPerWeekToggle" role="radiogroup" aria-labelledby="daysPerWeekLabel">
+            <label class="mode-chip"><input type="radio" name="daysPerWeek" value="3"> 3 hari</label>
+            <label class="mode-chip"><input type="radio" name="daysPerWeek" value="4" checked> 4 hari</label>
+            <label class="mode-chip"><input type="radio" name="daysPerWeek" value="5"> 5 hari</label>
+            <label class="mode-chip"><input type="radio" name="daysPerWeek" value="6"> 6 hari</label>
+          </div>
+          <!-- Only shown + the chips locked/disabled for First-timer (see
                updateGoalTypeUI) — 3x/minggu itself is part of the program
                (rest days between runs matter for a beginner's tendons/
                bones adapting), not a preference to dial up. -->
@@ -263,7 +306,7 @@
            race time to feed into at all. -->
       <fieldset id="recentRaceFieldset">
         <legend>Waktu Race Terakhir</legend>
-        <p class="field-hint">Dipakai untuk memperkirakan pace &amp; waktu finish race targetmu (rumus Riegel), kalau kamu belum isi target waktu finish spesifik di bawah. Pilih race/lari terdekat jaraknya ke race targetmu — bukan harus 5K — supaya perkiraannya lebih akurat.</p>
+        <details class="field-help"><summary>Kenapa ini ditanya?</summary><p>Dipakai untuk memperkirakan pace &amp; waktu finish race targetmu (rumus Riegel), kalau kamu belum isi target waktu finish spesifik di bawah. Pilih race/lari terdekat jaraknya ke race targetmu — bukan harus 5K — supaya perkiraannya lebih akurat.</p></details>
         <!-- className is set in JS (js/app.js's setRecentRaceSourceNote) —
              "strava-fill-badge" (same badge as section 2's stravaFillBadge)
              when the value shown actually came from Strava, "field-hint"
@@ -283,19 +326,19 @@
           </div>
           <div class="field field-small" id="recentRaceCustomField" hidden>
             <label for="recentRaceCustomKm">Jarak custom (km)</label>
-            <input type="number" id="recentRaceCustomKm" min="1" max="200" step="0.1" placeholder="mis. 18">
+            <input type="number" inputmode="numeric" id="recentRaceCustomKm" min="1" max="200" step="0.1" placeholder="mis. 18">
           </div>
           <div class="field field-small">
             <label for="recentRaceHours">Jam</label>
-            <input type="number" id="recentRaceHours" min="0" max="10" step="1" value="0">
+            <input type="number" inputmode="numeric" id="recentRaceHours" min="0" max="10" step="1" value="0">
           </div>
           <div class="field field-small">
             <label for="recentRaceMinutes">Menit</label>
-            <input type="number" id="recentRaceMinutes" min="0" max="59" step="1" value="0">
+            <input type="number" inputmode="numeric" id="recentRaceMinutes" min="0" max="59" step="1" value="0">
           </div>
           <div class="field field-small">
             <label for="recentRaceSeconds">Detik</label>
-            <input type="number" id="recentRaceSeconds" min="0" max="59" step="1" value="0">
+            <input type="number" inputmode="numeric" id="recentRaceSeconds" min="0" max="59" step="1" value="0">
           </div>
         </div>
         <p class="field-hint" id="recentRaceHint">Kalau diisi dan kamu tidak set target waktu finish di bawah, PaceForge akan memperkirakan waktu finish &amp; pace latihanmu dari hasil race ini (pakai rumus prediksi race time Riegel). Kosongkan kalau memang belum punya data race/lari cepat — plan akan pakai pace default sesuai level fitnessmu.</p>
@@ -332,26 +375,26 @@
           <div class="field-row" id="targetTimeFields">
             <div class="field field-small">
               <label for="targetHours">Jam</label>
-              <input type="number" id="targetHours" min="0" max="10" step="1" value="0">
+              <input type="number" inputmode="numeric" id="targetHours" min="0" max="10" step="1" value="0">
             </div>
             <div class="field field-small">
               <label for="targetMinutes">Menit</label>
-              <input type="number" id="targetMinutes" min="0" max="59" step="1" value="30">
+              <input type="number" inputmode="numeric" id="targetMinutes" min="0" max="59" step="1" value="30">
             </div>
             <div class="field field-small">
               <label for="targetSeconds">Detik</label>
-              <input type="number" id="targetSeconds" min="0" max="59" step="1" value="0">
+              <input type="number" inputmode="numeric" id="targetSeconds" min="0" max="59" step="1" value="0">
             </div>
           </div>
 
           <div class="field-row" id="targetPaceFields" hidden>
             <div class="field field-small">
               <label for="targetPaceMinutes">Menit /km</label>
-              <input type="number" id="targetPaceMinutes" min="0" max="59" step="1" value="5">
+              <input type="number" inputmode="numeric" id="targetPaceMinutes" min="0" max="59" step="1" value="5">
             </div>
             <div class="field field-small">
               <label for="targetPaceSeconds">Detik /km</label>
-              <input type="number" id="targetPaceSeconds" min="0" max="59" step="1" value="0">
+              <input type="number" inputmode="numeric" id="targetPaceSeconds" min="0" max="59" step="1" value="0">
             </div>
           </div>
           <p class="field-hint" id="targetPaceHint" hidden></p>
@@ -366,12 +409,19 @@
           <label for="userNotes">Ada hal khusus yang perlu dipertimbangkan?</label>
           <textarea id="userNotes" name="userNotes" rows="3" placeholder="mis. lutut kadang nyeri saat long run, minggu depan jadwal kerja padat, lebih suka lari pagi, dll."></textarea>
         </div>
-        <p class="field-hint">Kalau diisi, catatan ini otomatis dipakai AI untuk memberi catatan pelatih yang lebih personal di halaman hasil begitu plan-nya jadi. Jarak &amp; pace di jadwal tetap dari perhitungan rule-based di atas — AI tidak mengubah angkanya, hanya menambah catatan. Kalau kamu centang "latihan lebih konservatif" di bagian 2, ceritakan detail cedera/nyerinya di sini.</p>
+        <details class="field-help"><summary>Catatan ini dipakai buat apa?</summary><p>Kalau diisi, catatan ini otomatis dipakai AI untuk memberi catatan pelatih yang lebih personal di halaman hasil begitu plan-nya jadi. Jarak &amp; pace di jadwal tetap dari perhitungan rule-based di atas — AI tidak mengubah angkanya, hanya menambah catatan. Kalau kamu centang "latihan lebih konservatif" di bagian 2, ceritakan detail cedera/nyerinya di sini.</p></details>
       </fieldset>
 
       <div id="formError" class="form-error" role="alert" hidden></div>
 
-      <button type="submit" class="btn btn-primary btn-large"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg>Buat Training Plan</button>
+      <!-- Wrapped so the button can stick to the bottom of the viewport on
+           a phone (see .form-submit-bar in css/styles.css). This form runs
+           ~1900px tall, and the only way to submit it used to be to reach
+           the very end of that scroll — the action was invisible for the
+           whole time anyone was actually filling the form in. -->
+      <div class="form-submit-bar">
+        <button type="submit" class="btn btn-primary btn-large"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg>Buat Training Plan</button>
+      </div>
     </form>
   </section>
 
@@ -419,11 +469,27 @@
 
     <div class="result-header">
       <h2>Training Plan Kamu</h2>
+      <!-- Four buttons of equal visual weight used to sit here as a flat
+           row. They are not equal: "Lagi nggak fit?" is the one a runner
+           reaches for mid-block, the other three are occasional (export a
+           PDF once, subscribe a calendar once, start a new block every few
+           months). Stacked full-width on a phone they measured 195px —
+           on a 390x780 screen that pushed #todayCard, the single thing
+           this page is opened for on an ordinary morning, to y=715, i.e.
+           entirely below the fold. So the three occasional ones now live
+           behind one overflow button, and the whole row is one line at
+           every width. Their IDs are unchanged — every listener in
+           js/app.js still finds exactly the button it did before. -->
       <div class="result-actions no-print">
         <button id="feelingOffBtn" class="btn btn-secondary"><svg class="icon" aria-hidden="true"><use href="#i-pulse"/></svg>Lagi nggak fit?</button>
-        <button id="printBtn" class="btn btn-secondary"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Simpan sebagai PDF</button>
-        <button id="calendarBtn" class="btn btn-secondary"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>Hubungkan dengan Kalender</button>
-        <button id="newPlanBtn" class="btn btn-ghost"><svg class="icon" aria-hidden="true"><use href="#i-rotate"/></svg>Buat Plan Baru</button>
+        <div class="actions-more">
+          <button type="button" id="moreActionsBtn" class="btn btn-ghost" aria-expanded="false" aria-haspopup="true" aria-controls="moreActionsMenu">Lainnya<span class="actions-more-caret" aria-hidden="true">▾</span></button>
+          <div id="moreActionsMenu" class="actions-menu" role="menu" hidden>
+            <button id="printBtn" class="actions-menu-item" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Simpan sebagai PDF</button>
+            <button id="calendarBtn" class="actions-menu-item" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>Hubungkan dengan Kalender</button>
+            <button id="newPlanBtn" class="actions-menu-item" role="menuitem"><svg class="icon" aria-hidden="true"><use href="#i-rotate"/></svg>Buat Plan Baru</button>
+          </div>
+        </div>
       </div>
     </div>
 

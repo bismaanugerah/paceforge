@@ -192,8 +192,53 @@ body {
 }
 .sync-status.is-error { color: var(--color-error); opacity: 1; font-style: normal; }
 
+/* ---------- Header, per screen ---------- */
+/* <body data-screen> is set by setScreen() in js/app.js. The tagline and
+   the header's generous top padding are first-impression furniture: they
+   earn their space on the gate and the empty form, and stop earning it the
+   moment the runner is looking at a plan they have already generated. On a
+   390x780 phone this header measured 212px, which — stacked on top of the
+   195px action row that used to sit under the result heading — was landing
+   #todayCard, the one thing this page gets opened for on an ordinary
+   morning, at y=715. Trimming here is worth more than anywhere else on the
+   page because it is paid on every single visit. */
+body[data-screen="result"] .tagline { display: none; }
+body[data-screen="result"] .site-header { padding: 18px 0 30px; }
+
 @media (max-width: 640px) {
-  .auth-box { position: static; justify-content: center; margin-bottom: 14px; }
+  /* Brand and account on one row, the way an app's own chrome is shaped —
+     rather than the account line stacked above a centered wordmark, which
+     is what `position: static` alone gave and which cost a whole extra row
+     of header on the narrowest screens. The tagline keeps its own full
+     width row underneath (on the screens that still show it). */
+  /* minmax(0, 1fr), not 1fr: a bare 1fr floors at the brand lockup's own
+     min-content width, and with the MODE DUMMY badge in the row that came
+     to 250px — which, next to the account column, pushed the whole grid
+     35px wider than the phone and gave the page a horizontal scrollbar.
+     The brand wraps instead. */
+  .header-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 12px;
+    text-align: left;
+  }
+  .brand { grid-column: 1; justify-self: start; min-width: 0; flex-wrap: wrap; row-gap: 4px; }
+  .auth-box { position: static; grid-column: 2; justify-self: end; margin: 0; }
+  .tagline, .sync-status { grid-column: 1 / -1; }
+  /* One line, truncated. In the narrow right-hand column a long display
+     name ("Demo Runner (mode dummy)") wrapped to three lines and took the
+     header back up to 80px on its own — taller than the brand lockup it
+     sits beside, for a label nobody reads twice. */
+  .user-info { flex-wrap: nowrap; }
+  .user-email {
+    font-size: 0.78rem;
+    max-width: 108px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .auth-box .btn-link { white-space: nowrap; }
 }
 /* A lockup — mark beside wordmark — rather than the mark stacked above it.
    The stack is a landing-page shape; a row reads as an app's identity and
@@ -292,6 +337,28 @@ main.container { margin-top: -28px; padding-bottom: 60px; }
   .skeleton-block, .skeleton-bar { animation-duration: 3.2s; }
 }
 
+/* ---------- Disclosure reveal ---------- */
+/* Every <details> in the app (week accordions, plan warnings, field help)
+   snapped its content into place with no transition at all, which on the
+   week blocks meant a whole table appearing between two frames. Only the
+   opening is animated: a closing <details> removes its content from the
+   box tree immediately, so there is nothing left to animate out without
+   reaching for height interpolation this doesn't need. */
+@keyframes details-reveal {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.week-block[open] > *:not(summary),
+.result-warning[open] > *:not(summary),
+.field-help[open] > *:not(summary) {
+  animation: details-reveal 0.18s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .week-block[open] > *:not(summary),
+  .result-warning[open] > *:not(summary),
+  .field-help[open] > *:not(summary) { animation: none; }
+}
+
 /* ---------- Login gate ---------- */
 .gate-card { text-align: center; padding: 48px 28px; }
 .gate-card h1 { margin-top: 0; }
@@ -302,6 +369,56 @@ main.container { margin-top: -28px; padding-bottom: 60px; }
   margin: 16px auto 0;
   font-size: 0.85rem;
   line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+/* A scaled-down, made-up week block — the same header/row/badge shapes the
+   real schedule uses (see .week-header and .type-badge below), so this
+   screen shows what login gets you rather than only describing it in two
+   paragraphs. Deliberately quiet: it sits behind the button in the visual
+   order, and the caption underneath says the numbers are invented. */
+.gate-preview {
+  max-width: 340px;
+  margin: 28px auto 0;
+  text-align: left;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.gate-preview-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.82rem;
+}
+.gate-preview-week { font-family: var(--font-display); font-weight: 700; }
+.gate-preview-phase {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  /* --color-accent is the Build phase color in PHASE_COLORS (js/app.js),
+     matching the "BUILD" this sample week is labelled with. */
+  color: var(--color-accent);
+}
+.gate-preview-total { margin-left: auto; font-weight: 700; color: var(--color-primary-dark); font-variant-numeric: tabular-nums; }
+.gate-preview-rows { padding: 4px 0; }
+.gate-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+}
+.gate-preview-day { width: 26px; color: var(--color-text-muted); }
+.gate-preview-km { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+.gate-preview-caption {
+  max-width: 340px;
+  margin: 8px auto 0;
+  font-size: 0.76rem;
   color: var(--color-text-muted);
 }
 
@@ -370,8 +487,6 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px var(--color-primary-light);
 }
 
-input[type="range"] { width: 100%; accent-color: var(--color-primary); }
-
 /* Custom checkbox & radio (replaces native browser controls) */
 input[type="checkbox"],
 input[type="radio"] {
@@ -435,20 +550,47 @@ input[type="radio"]:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
-#daysPerWeekOutput {
-  display: inline-block;
-  margin-top: 6px;
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-primary-dark);
-}
-
 .field-hint {
   font-size: 0.85rem;
   color: var(--color-text-muted);
   margin: 4px 0 0;
 }
+
+/* ---------- Foldable field help ---------- */
+/* The three longest .field-hint paragraphs on this form ran to three or
+   four lines each and were re-read on every visit by everyone, including
+   the runner who already knows perfectly well why their weekly mileage is
+   being asked for. Nothing is removed — the same words are one tap away,
+   and the summary line says what is behind it. Short hints stay inline:
+   the point is to fold away the paragraphs, not to hide the labels. */
+.field-help { margin: 6px 0 0; font-size: 0.85rem; }
+.field-help > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  width: fit-content;
+  padding: 2px 0;
+}
+.field-help > summary::-webkit-details-marker { display: none; }
+.field-help > summary:hover { color: var(--color-text); }
+/* Same rotating chevron as the week accordions and the plan warnings —
+   one disclosure affordance across the whole app, not three. */
+.field-help > summary::after {
+  content: "";
+  width: 0.48em;
+  height: 0.48em;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translate(-2px, -2px);
+  opacity: 0.7;
+  transition: transform 0.15s ease;
+}
+.field-help[open] > summary::after { transform: rotate(-135deg) translate(-2px, -2px); }
+.field-help > summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; border-radius: 4px; }
+.field-help p { margin: 6px 0 0; color: var(--color-text-muted); line-height: 1.55; }
 
 .strava-fill-badge {
   display: inline-block;
@@ -490,6 +632,13 @@ input[type="radio"]:focus-visible {
   border-color: var(--color-primary);
   color: #fff;
 }
+/* A locked chip group — today only #daysPerWeekToggle, pinned to 3 days
+   for the First-timer program (see updateGoalTypeUI in js/app.js). The
+   inputs are genuinely disabled; this is what stops the chips still
+   looking tappable, since .mode-chip carries all its own styling and knows
+   nothing about the input's state otherwise. */
+.mode-toggle.is-disabled { opacity: 0.55; }
+.mode-toggle.is-disabled .mode-chip { cursor: not-allowed; }
 
 .day-checkboxes { display: flex; flex-wrap: wrap; gap: 8px; }
 .day-chip {
@@ -593,6 +742,71 @@ textarea.has-error:focus {
 .btn-ghost:hover { border-color: var(--color-text-muted); color: var(--color-text); }
 .btn-small { padding: 7px 14px; font-size: 0.82rem; }
 .btn:disabled { opacity: 0.6; cursor: wait; }
+
+/* ---------- Overflow menu (result actions) ---------- */
+/* See .result-actions in index.html. Plain absolute positioning rather
+   than a <dialog> or popover: this needs to open under its own button
+   inside a normal card, and it is three buttons — the open/close/dismiss
+   logic it does need is a dozen lines in js/app.js. */
+.actions-more { position: relative; }
+.actions-more-caret { font-size: 0.75em; opacity: 0.7; }
+.actions-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  /* Wide enough for the longest item ("Hubungkan dengan Kalender") to sit
+     on one line — wrapped, it threw the menu's row rhythm out. */
+  min-width: 264px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+.actions-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.actions-menu-item .icon { opacity: 0.7; }
+.actions-menu-item:hover { background: var(--color-bg); }
+.actions-menu-item:hover .icon { opacity: 1; }
+.actions-menu-item:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+
+/* ---------- Sticky form submit ---------- */
+/* Full-bleed inside the card's own padding, so the bar's background spans
+   the card edge to edge once it sticks. The gradient rather than a flat
+   fill is what keeps the field under it legible-but-clearly-behind as it
+   scrolls past, instead of being chopped off at a hard line. */
+.form-submit-bar { margin-top: 4px; }
+@media (max-width: 600px) {
+  .form-submit-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    margin: 0 -16px -24px;
+    padding: 26px 16px 14px;
+    /* rgba() of --color-surface's own value rather than `transparent`:
+       in Safari `transparent` interpolates through transparent BLACK,
+       which draws a dark smear across the top of the fade. */
+    background: linear-gradient(to top, var(--color-surface) 0%, var(--color-surface) 58%, rgba(26, 31, 43, 0) 100%);
+  }
+  .form-submit-bar .btn-large { margin-top: 0; padding: 13px 20px; }
+}
 
 /* ---------- AI enhancement ---------- */
 .ai-status-row {
@@ -1215,12 +1429,36 @@ textarea.has-error:focus {
 .pace-zone-table .zone-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .pace-zone-note { font-size: 0.78rem; color: var(--color-text-muted); margin: 10px 0 0; }
 
+/* Goal pace + the Riegel estimate, relocated here from the summary tiles
+   at the top of the page (see renderPaceZones in js/app.js for why). A
+   rule above them so they read as a footnote to the zone table rather
+   than two more rows of it. */
+.pace-goal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 28px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+.pace-goal-item { display: flex; align-items: baseline; gap: 8px; font-size: 0.82rem; }
+.pace-goal-item .label { color: var(--color-text-muted); }
+.pace-goal-item .value { font-weight: 700; font-variant-numeric: tabular-nums; }
+
 /* Week blocks */
+/* The phase color carried on the left edge (set per block as
+   --week-phase-color by renderPlan, from the same PHASE_COLORS the volume
+   chart's bars use) — collapsed, twelve week headers were otherwise
+   twelve identical strips, and the base-build-peak-taper shape the chart
+   above draws had no counterpart in the list underneath it.
+   No `overflow: hidden` any more: it made this element a scroll container,
+   which silently disabled `position: sticky` on the header inside it. The
+   corners it used to clip are now rounded on that header directly. */
 .week-block {
   border: 1px solid var(--color-border);
+  border-left: 3px solid var(--week-phase-color, var(--color-border));
   border-radius: 10px;
   margin-top: 16px;
-  overflow: hidden;
 }
 /* A CSS grid, not flex — each .week-header is its own independent flex
    container (one per <details>, no shared row context across weeks), so
@@ -1255,6 +1493,29 @@ textarea.has-error:focus {
   border-radius: 999px;
   padding: 2px 8px;
 }
+/* "3/4 sesi" — how much of a week that has already started was actually
+   run, from the same Strava matching that draws the checkmarks inside it
+   (see updateWeekProgress in js/app.js). Collapsed, a week header said
+   what was PLANNED and nothing about what happened, so the only way to
+   find out was to open every one of them. Muted by default: a week that
+   fell short is a fact, not a telling-off — the missed-week banner is
+   what escalates that. */
+.week-progress {
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+.week-progress.is-complete {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-light);
+}
+
 .week-header .week-phase {
   font-size: 0.75rem;
   text-transform: uppercase;
@@ -1283,7 +1544,22 @@ textarea.has-error:focus {
    rules below strip the browser's own disclosure triangle so the custom
    .week-toggle-icon (which rotates on [open], see below) is the only one
    shown, consistently across browsers. */
-summary.week-header { cursor: pointer; list-style: none; transition: background 0.15s; }
+/* Sticky so an opened week still says which week it is while its own
+   table scrolls past — a marathon block's week runs well over a screen
+   tall, and the answer to "which week am I looking at" was scrolled off
+   the top for most of the time anyone spends reading one.
+   The radii are here rather than on .week-block because that element can
+   no longer clip them (see its comment above). */
+summary.week-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  border-radius: 7px;
+  cursor: pointer;
+  list-style: none;
+  transition: background 0.15s;
+}
+.week-block[open] > summary.week-header { border-radius: 7px 7px 0 0; }
 summary.week-header::-webkit-details-marker { display: none; }
 /* Tactile feedback for a clickable row that otherwise looks identical to
    any other header — same idea as the row-hover below on .day-table. */
@@ -1355,9 +1631,15 @@ summary.week-header:hover { background: var(--color-surface); }
    row. Touch has no hover, so the mobile rules further down restore a
    permanently visible (and larger) version — see .day-table tr[data-date]
    .swap-day-btn under the 600px query. */
+/* Was a borderless glyph at 0.32 opacity, i.e. all but invisible until a
+   row happened to be hovered — and swapping a day is the plan's main
+   interaction, not a power-user secret. It keeps a faint outline at rest
+   so it reads as a control that is there to be pressed, and still steps
+   fully forward on row hover/focus so it never competes with the session
+   text beside it. */
 .swap-day-btn {
   float: right;
-  border: 1px solid transparent;
+  border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-muted);
   border-radius: 6px;
@@ -1368,7 +1650,7 @@ summary.week-header:hover { background: var(--color-surface); }
   justify-content: center;
   line-height: 1;
   cursor: pointer;
-  opacity: 0.32;
+  opacity: 0.5;
   transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 .swap-day-btn .icon { width: 15px; height: 15px; vertical-align: 0; }
@@ -1501,6 +1783,12 @@ summary.week-header:hover { background: var(--color-surface); }
      regardless of which one happens to be open on screen. */
   .week-block:not([open]) > *:not(summary) { display: block !important; }
   .week-toggle-icon { display: none; }
+  /* Sticky is a scrolling affordance and nothing else — on paper it can
+     only cause a repeated header at a page break. Same for the reveal
+     animation, which has nothing to reveal in a printed document. */
+  summary.week-header { position: static; }
+  .week-block[open] > *:not(summary),
+  .result-warning[open] > *:not(summary) { animation: none; }
   /* Same reasoning for the plan warnings: folding them away is a
      screen-reading convenience, but a printed plan should carry them. */
   .result-warning:not([open]) > *:not(summary) { display: block !important; }
@@ -1510,23 +1798,44 @@ summary.week-header:hover { background: var(--color-surface); }
 /* ---------- Responsive ---------- */
 @media (max-width: 600px) {
   .card { padding: 20px 16px 24px; }
+  /* The hours/minutes/seconds triplets are the smallest tap targets on
+     the form and the only ones a thumb has to hit three times in a row —
+     inputmode="numeric" in index.html brings up the number pad, this
+     gives them a target worth aiming at. */
+  .field-small input { padding: 12px 10px; }
   .brand-name { font-size: 1.42rem; }
   .brand-logo { width: 29px; height: 29px; }
   .site-header { padding: 20px 0 32px; }
   /* See .summary-grid's own comment — 140px is the widest that still
      yields two columns on a 375px screen. */
   .summary-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-  /* Content-width buttons wrapping one per line left four ragged right
-     edges stacked down the screen. One full-width column squares them off
-     and lines the icons up in a column of their own — two columns was
-     tried first and is too narrow for these labels ("Hubungkan dengan
-     Kalender" broke across three lines and threw the row heights out). */
-  .result-actions {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-  .result-actions .btn { justify-content: flex-start; padding: 11px 14px; }
+  /* Two buttons now, not four (the other three moved into the overflow
+     menu — see .result-actions in index.html), so they fit side by side
+     on one line at every phone width instead of stacking into 195px of
+     chrome above the plan. */
+  .result-actions { gap: 8px; }
+  .result-actions > .btn, .actions-more > .btn { flex: 1 1 auto; }
+  /* Full-width under its own button rather than a 232px panel floating
+     off the right edge of a 358px card. */
+  .actions-menu { left: 0; right: 0; min-width: 0; }
+
+  /* Today's session, above the heading and the buttons. Even with the row
+     above trimmed to one line, "Training Plan Kamu" plus four action
+     buttons plus the AI intro paragraph all outranked the answer to the
+     question this page is actually opened with. display:contents lifts
+     the heading and the action row out of .result-header so all three can
+     be ordered against each other; the DOM order is untouched, which is
+     what keeps the desktop layout (and the print stylesheet) as it was.
+     Order is: anything urgent (the missed-week banner), today, the
+     heading, then the actions. Spacing has to be restated here:
+     .result-header's own `gap` goes away with display:contents, and the
+     h2 carries `margin: 0`. */
+  .result-card { display: flex; flex-direction: column; }
+  .result-header { display: contents; }
+  .missed-week-banner { order: -4; }
+  #todayCard { order: -3; margin-top: 0; }
+  .result-header h2 { order: -2; margin: 20px 0 10px; }
+  .result-actions { order: -1; }
 
   /* Five columns never actually fit here. .table-scroll kept the page from
      breaking, but Pace Target — and the swap button that lives inside
@@ -1583,6 +1892,24 @@ summary.week-header:hover { background: var(--color-surface); }
   .day-table tr[data-date].is-rest > td:nth-child(4) { display: none; }
   .day-table tr[data-date].is-rest > td:nth-child(5)::before,
   .day-table tr[data-date].is-rest .pace-text { display: none; }
+  /* With those two lines gone a rest day is one line of content, yet it
+     still occupied a block the same height as a session with a distance,
+     a pace and a structure bar. In a 4-day week that is three of the
+     seven blocks given the weight of a training day for saying "nothing
+     today" — so day, date and badge collapse onto a single row and the
+     whole block gets a tighter rhythm. */
+  .day-table tr[data-date].is-rest {
+    grid-template-columns: auto auto 1fr;
+    grid-template-areas: "hari tanggal sesi";
+    padding-top: 7px;
+    padding-bottom: 7px;
+    row-gap: 0;
+  }
+  .day-table tr[data-date].is-rest > td:nth-child(3) { justify-self: end; }
+  .day-table tr[data-date].is-rest .type-badge { font-size: 0.68rem; padding: 2px 8px; }
+  /* The absolute top: 8px below is measured for a three-row block; on a
+     single-row one it would hang past the bottom edge. */
+  .day-table tr[data-date].is-rest .swap-day-btn { top: 50%; transform: translateY(-50%); }
   /* Touch has no hover to reveal the quiet desktop version, so here it
      stays visible — but at a lower opacity than the content it sits
      beside, and with the border back so a 34px tap target is legible. */

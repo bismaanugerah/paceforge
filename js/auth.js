@@ -54,7 +54,18 @@
   // plain save/load, the alert for an error. Kept as a class rather than
   // markup so the message itself stays textContent: some of these lines
   // carry values from the server.
+  // Non-error messages clear themselves after a few seconds instead of
+  // living in the header for the rest of the session. "Plan tersimpan" is
+  // worth seeing once; kept permanently it was a third line of header
+  // chrome above every visit to a plan, and by the second visit it was
+  // saying something the runner had already read and acted on. Errors
+  // stay until something replaces them — an error the runner glanced
+  // away from must not quietly disappear.
+  const SYNC_STATUS_TIMEOUT_MS = 8000;
+  let syncStatusTimer = null;
+
   function setSyncStatus(text, isError, variant) {
+    clearTimeout(syncStatusTimer);
     if (!text) {
       syncStatus.hidden = true;
       syncStatus.textContent = '';
@@ -64,6 +75,12 @@
     syncStatus.textContent = text;
     syncStatus.classList.toggle('is-error', !!isError);
     syncStatus.classList.toggle('is-ai', variant === 'ai');
+    if (!isError) {
+      syncStatusTimer = setTimeout(() => {
+        syncStatus.hidden = true;
+        syncStatus.textContent = '';
+      }, SYNC_STATUS_TIMEOUT_MS);
+    }
   }
 
   if (looksUnconfigured) {
