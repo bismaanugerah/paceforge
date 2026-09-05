@@ -197,17 +197,28 @@
     }) || null;
   }
 
-  // Whether a week has actually begun (its first day is today or earlier)
-  // — the only weeks an "actual vs. planned" comparison means anything
-  // for. A week entirely in the future has nothing run yet by definition,
-  // so renderVolumeChart leaves it as the plain planned-only bar it's
-  // always been rather than drawing a zero-height "actual" underneath it.
-  function weekHasStarted(week) {
-    const start = new Date(week.startDate);
-    start.setHours(0, 0, 0, 0);
+  // Where "today" sits relative to one week — three states renderVolumeChart
+  // treats differently, not just "started or not":
+  //  - 'future': hasn't begun. Nothing run yet by definition, so the bar
+  //    stays a single dim plan-only fill — there's nothing to compare it
+  //    against, and dim is exactly "not real yet".
+  //  - 'current': today falls inside it. Whatever's left of its target THIS
+  //    week is still genuinely undecided (there's time left to run it), so
+  //    that remainder renders dim too, same as a future week's plan.
+  //  - 'past': already over. Any gap between what was run and what was
+  //    planned already happened (or didn't) — that's a real missed session,
+  //    not a hypothetical, so it renders at full brightness like any other
+  //    plan color instead of being softened into "not real yet".
+  function weekTimeStatus(week) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    return start <= today;
+    const start = new Date(week.startDate);
+    start.setHours(0, 0, 0, 0);
+    if (today < start) return 'future';
+    const end = new Date(week.endDate);
+    end.setHours(0, 0, 0, 0);
+    if (today > end) return 'past';
+    return 'current';
   }
 
   // Sum of day.actualKm across a week — set by markCompletedSessionsFromStrava
@@ -2584,24 +2595,27 @@
   // to expand all of them just to see the plan's overall base-build-peak-
   // taper shape.
   //
-  // For a week that has actually started (weekHasStarted), the bar splits
-  // into two stacked zones instead of one solid fill: a bottom zone in a
-  // single vivid color for km actually logged on Strava so far this week
-  // (weekActualKm), and — if the target isn't fully met yet — a dim zone
-  // above it for what's still left to run. Both zones stay full width,
-  // same as every other week's bar, rather than a bullet-graph-style
-  // narrow bar centered over a wide one: tried that first, and next to a
-  // row of bold full-width bars a thin centered one read as "this bar is
-  // too small" rather than "here's a comparison", on exactly the week
-  // that matters most. The "done" zone's color is deliberately its own
-  // hue (--color-progress) rather than reusing --color-accent, which
-  // Build's own phase bar already sits in — a same-colored overlay would
-  // vanish into a Build week exactly when checking progress on it matters
-  // most. A future week (hasn't started) is a single plain bar, same as
-  // always, but dimmed — there's nothing run yet to compare it against,
-  // and full brightness reserved for "already happened" (a completed
-  // week's done zone, or a just-run today) makes that distinction visible
-  // at a glance instead of every week competing for the same attention.
+  // A week's bar reads one of three ways depending on weekTimeStatus:
+  //  - future: a single plain bar, dimmed — there's nothing run yet to
+  //    compare it against, and dim reads as "not real yet".
+  //  - current/past: splits into two stacked zones instead of one solid
+  //    fill — a bottom zone in a single vivid color for km actually
+  //    logged on Strava so far this week (weekActualKm), and, if the
+  //    target isn't fully met, a zone above it for what's still left to
+  //    run. That remainder is dim for the CURRENT week (there's still
+  //    time left to close the gap, so it's as undecided as a future
+  //    week's plan) but full brightness for a PAST week (that gap already
+  //    happened, a real missed session, not a hypothetical one softened
+  //    into looking unreal). Both zones stay full width, same as every
+  //    other week's bar, rather than a bullet-graph-style narrow bar
+  //    centered over a wide one: tried that first, and next to a row of
+  //    bold full-width bars a thin centered one read as "this bar is too
+  //    small" rather than "here's a comparison", on exactly the week that
+  //    matters most. The "done" zone's color is deliberately its own hue
+  //    (--color-progress) rather than reusing --color-accent, which
+  //    Build's own phase bar already sits in — a same-colored overlay
+  //    would vanish into a Build week exactly when checking progress on
+  //    it matters most.
   //
   // Plain flex/CSS bars, not SVG: an SVG viewBox stretched to the
   // container's width with preserveAspectRatio="none" (the first version
@@ -2619,35 +2633,52 @@
     // and the chart's own scale (maxKm below) has to stretch to fit that
     // or its bright zone would just clip against the top of the track.
     const rows = weeks.map(week => {
-      const hasStarted = weekHasStarted(week);
-      const actualKm = hasStarted ? weekActualKm(week) : 0;
-      return { week, hasStarted, actualKm };
+      const status = weekTimeStatus(week);
+      const actualKm = status === 'future' ? 0 : weekActualKm(week);
+      return { week, status, actualKm };
     });
 
     const maxKm = Math.max(...rows.map(r => Math.max(r.week.totalKm, r.actualKm)), 1);
     const trackHeight = 90;
 
-    const cols = rows.map(({ week, hasStarted, actualKm }) => {
+    const cols = rows.map(({ week, status, actualKm }) => {
       const targetHeightPx = Math.max(3, Math.round((week.totalKm / maxKm) * trackHeight));
       const color = PHASE_COLORS[week.phase] || 'var(--color-text-muted)';
       const isCurrent = currentWeek && week.weekNumber === currentWeek.weekNumber;
 
-      let bar;
-      if (hasStarted) {
+      // Wrapped in .volume-chart-bar, sized to exactly this week's own
+      // rendered height (outerHeightPx below, or targetHeightPx for a
+      // future week) — NOT the fixed 90px .volume-chart-track every
+      // column sits in. The current-week ring attaches to this wrapper
+      // (see .volume-chart-col.is-current .volume-chart-bar) specifically
+      // so a short week's ring hugs its own short bar instead of framing
+      // a tall empty box up to whatever the chart's tallest week happens
+      // to be.
+      let innerHtml, outerHeightPx;
+      if (status === 'future') {
+        outerHeightPx = targetHeightPx;
+        innerHtml = `<span class="volume-chart-fill" style="height:${targetHeightPx}px;background:${color}"></span>`;
+      } else {
         // doneHeightPx alone (not targetHeightPx) drives the bar's outer
         // height once it exceeds the target — an overshoot week is just
         // taller than a normal one, no remainder zone left to show.
         const doneHeightPx = Math.round((actualKm / maxKm) * trackHeight);
-        const outerHeightPx = Math.max(targetHeightPx, doneHeightPx);
+        outerHeightPx = Math.max(targetHeightPx, doneHeightPx);
         const remainderHeightPx = outerHeightPx - doneHeightPx;
+        // A 'current' week's remainder is still genuinely undecided —
+        // there's time left this week to close that gap — so it renders
+        // dim, same as a future week's plan-only bar. A 'past' week's
+        // remainder already happened (or didn't): that's a real shortfall,
+        // not a hypothetical, so it prints at full brightness instead of
+        // being softened into looking like "not real yet".
+        const remainderClass = status === 'past' ? 'volume-chart-remainder is-past' : 'volume-chart-remainder';
         const doneClass = remainderHeightPx > 0 ? 'volume-chart-done' : 'volume-chart-done is-full';
-        bar = `
-          ${remainderHeightPx > 0 ? `<span class="volume-chart-remainder" style="height:${remainderHeightPx}px;bottom:${doneHeightPx}px;background:${color}"></span>` : ''}
+        innerHtml = `
+          ${remainderHeightPx > 0 ? `<span class="${remainderClass}" style="height:${remainderHeightPx}px;bottom:${doneHeightPx}px;background:${color}"></span>` : ''}
           ${doneHeightPx > 0 ? `<span class="${doneClass}" style="height:${doneHeightPx}px"></span>` : ''}
         `;
-      } else {
-        bar = `<span class="volume-chart-fill" style="height:${targetHeightPx}px;background:${color}"></span>`;
       }
+      const bar = `<div class="volume-chart-bar" style="height:${outerHeightPx}px">${innerHtml}</div>`;
 
       // "Actual/Rencana" once a week has something to report, otherwise
       // just the plan number as before — matches the title text below,
@@ -2658,6 +2689,7 @@
       // to a whole km same as the plan figure always has been — a dozen+
       // of these columns already have to share the width .table-scroll
       // gives them, and the exact decimal is one hover away in `title`.
+      const hasStarted = status !== 'future';
       const roundedActual = Math.round(actualKm);
       const valueLabel = hasStarted
         ? `<span class="volume-chart-value-actual">${roundedActual}</span><span class="volume-chart-value-sep">/</span>${Math.round(week.totalKm)}`
@@ -2692,7 +2724,7 @@
     `).join('');
     // Only appears once at least one week has actually started — otherwise
     // the legend would explain a color nowhere in the chart yet.
-    const actualLegend = rows.some(r => r.hasStarted)
+    const actualLegend = rows.some(r => r.status !== 'future')
       ? `<span class="volume-chart-legend-item"><span class="volume-chart-legend-dot volume-chart-legend-dot-actual"></span>Sudah dijalani (Strava)</span>`
       : '';
 

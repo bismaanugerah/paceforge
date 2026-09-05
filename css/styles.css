@@ -1068,13 +1068,21 @@ textarea.has-error:focus {
    zones can stack sharing the same baseline instead of sitting side by
    side — see .volume-chart-done/.volume-chart-remainder below. */
 .volume-chart-track { position: relative; height: 90px; width: 100%; }
+/* Sized in JS to exactly this week's own rendered height (the taller of
+   its target and its actual, see renderVolumeChart) rather than filling
+   the fixed 90px .volume-chart-track every column sits in — purely a
+   positioning anchor for whichever zone(s) below it needs, and the thing
+   the current-week ring attaches to (see .is-current below), so a short
+   week's ring hugs its own short bar instead of framing an oversized box
+   reaching up toward the chart's tallest week. */
+.volume-chart-bar { position: absolute; left: 0; right: 0; bottom: 0; }
 /* A week that hasn't started yet — plan only, nothing to compare against.
    Dimmed rather than the solid full-opacity look this used to always
    have: full brightness is now reserved for "already happened" (a
-   completed week's .volume-chart-done zone below, or today's own km), so
-   a week that's still just a future plan visibly recedes next to it
-   instead of every bar competing for the same attention regardless of
-   whether it's real yet. */
+   completed week's .volume-chart-done zone below, or a past week's own
+   .volume-chart-remainder.is-past), so a week that's still just a future
+   plan visibly recedes next to it instead of every bar competing for the
+   same attention regardless of whether it's real yet. */
 .volume-chart-fill {
   position: absolute;
   left: 0;
@@ -1087,20 +1095,27 @@ textarea.has-error:focus {
 }
 .volume-chart-col:hover .volume-chart-fill { opacity: 0.7; }
 /* The "still to run" zone of a started week that hasn't hit its target
-   yet — same dimness as a future week's whole bar (see .volume-chart-fill
-   above), for the same reason: this km hasn't actually happened either.
-   Sits on TOP of .volume-chart-done (offset up by `bottom`, set inline in
-   JS to the done zone's own height), so together the two form one
-   continuous bar reaching the week's planned total. */
+   yet. Sits on TOP of .volume-chart-done (offset up by `bottom`, set
+   inline in JS to the done zone's own height), so together the two form
+   one continuous bar reaching the week's planned total (or the done
+   zone's own taller height, on an overshoot). Dim by default — same
+   reasoning and same opacity as a future week's whole bar, since for the
+   CURRENT week this km hasn't happened yet either and there's still time
+   left to close the gap. */
 .volume-chart-remainder {
   position: absolute;
   left: 0;
   right: 0;
   border-radius: 4px 4px 0 0;
   opacity: 0.4;
-  background-clip: padding-box;
 }
 .volume-chart-col:hover .volume-chart-remainder { opacity: 0.65; }
+/* A PAST week's own remainder, though — that gap already happened (or
+   didn't). It's a real missed session, not a still-undecided plan, so it
+   prints at full brightness like any other plan color instead of being
+   softened into looking hypothetical. */
+.volume-chart-remainder.is-past { opacity: 0.82; }
+.volume-chart-col:hover .volume-chart-remainder.is-past { opacity: 1; }
 /* The actually-logged-km zone (see weekActualKm/renderVolumeChart) — full
    width, same as every bar in this chart, stacked at the bar's own base.
    A first version centered a narrower bright bar over a wide dim one
@@ -1123,12 +1138,12 @@ textarea.has-error:focus {
 .volume-chart-done.is-full { border-radius: 4px 4px 0 0; }
 .volume-chart-week-no { font-size: 0.68rem; color: var(--color-text-muted); }
 /* The current week needs to be unmistakable, not just a slightly brighter
-   bar in a row of a dozen similar ones — a visible ring on the whole
-   track (not just one of the two possible bars inside it, so this looks
-   identical whether or not the week has started) plus bolded/colored
+   bar in a row of a dozen similar ones — a ring on .volume-chart-bar
+   (sized to this week's own bar, not the shared 90px track every column
+   sits in — see .volume-chart-bar's own comment) plus bolded/colored
    labels above and below it, backed up by the explicit "Sekarang: Minggu
    N" text in the header line above (see renderVolumeChart). */
-.volume-chart-col.is-current .volume-chart-track {
+.volume-chart-col.is-current .volume-chart-bar {
   box-shadow: 0 0 0 2px var(--color-primary-dark);
   border-radius: 4px 4px 0 0;
 }
