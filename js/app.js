@@ -13,6 +13,12 @@
     structureToSegments, formatKm,
   } = PaceForgePlanText;
 
+  // Markup for one icon from the sprite at the top of index.html — a
+  // helper rather than the same <svg><use> boilerplate spelled out at
+  // every call site. Icons inherit currentColor, so they always match the
+  // text they sit beside (see .icon in css/styles.css).
+  const icon = (name) => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+
   const RACE_META = {
     '5k': { km: 5, label: '5K' },
     '10k': { km: 10, label: '10K' },
@@ -644,7 +650,7 @@
     const selected = getSelectedDays().length;
     const needed = Number(daysPerWeekInput.value);
     if (selected === needed) {
-      dayCountHint.textContent = `✓ ${selected} hari dipilih.`;
+      dayCountHint.innerHTML = `${icon('check')} ${selected} hari dipilih.`;
       dayCountHint.style.color = 'var(--color-accent)';
     } else {
       dayCountHint.textContent = `Pilih tepat ${needed} hari (saat ini: ${selected}).`;
@@ -1195,7 +1201,7 @@
 
     blockHistoryChart.innerHTML = `
       <div class="pace-zone-header">
-        <span class="pace-zone-title">📈 Riwayat Blok</span>
+        <span class="pace-zone-title">${icon('trend')} Riwayat Blok</span>
         <span class="pace-zone-source">${blocks.length} blok selesai • total km per blok</span>
       </div>
       <div class="table-scroll"><div class="volume-chart-bars">${cols}</div></div>
@@ -1404,7 +1410,7 @@
 
     const ranKm = Math.round((info.plannedKm - info.missedKm) * 10) / 10;
     const pct = Math.round(info.missedFraction * 100);
-    missedWeekText.textContent = `⚠️ Minggu ${info.missedWeek.weekNumber} lalu cuma kepakai ${ranKm} dari ${info.plannedKm} km rencana (${pct}% terlewat). Mau PaceForge sesuaikan volume minggu ${info.currentWeek.weekNumber} ini biar nggak lompat balik ke rencana semula?`;
+    missedWeekText.innerHTML = `${icon('alert')} Minggu ${info.missedWeek.weekNumber} lalu cuma kepakai ${ranKm} dari ${info.plannedKm} km rencana (${pct}% terlewat). Mau PaceForge sesuaikan volume minggu ${info.currentWeek.weekNumber} ini biar nggak lompat balik ke rencana semula?`;
     missedWeekBanner.dataset.week = String(info.missedWeek.weekNumber);
     missedWeekBanner.hidden = false;
   }
@@ -1507,7 +1513,7 @@
     feedbackSubmitBtn.disabled = true;
     feedbackStatus.hidden = false;
     feedbackStatus.classList.remove('is-error');
-    feedbackStatus.textContent = '✨ Menyesuaikan jadwal...';
+    feedbackStatus.innerHTML = `${icon('sparkle')} Menyesuaikan jadwal...`;
 
     let adjustments;
     let summary;
@@ -1563,7 +1569,10 @@
       markCompletedSessionsFromStrava(lastPlan).catch(() => {});
       if (REQUIRE_LOGIN && lastSettings) savePlanForCurrentUser(lastSettings);
       feedbackStatus.classList.remove('is-error');
-      feedbackStatus.textContent = summary || `✓ ${touchedWeeks.size} sesi disesuaikan.`;
+      // `summary` is AI-written text, so it stays textContent — only the
+      // app's own fallback sentence is safe to build as markup.
+      if (summary) feedbackStatus.textContent = summary;
+      else feedbackStatus.innerHTML = `${icon('check')} ${touchedWeeks.size} sesi disesuaikan.`;
     } else {
       feedbackStatus.classList.add('is-error');
       feedbackStatus.textContent = 'Nggak ada sesi yang perlu disesuaikan menurut catatan itu.';
@@ -1573,7 +1582,7 @@
   // A message slot inside one week's own block, used for everything the
   // day-swap flow needs to say. Deliberately not a banner at the top of
   // the page: by week 5 of a 12-week plan that banner is several screens
-  // away from the ⇄ button that triggered it, so the runner would get no
+  // away from the swap button that triggered it, so the runner would get no
   // feedback they could actually see. At most one is ever open.
   //
   // With `confirm`, resolves true/false on the runner's answer — the
@@ -1667,7 +1676,7 @@
   }
 
   // The prompt shown while a first day is picked and a second is still
-  // pending. Until this existed, clicking ⇄ only tinted a row — nothing
+  // pending. Until this existed, clicking swap only tinted a row — nothing
   // said a second click was expected, so the half-finished state read as
   // "the button did nothing".
   function promptForSwapPartner(weekNumber, dow) {
@@ -1705,7 +1714,7 @@
     if (!await attemptDaySwap(weekNumber, sourceDow, dow)) reRenderWeek(weekNumber);
   }
 
-  // Drag-and-drop is the desktop-mouse path to the same swap the ⇄ button
+  // Drag-and-drop is the desktop-mouse path to the same swap the swap button
   // (handleSwapDayClick) already does — HTML5 drag events don't fire on
   // touch at all, so the button stays as the interaction every device can
   // actually use; this is additive, not a replacement. dragWeek/dragDow
@@ -1762,7 +1771,7 @@
 
     if (paceforgeAuth.isDummy()) {
       localStorage.setItem(DUMMY_PLAN_KEY, JSON.stringify(payload));
-      paceforgeAuth.setSyncStatus('✓ Plan tersimpan (mode dummy — lokal di browser ini saja).');
+      paceforgeAuth.setSyncStatus('Plan tersimpan (mode dummy — lokal di browser ini saja).');
       return;
     }
 
@@ -1775,7 +1784,7 @@
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Server merespons status ${res.status}`);
-      paceforgeAuth.setSyncStatus('✓ Plan tersimpan ke akunmu.');
+      paceforgeAuth.setSyncStatus('Plan tersimpan ke akunmu.');
     } catch (err) {
       paceforgeAuth.setSyncStatus(`Gagal menyimpan plan ke akun: ${err.message}`, true);
     }
@@ -1811,7 +1820,7 @@
       // actually in place, or a previously-dismissed/applied week's banner
       // would incorrectly reappear on every reload.
       renderMissedWeekBanner();
-      paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat (mode dummy — lokal).');
+      paceforgeAuth.setSyncStatus('Plan terakhir dimuat (mode dummy — lokal).');
       return true;
     }
 
@@ -1846,7 +1855,7 @@
       // actually in place, or a previously-dismissed/applied week's banner
       // would incorrectly reappear on every reload.
       renderMissedWeekBanner();
-      paceforgeAuth.setSyncStatus('✓ Plan terakhir dimuat dari akunmu.');
+      paceforgeAuth.setSyncStatus('Plan terakhir dimuat dari akunmu.');
       return true;
     } catch (err) {
       paceforgeAuth.setSyncStatus(`Gagal memuat plan tersimpan: ${err.message}`, true);
@@ -1921,8 +1930,8 @@
       // though, so both get the badge treatment (badge: true).
       setRecentRaceSourceNote(
         summary.recentRace.isEstimate
-          ? '📊 Estimasi dari segmen tercepat di salah satu sesi larimu (bukan race resmi di Strava) — edit di bawah kalau kamu punya waktu race asli.'
-          : '📊 Dari race yang kamu tandai di Strava.',
+          ? 'Estimasi dari segmen tercepat di salah satu sesi larimu (bukan race resmi di Strava) — edit di bawah kalau kamu punya waktu race asli.'
+          : 'Dari race yang kamu tandai di Strava.',
         true,
       );
       filledAny = true;
@@ -1945,7 +1954,7 @@
     }
 
     if (filledAny) {
-      paceforgeAuth.setSyncStatus('✨ Sebagian field (km mingguan, lari terjauh, race terakhir, hari latihan) diisi otomatis dari data Strava-mu — cek dulu sebelum submit.');
+      paceforgeAuth.setSyncStatus('Sebagian field (km mingguan, lari terjauh, race terakhir, hari latihan) diisi otomatis dari data Strava-mu — cek dulu sebelum submit.', false, 'ai');
     }
   }
 
@@ -2077,7 +2086,7 @@
     const kmDiffLabel = kmDiff === 0 ? '' : ` (${kmDiff > 0 ? '+' : ''}${kmDiff} km dari rencana)`;
     const caveat = NON_COMPARABLE_PACE_TYPES.has(day.type) ? 'termasuk jeda recovery, bukan pace repetisinya sendiri' : null;
     const paceLabel = buildPaceComparisonLabel('Pace rata-rata', actualPaceSecPerKm, day, caveat);
-    analysisEl.innerHTML = `📊 ${best.km} km${kmDiffLabel} &middot; ${paceLabel} &middot; ${formatDuration(best.movingTimeSec)}`;
+    analysisEl.innerHTML = `${icon('chart')} ${best.km} km${kmDiffLabel} &middot; ${paceLabel} &middot; ${formatDuration(best.movingTimeSec)}`;
   }
 
   // Progressive enhancement over renderCompletedRow's baseline: for a
@@ -2109,7 +2118,7 @@
       const kmDiffLabel = kmDiff === 0 ? '' : ` (${kmDiff > 0 ? '+' : ''}${kmDiff} km dari rencana)`;
       const segmentLabel = SEGMENT_TYPE_LABEL[day.type] || 'segmen';
       const paceLabel = buildPaceComparisonLabel(`Pace ${segmentLabel} (≈${effort.distanceKm} km):`, actualPaceSecPerKm, day, null);
-      analysisEl.innerHTML = `📊 ${best.km} km${kmDiffLabel} &middot; ${paceLabel} &middot; ${formatDuration(best.movingTimeSec)}`;
+      analysisEl.innerHTML = `${icon('chart')} ${best.km} km${kmDiffLabel} &middot; ${paceLabel} &middot; ${formatDuration(best.movingTimeSec)}`;
     }));
   }
 
@@ -2189,14 +2198,14 @@
         row.querySelector('.swap-day-btn')?.remove();
         const slot = row.querySelector('.completed-slot');
         if (slot) {
-          slot.innerHTML = `<span class="completed-badge" title="Selesai — tercatat ${best.km} km di Strava">✅</span>`;
+          slot.innerHTML = `<span class="completed-badge" title="Selesai — tercatat ${best.km} km di Strava"></span>`;
         }
 
         // Richer per-session analysis — actual distance/pace/duration from
         // the matched Strava activity, plus how that pace compares to what
         // this session was targeting — rendered into the placeholder row
         // renderDayRow already left right below this one (see analysisRow
-        // there) rather than just leaving the ✅ badge to speak for itself.
+        // there) rather than just leaving the completed badge to speak for itself.
         const analysisRow = planWeeksEl.querySelector(`tr.completed-analysis-row[data-analysis-date="${key}"]`);
         // The structure bar (interval/tempo breakdown), when present, is its
         // own sibling <tr> between the day row and the analysis row above —
@@ -2347,7 +2356,7 @@
     aiRetryBtn.hidden = true;
     aiStatus.hidden = false;
     aiStatus.classList.remove('is-error');
-    aiStatus.textContent = '✨ Meminta review dari Claude...';
+    aiStatus.innerHTML = `${icon('sparkle')} Meminta review dari Claude...`;
     await reviewPlanWithAI();
     renderPlan(lastPlan);
     applyPendingAiReviewToDom();
@@ -2403,7 +2412,7 @@
 
     paceLegend.innerHTML = `
       <div class="pace-zone-header">
-        <span class="pace-zone-title">🎯 Zona Pace (VDOT ${vdot.toFixed(1)})</span>
+        <span class="pace-zone-title">${icon('target')} Zona Pace (VDOT ${vdot.toFixed(1)})</span>
         <span class="pace-zone-source">${sourceLabel} • per ${formatLongDate(relevantWeek.startDate)}</span>
       </div>
       <div class="table-scroll">
@@ -2520,7 +2529,7 @@
       day.km ? `<span class="today-card-metric">Pace <strong>${paceTargetLabel(day, zone, isFirstTimerPlan)}</strong></span>` : '',
       // Set by markCompletedSessionsFromStrava, which runs after the first
       // render and calls back in here — see its tail.
-      day.isCompleted ? '<span class="today-card-metric today-card-done">✅ Sudah dijalani</span>' : '',
+      day.isCompleted ? `<span class="today-card-metric today-card-done">${icon('check-circle')} Sudah dijalani</span>` : '',
     ].filter(Boolean).join('');
 
     todayCard.innerHTML = `
@@ -2598,7 +2607,7 @@
 
     volumeChart.innerHTML = `
       <div class="pace-zone-header">
-        <span class="pace-zone-title">📈 Volume Mingguan (km)</span>
+        <span class="pace-zone-title">${icon('trend')} Volume Mingguan (km)</span>
         <span class="pace-zone-source">Peak ${peakWeek.totalKm} km di minggu ${peakWeek.weekNumber}${currentNote}</span>
       </div>
       <div class="table-scroll"><div class="volume-chart-bars">${cols}</div></div>
@@ -2627,9 +2636,22 @@
     // markup (see applyPendingAiReviewToDom), and planWeeksEl.innerHTML is
     // about to be fully rebuilt below anyway.
 
-    // Warnings
+    // Warnings, as a <details> the runner can fold away. These run to two
+    // or three full paragraphs — measured at 786px tall on a 375px screen,
+    // more than three times the "today" card above them — and they say the
+    // same thing on every visit for the life of the block. Open on first
+    // render so nothing is ever hidden from someone who hasn't chosen to
+    // hide it; the summary line alone is what they get back to on the
+    // visits after that.
     if (warnings.length) {
-      resultWarning.innerHTML = warnings.map(w => `⚠️ ${w}`).join('<br><br>');
+      const label = warnings.length === 1
+        ? 'Satu catatan penting tentang plan ini'
+        : `${warnings.length} catatan penting tentang plan ini`;
+      resultWarning.innerHTML = `
+        <summary class="result-warning-summary">${icon('alert')}<span>${label}</span></summary>
+        <div class="result-warning-body">${warnings.map(w => `<p>${w}</p>`).join('')}</div>
+      `;
+      resultWarning.open = true;
       resultWarning.hidden = false;
     } else {
       resultWarning.hidden = true;
@@ -2684,7 +2706,7 @@
     planWeeksEl.innerHTML = weeks.map(week => {
       const vdot = weekVdot(week);
       const vdotLine = vdot
-        ? `<div class="week-vdot">🎯 Zona Pace (VDOT ${vdot.toFixed(1)}) per ${formatLongDate(week.startDate)}</div>`
+        ? `<div class="week-vdot">${icon('target')} Zona Pace (VDOT ${vdot.toFixed(1)}) per ${formatLongDate(week.startDate)}</div>`
         : '';
       const isOpen = week.weekNumber === defaultOpenWeekNumber;
       const currentWeekBadge = currentWeek && week.weekNumber === currentWeek.weekNumber
@@ -2790,7 +2812,7 @@
       // repeating a trimmed version of it here would be the copy people
       // read first and the one that's missing the Google desktop caveat.
       setStatus(copied
-        ? '✓ Link disalin ke clipboard — tempel sesuai langkah di atas.'
+        ? `${icon('check')} Link disalin ke clipboard — tempel sesuai langkah di atas.`
         : 'Salin link di bawah ini, lalu tempel sesuai langkah di atas.');
     } catch (err) {
       calendarUrlOut.hidden = true;
@@ -3294,7 +3316,7 @@
       }
       aiStatus.hidden = false;
       aiStatus.classList.remove('is-error');
-      aiStatus.textContent = '✨ Plan sudah ditinjau & diberi catatan oleh Claude.';
+      aiStatus.innerHTML = `${icon('sparkle')} Plan sudah ditinjau &amp; diberi catatan oleh Claude.`;
     } else if (aiReviewErrorMessage) {
       aiStatus.hidden = false;
       aiStatus.classList.add('is-error');
@@ -3338,8 +3360,13 @@
     const zone = zoneForDay(day);
     const pace = paceTargetLabel(day, zone, isFirstTimerPlan);
     const color = TYPE_COLORS[displayKey] || 'var(--type-rest)';
-    const structureRow = day.structure
-      ? `<tr class="structure-row ${rowClass}"><td colspan="5">${renderWorkoutStructure(day.structure, zone)}</td></tr>`
+    // renderWorkoutStructure returns nothing for a shapeless session (see
+    // its own comment), so the row is built from the result rather than
+    // from `day.structure` being present — otherwise an Easy Run would
+    // still get an empty, padded <tr>.
+    const structureHtml = day.structure ? renderWorkoutStructure(day.structure, zone) : '';
+    const structureRow = structureHtml
+      ? `<tr class="structure-row ${rowClass}"><td colspan="5">${structureHtml}</td></tr>`
       : '';
     // Populated (and unhidden) after the fact by markCompletedSessionsFromStrava
     // once it finds a matching Strava activity for this date — see there for
@@ -3352,11 +3379,11 @@
     // disabled one, since there's nothing a click on it could ever do (a
     // completed day's distance/pace is a record of what you actually
     // ran, not a slot left to plan). The selected source day gets a
-    // "cancel" affordance (✕) in place of the swap icon (⇄) instead of a
+    // "cancel" affordance (an x icon) in place of the swap icon instead of a
     // second button, so there's always exactly one control to reason
     // about per row.
     const swapDisabled = isRace || isCompleted;
-    const swapBtn = swapDisabled ? '' : `<button type="button" class="swap-day-btn" data-week="${weekNumber}" data-dow="${day.dow}" title="${isSwapSelected ? 'Batal tukar' : 'Tukar dengan hari lain'}" aria-label="${isSwapSelected ? 'Batalkan pemilihan tukar hari' : `Tukar sesi hari ${day.dayName} dengan hari lain`}">${isSwapSelected ? '✕' : '⇄'}</button>`;
+    const swapBtn = swapDisabled ? '' : `<button type="button" class="swap-day-btn" data-week="${weekNumber}" data-dow="${day.dow}" title="${isSwapSelected ? 'Batal tukar' : 'Tukar dengan hari lain'}" aria-label="${isSwapSelected ? 'Batalkan pemilihan tukar hari' : `Tukar sesi hari ${day.dayName} dengan hari lain`}">${icon(isSwapSelected ? 'x' : 'swap')}</button>`;
     // draggable is left off entirely for race day/a completed day
     // (matching swapBtn above — nothing a drag could ever do there
     // either), rather than draggable plus a drop handler that just
@@ -3399,6 +3426,14 @@
   // interval/tempo sessions break down into their segments.
   function renderWorkoutStructure(structure, zone) {
     const { segments, caption } = structureToSegments(structure);
+
+    // A single segment with nothing to say about it is one flat block of
+    // color spanning the row — it looks like a chart but carries no
+    // information the "Jarak" column doesn't already give. That was 33 of
+    // the 47 bars on a typical 12-week plan (every Easy and Recovery run),
+    // i.e. most of what this element rendered was noise. Skipping them
+    // leaves the bar meaning something: this session has a shape.
+    if (segments.length < 2 && !caption) return '';
 
     const bar = segments.map(seg => {
       const color = roleColorCss(seg.role, zone);

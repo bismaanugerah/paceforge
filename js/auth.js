@@ -49,7 +49,12 @@
     userNameEl.textContent = user ? ([user.firstname, user.lastname].filter(Boolean).join(' ') || 'Runner') : '';
   }
 
-  function setSyncStatus(text, isError) {
+  // `variant` picks the leading icon css/styles.css draws on .sync-status
+  // — 'ai' for "PaceForge filled this in for you", the default check for a
+  // plain save/load, the alert for an error. Kept as a class rather than
+  // markup so the message itself stays textContent: some of these lines
+  // carry values from the server.
+  function setSyncStatus(text, isError, variant) {
     if (!text) {
       syncStatus.hidden = true;
       syncStatus.textContent = '';
@@ -58,6 +63,7 @@
     syncStatus.hidden = false;
     syncStatus.textContent = text;
     syncStatus.classList.toggle('is-error', !!isError);
+    syncStatus.classList.toggle('is-ai', variant === 'ai');
   }
 
   if (looksUnconfigured) {

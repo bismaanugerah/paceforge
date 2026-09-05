@@ -49,10 +49,99 @@
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
   --font-body: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-display: 'Space Grotesk', var(--font-body);
+
+  /* Mask sources for the pseudo-element icons further down (see the
+     ::before block under "Icons"). Same shapes as index.html's sprite;
+     duplicated as data URIs only because mask-image cannot point at a
+     <symbol>. Stroke color is irrelevant to a mask — only the alpha is
+     read — so these all draw in black and take their real color from the
+     element's own currentColor. */
+  --i-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4.5 12.5 5 5 10-10.5'/%3E%3C/svg%3E");
+  --i-sparkle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 2.8 11.7 8 17 9.8 11.7 11.5 10 16.8 8.3 11.5 3 9.8 8.3 8 10 2.8Z'/%3E%3Cpath d='m18 14.2.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9.9-2.4Z'/%3E%3C/svg%3E");
+  --i-alert: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5 2.8 20h18.4L12 3.5Z'/%3E%3Cpath d='M12 9.5v4.2'/%3E%3Ccircle cx='12' cy='16.9' r='1' fill='%23000' stroke='none'/%3E%3C/svg%3E");
+  --i-chart: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.2 20.4h17.6'/%3E%3Cpath d='M6.8 20.4v-7.6'/%3E%3Cpath d='M12 20.4V4.6'/%3E%3Cpath d='M17.2 20.4v-5.2'/%3E%3C/svg%3E");
+  --i-flag: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5.2 21.2V3.2'/%3E%3Cpath d='M5.2 4.4h13.4l-2.6 4.3 2.6 4.3H5.2'/%3E%3C/svg%3E");
+  --i-check-circle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.8'/%3E%3Cpath d='m8 12.2 2.8 2.8 5.4-5.6'/%3E%3C/svg%3E");
 }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
+
+/* ---------- Icons ---------- */
+/* Every icon is a <use> into the sprite at the top of index.html. Sized in
+   em so it scales with whatever text it sits beside, and stroked in
+   currentColor so it takes that text's exact color — the thing emoji
+   could never do, since each renders in its own fixed vendor palette. */
+.icon-sprite { display: none; }
+.icon {
+  width: 1.05em;
+  height: 1.05em;
+  flex: none;
+  vertical-align: -0.16em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* Pseudo-element form, for the handful of places where the icon is a
+   fixed property of a message class rather than part of specific markup
+   (.sync-status, .ai-intro, ...). Those elements have their text written
+   via textContent — some of it server- or AI-authored — so the icon can't
+   be markup there without giving up that safety. A mask over
+   background:currentColor keeps the same inherit-the-text-color behavior
+   the <use> icons have. */
+.sync-status::before,
+.strava-fill-badge::before,
+.ai-intro::before,
+.ai-tips::before,
+.week-ai-note::before,
+.week-race-tips::before,
+.completed-badge::before {
+  content: "";
+  display: inline-block;
+  width: 1.05em;
+  height: 1.05em;
+  vertical-align: -0.16em;
+  margin-right: 0.42em;
+  background: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+/* Same geometry as the matching <symbol> in index.html's sprite, inlined
+   here because mask-image can't reference a sprite symbol. Keep the two
+   in step if an icon is ever redrawn. */
+.sync-status::before {
+  -webkit-mask-image: var(--i-check);
+  mask-image: var(--i-check);
+}
+.sync-status.is-ai::before,
+.ai-intro::before,
+.ai-tips::before,
+.week-ai-note::before {
+  -webkit-mask-image: var(--i-sparkle);
+  mask-image: var(--i-sparkle);
+}
+.sync-status.is-error::before {
+  -webkit-mask-image: var(--i-alert);
+  mask-image: var(--i-alert);
+}
+.strava-fill-badge::before {
+  -webkit-mask-image: var(--i-chart);
+  mask-image: var(--i-chart);
+}
+.week-race-tips::before {
+  -webkit-mask-image: var(--i-flag);
+  mask-image: var(--i-flag);
+}
+.completed-badge::before {
+  -webkit-mask-image: var(--i-check-circle);
+  mask-image: var(--i-check-circle);
+}
 
 body {
   margin: 0;
@@ -72,10 +161,14 @@ body {
 }
 
 /* ---------- Header ---------- */
+/* A soft halo behind the wordmark that resolves into the page background,
+   rather than the old 135deg navy-to-near-black ramp — that one ended on a
+   different color than --color-bg, so the header met the page at a visible
+   seam right where the first card overlaps it. */
 .site-header {
-  background: linear-gradient(135deg, #282d55 0%, #0b0f16 100%);
+  background: radial-gradient(120% 140% at 50% 0%, #2b3168 0%, #171b2e 45%, var(--color-bg) 100%);
   color: #fff;
-  padding: 36px 0 44px;
+  padding: 26px 0 38px;
 }
 .header-inner { text-align: center; position: relative; }
 
@@ -102,18 +195,22 @@ body {
 @media (max-width: 640px) {
   .auth-box { position: static; justify-content: center; margin-bottom: 14px; }
 }
+/* A lockup — mark beside wordmark — rather than the mark stacked above it.
+   The stack is a landing-page shape; a row reads as an app's identity and
+   gives back ~60px of vertical space at the top of every single visit,
+   which on a phone was 336px of chrome before any content. */
 .brand {
   display: inline-flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
 }
-.brand-logo { width: 52px; height: 52px; }
+.brand-logo { width: 34px; height: 34px; }
 .brand-name {
   font-family: var(--font-display);
-  font-size: 2.05rem;
+  font-size: 1.72rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
 }
 .dummy-badge {
   display: inline-block;
@@ -126,13 +223,15 @@ body {
   border-radius: 999px;
   padding: 3px 10px;
 }
+/* Subordinate to the wordmark now, instead of competing with it: same
+   display face at bold 1.05rem meant two headline-weight lines stacked on
+   top of each other with no hierarchy between them. */
 .tagline {
-  margin: 2px 0 0;
-  font-family: var(--font-display);
-  font-size: 1.05rem;
-  font-weight: 600;
-  letter-spacing: -0.004em;
-  opacity: 0.92;
+  margin: 8px 0 0;
+  font-size: 0.9rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  opacity: 0.6;
 }
 
 main.container { margin-top: -28px; padding-bottom: 60px; }
@@ -457,8 +556,14 @@ textarea.has-error:focus {
 }
 
 /* ---------- Buttons ---------- */
+/* inline-flex, not inline-block: every button label is now icon + text,
+   and baseline-aligning an SVG next to text is guesswork where centering
+   two flex children is not. */
 .btn {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   border: none;
   border-radius: 8px;
   padding: 12px 20px;
@@ -541,9 +646,6 @@ textarea.has-error:focus {
   line-height: 1.55;
   margin: 16px 0;
 }
-.ai-intro::before, .ai-tips::before {
-  content: "✨ ";
-}
 .ai-tips-title { font-weight: 700; display: block; margin-bottom: 4px; }
 .week-ai-note {
   background: var(--color-accent-light);
@@ -553,7 +655,6 @@ textarea.has-error:focus {
   font-size: 0.85rem;
   font-style: italic;
 }
-.week-ai-note::before { content: "✨ "; font-style: normal; }
 
 /* Race-day pacing/nutrition/mental tips — same visual language as .ai-tips
    (it's the same kind of AI-written advice), but appended straight into
@@ -571,7 +672,6 @@ textarea.has-error:focus {
   line-height: 1.55;
   margin: 12px 16px 16px;
 }
-.week-race-tips::before { content: "🏁 "; }
 
 /* ---------- Results ---------- */
 .result-header {
@@ -587,7 +687,70 @@ textarea.has-error:focus {
   font-weight: 700;
   letter-spacing: -0.015em;
 }
-.result-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+/* Four actions of identical weight used to wrap 3-and-1 and read as a
+   toolbar of equals. They aren't: "Lagi nggak fit?" is the one a runner
+   reaches for mid-block, the other three are occasional. So the set is
+   compact icon+label chips at a smaller size than body buttons, the
+   frequent one carries the tinted variant, and the whole row sits beside
+   the heading instead of under it wherever there's room. */
+.result-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.result-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  font-size: 0.87rem;
+}
+.result-actions .btn .icon { opacity: 0.75; }
+.result-actions .btn:hover .icon { opacity: 1; }
+/* The mid-block action, marked out from its neighbours by tint alone —
+   still a secondary button, just not an anonymous one. */
+#feelingOffBtn {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary);
+  color: var(--color-primary-dark);
+}
+
+/* ---------- Plan warnings (collapsible) ---------- */
+/* A left rule instead of a filled yellow block: these are two or three
+   paragraphs long and appear on every visit for the life of the block, so
+   a full-bleed warning fill made the whole page feel like an alert. See
+   renderPlan for why it opens by default. */
+.result-warning {
+  margin: 18px 0;
+  padding: 0 0 0 14px;
+  border-left: 3px solid var(--color-warning);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+.result-warning-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  cursor: pointer;
+  color: var(--color-warning);
+  font-weight: 600;
+  padding: 2px 0;
+}
+.result-warning-summary::-webkit-details-marker { display: none; }
+/* Chevron, rotating on open — same affordance the week accordions use. */
+.result-warning-summary::after {
+  content: "";
+  width: 0.55em;
+  height: 0.55em;
+  margin-left: 2px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translate(-2px, -2px);
+  opacity: 0.7;
+  transition: transform 0.15s ease;
+}
+.result-warning[open] .result-warning-summary::after {
+  transform: rotate(-135deg) translate(-2px, -2px);
+}
+.result-warning-body { color: var(--color-text-muted); }
+.result-warning-body p { margin: 8px 0 0; }
 
 /* Opened by #feelingOffBtn — see handleFeedbackSubmit in js/app.js. */
 .feedback-panel { margin: 16px 0; display: flex; flex-direction: column; gap: 10px; }
@@ -677,7 +840,7 @@ textarea.has-error:focus {
 
 /* Everything the day-swap flow says, inside the week block it's about
    (see showWeekNotice in js/app.js) — a page-level banner would be
-   several screens from the ⇄ button by week 5. Neutral primary tint for
+   several screens from the swap button by week 5. Neutral primary tint for
    the "now pick the second day" prompt and the long-run question; the
    error variant for a swap that was refused outright. */
 .week-notice {
@@ -740,7 +903,7 @@ textarea.has-error:focus {
 }
 .today-card-metric { font-size: 0.92rem; color: var(--color-text-muted); }
 .today-card-metric strong { color: var(--color-text); font-variant-numeric: tabular-nums; }
-/* Same accent as the ✅ badge and per-session analysis in the table below
+/* Same accent as the completed badge and per-session analysis in the table below
    — "the app matched this to a real Strava activity". */
 .today-card-done { color: var(--color-accent); }
 .today-card .workout-structure { margin-top: 12px; }
@@ -777,12 +940,14 @@ textarea.has-error:focus {
   color: var(--color-text-muted);
 }
 
-/* 140px, not a hair more: at 150px the two-column phone layout tips over
-   into a single column (a 375px screen leaves ~302px of usable card
-   width here) and the summary block doubles in height. */
+/* 170px so a two-word value ("Half Marathon") and the longest label
+   ("Estimasi dari Race Terakhir") each get a line to themselves instead of
+   breaking mid-phrase. The phone override at the bottom of this file drops
+   it back to 140px, which is the widest a 375px screen can take and still
+   fit two columns (~302px of usable card width there). */
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 12px;
   margin: 20px 0;
 }
@@ -801,26 +966,40 @@ textarea.has-error:focus {
 .summary-item {
   background: var(--color-bg);
   border-radius: 12px;
-  padding: 14px 16px;
+  padding: 11px 13px;
   transition: transform 0.15s ease;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
 }
 .summary-item:hover { transform: translateY(-2px); }
-.summary-item .label { font-size: 0.76rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 4px; }
+/* Sentence case, not uppercase-with-letterspacing: "PEAK WEEKLY VOLUME"
+   and "ESTIMASI DARI RACE TERAKHIR" both wrapped to two lines purely
+   because the tracking stretched them, which then dragged every tile in
+   the row taller. */
+.summary-item .label {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  letter-spacing: 0;
+  margin-bottom: 3px;
+}
+/* Neutral, not --color-primary-dark. Every one of these values used to be
+   set in the brand indigo at 1.35rem, which put five to seven identically
+   loud elements on one screen — when everything is emphasized nothing is,
+   and the one number a runner actually came for (today's session, in the
+   card above) had nothing left to stand out against. */
 .summary-item .value {
   font-family: var(--font-display);
-  font-size: 1.35rem;
+  font-size: 1.18rem;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   font-variant-numeric: tabular-nums;
-  color: var(--color-primary-dark);
+  color: var(--color-text);
 }
 /* Tiles whose value is a date or a whole phrase rather than a short number
    — they need the smaller size to fit, but it belongs here next to the
    base rule, not as an inline style on the markup that sets it. */
-.summary-item .value.is-small { font-size: 1rem; line-height: 1.35; }
+.summary-item .value.is-small { font-size: 0.95rem; line-height: 1.4; }
 
 /* Reuses .pace-zone-header/.pace-zone-title/.pace-zone-source below for
    its own header row (same "reference card" look as .pace-legend right
@@ -1081,20 +1260,34 @@ summary.week-header:hover { background: var(--color-surface); }
    neutral) — a plain white/dark row otherwise gives no hint that it's
    draggable or has a swap button tucked in its last cell. */
 .day-table tr[draggable="true"]:not(.is-race):not(.is-swap-selected):not(.is-today):hover { background: var(--color-bg); }
+/* One of these sits on every day of every week — 83 of them on a 12-week
+   plan. As bordered boxes they read as 83 competing controls; the schedule
+   is meant to be read far more often than edited. So: no border, low
+   opacity at rest, and full strength once the pointer is anywhere on that
+   row. Touch has no hover, so the mobile rules further down restore a
+   permanently visible (and larger) version — see .day-table tr[data-date]
+   .swap-day-btn under the 600px query. */
 .swap-day-btn {
   float: right;
-  border: 1px solid var(--color-border);
+  border: 1px solid transparent;
   background: transparent;
   color: var(--color-text-muted);
   border-radius: 6px;
   width: 26px;
   height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
   cursor: pointer;
-  font-size: 0.9rem;
+  opacity: 0.32;
+  transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.swap-day-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
-.is-swap-selected .swap-day-btn { border-color: var(--color-primary); color: var(--color-primary); }
+.swap-day-btn .icon { width: 15px; height: 15px; vertical-align: 0; }
+.day-table tr:hover .swap-day-btn,
+.swap-day-btn:focus-visible { opacity: 1; }
+.swap-day-btn:hover { opacity: 1; border-color: var(--color-primary); color: var(--color-primary); }
+.is-swap-selected .swap-day-btn { opacity: 1; border-color: var(--color-primary); color: var(--color-primary); }
 
 .type-badge {
   display: inline-block;
@@ -1130,7 +1323,7 @@ summary.week-header:hover { background: var(--color-surface); }
 }
 
 /* Per-session analysis (actual distance/pace/duration vs. what was
-   planned) — filled in and unhidden alongside the ✅ badge above, once a
+   planned) — filled in and unhidden alongside the completed badge above, once a
    matching Strava activity is found; see markCompletedSessionsFromStrava. */
 .completed-analysis-row td { padding: 0 16px 12px; border-bottom: 1px solid var(--color-border); }
 .completed-analysis {
@@ -1213,15 +1406,35 @@ summary.week-header:hover { background: var(--color-surface); }
      regardless of which one happens to be open on screen. */
   .week-block:not([open]) > *:not(summary) { display: block !important; }
   .week-toggle-icon { display: none; }
+  /* Same reasoning for the plan warnings: folding them away is a
+     screen-reading convenience, but a printed plan should carry them. */
+  .result-warning:not([open]) > *:not(summary) { display: block !important; }
+  .result-warning-summary::after { display: none; }
 }
 
 /* ---------- Responsive ---------- */
 @media (max-width: 600px) {
   .card { padding: 20px 16px 24px; }
-  .brand-name { font-size: 1.6rem; }
+  .brand-name { font-size: 1.42rem; }
+  .brand-logo { width: 29px; height: 29px; }
+  .site-header { padding: 20px 0 32px; }
+  /* See .summary-grid's own comment — 140px is the widest that still
+     yields two columns on a 375px screen. */
+  .summary-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  /* Content-width buttons wrapping one per line left four ragged right
+     edges stacked down the screen. One full-width column squares them off
+     and lines the icons up in a column of their own — two columns was
+     tried first and is too narrow for these labels ("Hubungkan dengan
+     Kalender" broke across three lines and threw the row heights out). */
+  .result-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .result-actions .btn { justify-content: flex-start; padding: 11px 14px; }
 
   /* Five columns never actually fit here. .table-scroll kept the page from
-     breaking, but Pace Target — and the ⇄ swap button that lives inside
+     breaking, but Pace Target — and the swap button that lives inside
      that cell, i.e. the plan's main interaction — sat past the visible
      edge, invisible unless you knew to swipe sideways. So below this width
      each day becomes a stacked block instead: day + date, then the session
@@ -1250,7 +1463,7 @@ summary.week-header:hover { background: var(--color-surface); }
     /* The separator moves from the cells to the block itself — the cells
        are no longer a row, so a border on each would draw three lines. */
     border-bottom: 1px solid var(--color-border);
-    /* Keeps the ⇄ button clear of the text; see its own rule below. */
+    /* Keeps the swap button clear of the text; see its own rule below. */
     padding-right: 44px;
   }
   .day-table tr[data-date] > td { padding: 0; border-bottom: none; font-size: 0.85rem; }
@@ -1275,6 +1488,9 @@ summary.week-header:hover { background: var(--color-surface); }
   .day-table tr[data-date].is-rest > td:nth-child(4) { display: none; }
   .day-table tr[data-date].is-rest > td:nth-child(5)::before,
   .day-table tr[data-date].is-rest .pace-text { display: none; }
+  /* Touch has no hover to reveal the quiet desktop version, so here it
+     stays visible — but at a lower opacity than the content it sits
+     beside, and with the border back so a 34px tap target is legible. */
   .day-table tr[data-date] .swap-day-btn {
     float: none;
     position: absolute;
@@ -1282,6 +1498,8 @@ summary.week-header:hover { background: var(--color-surface); }
     right: 4px;
     width: 34px;
     height: 34px;
+    opacity: 0.5;
+    border-color: var(--color-border);
   }
   .type-badge { padding: 3px 7px; font-size: 0.72rem; }
   .structure-row td { padding: 2px 6px 12px; }

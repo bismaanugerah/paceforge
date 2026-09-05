@@ -4,13 +4,43 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PaceForge — Bikin Training Plan Lari Sendiri</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3ClinearGradient id='f' x1='0%25' y1='100%25' x2='100%25' y2='0%25'%3E%3Cstop offset='0%25' stop-color='%238a2a1c'/%3E%3Cstop offset='55%25' stop-color='%23f4732a'/%3E%3Cstop offset='100%25' stop-color='%23ffc94d'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg fill='url(%23f)'%3E%3Crect x='10' y='8' width='6' height='32' rx='3'/%3E%3Crect x='16' y='8' width='20' height='6' rx='3'/%3E%3Crect x='16' y='16' width='26' height='6' rx='3'/%3E%3Crect x='16' y='24' width='14' height='6' rx='3'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3ClinearGradient id='f' x1='0%25' y1='100%25' x2='100%25' y2='0%25'%3E%3Cstop offset='0%25' stop-color='%234f46e5'/%3E%3Cstop offset='55%25' stop-color='%23818cf8'/%3E%3Cstop offset='100%25' stop-color='%23c4b5fd'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg fill='url(%23f)'%3E%3Crect x='10' y='8' width='6' height='32' rx='3'/%3E%3Crect x='16' y='8' width='20' height='6' rx='3'/%3E%3Crect x='16' y='16' width='26' height='6' rx='3'/%3E%3Crect x='16' y='24' width='14' height='6' rx='3'/%3E%3C/g%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
+
+<!-- Icon sprite. Every icon in the app is a <use> reference into this,
+     drawn as a 24×24 stroke path that inherits currentColor — so an icon
+     always matches the exact color and optical weight of the text beside
+     it. This replaces the ~50 emoji the UI used to use as iconography:
+     emoji render in each vendor's own fixed palette (📈 blue-and-white,
+     🎯 red-and-white, ⚠️ orange), which read as stickers pasted onto a
+     dark UI whose colors are otherwise all drawn from the tokens in
+     css/styles.css. Stroke/fill/width come from .icon there, so shapes
+     here set no presentation attributes of their own except the few
+     solid dots. -->
+<svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5 2.8 20h18.4L12 3.5Z"/><path d="M12 9.5v4.2"/><circle cx="12" cy="16.9" r="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m4.5 12.5 5 5 10-10.5"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.8"/><path d="m8 12.2 2.8 2.8 5.4-5.6"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M10 2.8 11.7 8 17 9.8 11.7 11.5 10 16.8 8.3 11.5 3 9.8 8.3 8 10 2.8Z"/><path d="m18 14.2.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9.9-2.4Z"/></symbol>
+  <symbol id="i-trend" viewBox="0 0 24 24"><path d="M3 16.5 9.2 10l3.8 3.8L21 5.8"/><path d="M15 5.8h6v6"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.2" y="5" width="17.6" height="16" rx="2.6"/><path d="M8 2.8v4.4M16 2.8v4.4M3.2 10.4h17.6"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3.5v11"/><path d="m7.8 10.6 4.2 4.2 4.2-4.2"/><path d="M4.5 17v2a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-2"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5.2 21.2V3.2"/><path d="M5.2 4.4h13.4l-2.6 4.3 2.6 4.3H5.2"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2.8 12.5h4l2.4-5.2 3.6 10.4 2.6-5.2 1.4 0h4.4"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.8"/><path d="M12 11.2v5.4"/><circle cx="12" cy="7.7" r="1.05" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10.4 13.6a4.2 4.2 0 0 0 6 0l2.8-2.8a4.2 4.2 0 1 0-6-6l-1.5 1.5"/><path d="M13.6 10.4a4.2 4.2 0 0 0-6 0l-2.8 2.8a4.2 4.2 0 1 0 6 6l1.5-1.5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.2 11A8.2 8.2 0 0 0 6.2 6.2L3.8 8.4"/><path d="M3.8 4v4.6h4.6"/><path d="M3.8 13A8.2 8.2 0 0 0 17.8 17.8l2.4-2.2"/><path d="M20.2 20v-4.6h-4.6"/></symbol>
+  <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M4.2 9.6A8.2 8.2 0 1 1 4.6 15"/><path d="M3.8 4.2v5.6h5.6"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 9h14"/><path d="m14.4 5.4 3.6 3.6-3.6 3.6"/><path d="M20 15H6"/><path d="m9.6 11.4-3.6 3.6 3.6 3.6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3.2 20.4h17.6"/><path d="M6.8 20.4v-7.6"/><path d="M12 20.4V4.6"/><path d="M17.2 20.4v-5.2"/></symbol>
+</defs></svg>
 
 <header class="site-header">
   <div class="container header-inner">
@@ -24,9 +54,9 @@
       <svg class="brand-logo" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PaceForge logo">
         <defs>
           <linearGradient id="brandStride" x1="0%" y1="100%" x2="100%" y2="0%">
-            <stop offset="0%" stop-color="#8a2a1c"/>
-            <stop offset="55%" stop-color="#f4732a"/>
-            <stop offset="100%" stop-color="#ffc94d"/>
+            <stop offset="0%" stop-color="#4f46e5"/>
+            <stop offset="55%" stop-color="#818cf8"/>
+            <stop offset="100%" stop-color="#c4b5fd"/>
           </linearGradient>
         </defs>
         <g fill="url(#brandStride)">
@@ -53,7 +83,7 @@
     <div class="gate-actions">
       <button data-action="login" class="btn btn-primary btn-large">Login dengan Strava</button>
     </div>
-    <p id="dummyModeNote" class="dummy-note" hidden>🔧 Mode dummy: app Strava belum disambungkan. Tombol di atas mensimulasikan login (data & plan tersimpan lokal di browser ini saja, angka Strava-nya juga contoh/palsu) supaya alur login &amp; auto-fill-nya bisa dicoba dulu — belum akun Strava sungguhan. Lihat README untuk sambungkan Strava &amp; Supabase asli.</p>
+    <p id="dummyModeNote" class="dummy-note" hidden><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg> Mode dummy: app Strava belum disambungkan. Tombol di atas mensimulasikan login (data & plan tersimpan lokal di browser ini saja, angka Strava-nya juga contoh/palsu) supaya alur login &amp; auto-fill-nya bisa dicoba dulu — belum akun Strava sungguhan. Lihat README untuk sambungkan Strava &amp; Supabase asli.</p>
   </section>
 
   <!-- ===================== FORM SECTION ===================== -->
@@ -164,7 +194,7 @@
             <input type="number" id="longestRecentRunKm" name="longestRecentRunKm" min="0" max="200" step="0.5" value="8" required>
           </div>
         </div>
-        <p id="stravaFillBadge" class="strava-fill-badge" hidden>📊 Data di atas diambil otomatis dari Strava-mu — cek dulu, boleh diedit kalau kurang sesuai.</p>
+        <p id="stravaFillBadge" class="strava-fill-badge" hidden>Data di atas diambil otomatis dari Strava-mu — cek dulu, boleh diedit kalau kurang sesuai.</p>
         <p class="field-hint">Dipakai supaya kenaikan jarak lari jauh di plan tidak melompat terlalu drastis dari kemampuanmu sekarang — kalau kamu login dengan Strava, kedua angka ini otomatis terisi dari histori lari-mu (tetap bisa diedit).</p>
 
         <div class="field checkbox-field">
@@ -341,7 +371,7 @@
 
       <div id="formError" class="form-error" role="alert" hidden></div>
 
-      <button type="submit" class="btn btn-primary btn-large">Buat Training Plan 🏁</button>
+      <button type="submit" class="btn btn-primary btn-large"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg>Buat Training Plan</button>
     </form>
   </section>
 
@@ -390,10 +420,10 @@
     <div class="result-header">
       <h2>Training Plan Kamu</h2>
       <div class="result-actions no-print">
-        <button id="feelingOffBtn" class="btn btn-secondary">😔 Lagi nggak fit?</button>
-        <button id="printBtn" class="btn btn-secondary">📄 Simpan sebagai PDF</button>
-        <button id="calendarBtn" class="btn btn-secondary">📅 Hubungkan dengan Kalender</button>
-        <button id="newPlanBtn" class="btn btn-ghost">↺ Buat Plan Baru</button>
+        <button id="feelingOffBtn" class="btn btn-secondary"><svg class="icon" aria-hidden="true"><use href="#i-pulse"/></svg>Lagi nggak fit?</button>
+        <button id="printBtn" class="btn btn-secondary"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Simpan sebagai PDF</button>
+        <button id="calendarBtn" class="btn btn-secondary"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>Hubungkan dengan Kalender</button>
+        <button id="newPlanBtn" class="btn btn-ghost"><svg class="icon" aria-hidden="true"><use href="#i-rotate"/></svg>Buat Plan Baru</button>
       </div>
     </div>
 
@@ -406,7 +436,7 @@
          banner up here would be off-screen by week 5. -->
     <div id="resultNotice" class="result-notice no-print" hidden>
       <p id="resultNoticeText"></p>
-      <button type="button" id="resultNoticeDismissBtn" class="result-notice-dismiss" aria-label="Tutup pesan">✕</button>
+      <button type="button" id="resultNoticeDismissBtn" class="result-notice-dismiss" aria-label="Tutup pesan"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
     </div>
 
     <!-- Opened by #feelingOffBtn — tells the AI (or, when it's unavailable,
@@ -446,7 +476,7 @@
         <p>Sambungkan link ini ke aplikasi kalendermu. Cukup dihubungkan sekali: tukar hari, penyesuaian volume, atau blok baru ikut berubah sendiri di kalender.</p>
         <p><strong>Google Calendar:</strong> menghubungkannya harus lewat komputer (calendar.google.com → Other calendars → From URL) — aplikasi HP-nya nggak punya menu itu. Sesudah terhubung, otomatis muncul juga di HP. Update dari PaceForge bisa telat sampai ~24 jam di sisi Google.<br><strong>iPhone:</strong> bisa langsung dari HP — Settings → Apps → Calendar → Calendar Accounts → Add Account → Other → Add Subscribed Calendar.</p>
         <p>Simpan link ini buat dirimu sendiri — siapa pun yang punya link ini bisa melihat jadwal latihanmu.</p>
-        <button type="button" id="calendarSubscribeBtn" class="btn btn-primary btn-small">🔗 Ambil link kalender</button>
+        <button type="button" id="calendarSubscribeBtn" class="btn btn-primary btn-small"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg>Ambil link kalender</button>
         <p id="calendarUrlOut" class="calendar-url" hidden></p>
         <p id="calendarSubscribeStatus" class="feedback-status" hidden></p>
       </div>
@@ -457,7 +487,7 @@
 
     <div class="ai-status-row no-print">
       <p id="aiStatus" class="ai-status" hidden></p>
-      <button id="aiRetryBtn" class="btn-link" hidden>🔄 Coba lagi</button>
+      <button id="aiRetryBtn" class="btn-link" hidden><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Coba lagi</button>
     </div>
     <div id="aiIntro" class="ai-intro" hidden></div>
 
@@ -478,7 +508,7 @@
          on every single visit. Nothing is hidden, it just no longer
          outranks today's session and the plan's own numbers; and it now
          sits directly above the schedule it's actually about. -->
-    <div id="resultWarning" class="form-warning" hidden></div>
+    <details id="resultWarning" class="result-warning" hidden></details>
 
     <!-- Whole-plan volume progression at a glance (see renderVolumeChart in
          js/app.js) — the accordion below only shows one week's total at a
@@ -500,7 +530,7 @@
       <div id="blockHistoryList" class="block-history-list"></div>
     </section>
 
-    <p class="disclaimer">⚠️ Plan ini dihasilkan otomatis dari aturan umum (rule-based), bukan pengganti saran pelatih lari atau dokter. Dengarkan tubuhmu, dan sesuaikan bila perlu.</p>
+    <p class="disclaimer"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg> Plan ini dihasilkan otomatis dari aturan umum (rule-based), bukan pengganti saran pelatih lari atau dokter. Dengarkan tubuhmu, dan sesuaikan bila perlu.</p>
   </section>
 
 </main>
