@@ -1464,7 +1464,7 @@ textarea.has-error:focus {
    container (one per <details>, no shared row context across weeks), so
    with flexbox alone the "Total"/phase columns drift left-right between
    weeks depending on how wide that week's own title/badge/phase text
-   happens to be (e.g. the "Minggu saat ini" badge only on one week,
+   happens to be (e.g. the "Saat ini" badge only on one week,
    "BASE" vs "RACE WEEK" varying in length). Fixed track widths on the
    title and total columns keep both lined up in a straight column down
    the page regardless of any single week's own content width. */

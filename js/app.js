@@ -2968,7 +2968,7 @@
         : '';
       const isOpen = week.weekNumber === defaultOpenWeekNumber;
       const currentWeekBadge = currentWeek && week.weekNumber === currentWeek.weekNumber
-        ? '<span class="week-current-badge">Minggu saat ini</span>'
+        ? '<span class="week-current-badge">Saat ini</span>'
         : '';
       // The phase color already carried by this week's bar in the volume
       // chart and by its own phase label, brought out to the block's left
