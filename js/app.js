@@ -2584,16 +2584,24 @@
   // to expand all of them just to see the plan's overall base-build-peak-
   // taper shape.
   //
-  // For a week that has actually started (weekHasStarted), the phase-
-  // colored bar becomes a dimmed TARGET behind a second, narrower bar in a
-  // single vivid color — the real km logged on Strava so far this week
-  // (weekActualKm), the one number in this chart that isn't "the plan".
-  // Deliberately its own hue (--color-progress) rather than reusing
-  // --color-accent, which Build's own phase bar already sits in — overlaying
-  // a same-colored "actual" bar on a same-colored Build week would erase the
-  // whole comparison for exactly the phase most worth checking progress on.
-  // A future week (hasn't started) keeps the plain single bar it's always
-  // had: there's nothing run yet to compare it against.
+  // For a week that has actually started (weekHasStarted), the bar splits
+  // into two stacked zones instead of one solid fill: a bottom zone in a
+  // single vivid color for km actually logged on Strava so far this week
+  // (weekActualKm), and — if the target isn't fully met yet — a dim zone
+  // above it for what's still left to run. Both zones stay full width,
+  // same as every other week's bar, rather than a bullet-graph-style
+  // narrow bar centered over a wide one: tried that first, and next to a
+  // row of bold full-width bars a thin centered one read as "this bar is
+  // too small" rather than "here's a comparison", on exactly the week
+  // that matters most. The "done" zone's color is deliberately its own
+  // hue (--color-progress) rather than reusing --color-accent, which
+  // Build's own phase bar already sits in — a same-colored overlay would
+  // vanish into a Build week exactly when checking progress on it matters
+  // most. A future week (hasn't started) is a single plain bar, same as
+  // always, but dimmed — there's nothing run yet to compare it against,
+  // and full brightness reserved for "already happened" (a completed
+  // week's done zone, or a just-run today) makes that distinction visible
+  // at a glance instead of every week competing for the same attention.
   //
   // Plain flex/CSS bars, not SVG: an SVG viewBox stretched to the
   // container's width with preserveAspectRatio="none" (the first version
@@ -2609,7 +2617,7 @@
     // Resolved once per week up front — an overshot week's actualKm can
     // exceed every week's totalKm (a great week, or a stray extra run),
     // and the chart's own scale (maxKm below) has to stretch to fit that
-    // or its bright bar would just clip against the top of the track.
+    // or its bright zone would just clip against the top of the track.
     const rows = weeks.map(week => {
       const hasStarted = weekHasStarted(week);
       const actualKm = hasStarted ? weekActualKm(week) : 0;
@@ -2620,18 +2628,26 @@
     const trackHeight = 90;
 
     const cols = rows.map(({ week, hasStarted, actualKm }) => {
-      const heightPx = Math.max(3, Math.round((week.totalKm / maxKm) * trackHeight));
+      const targetHeightPx = Math.max(3, Math.round((week.totalKm / maxKm) * trackHeight));
       const color = PHASE_COLORS[week.phase] || 'var(--color-text-muted)';
       const isCurrent = currentWeek && week.weekNumber === currentWeek.weekNumber;
 
-      // Only ever non-zero for a started week (see the guard in `rows`
-      // above) — 0 there still renders a visible-but-empty progress bar
-      // (min-height below in CSS), which is the honest state for "this
-      // week just began, nothing logged yet" rather than no bar at all.
-      const actualHeightPx = hasStarted ? Math.max(1, Math.round((actualKm / maxKm) * trackHeight)) : 0;
-      const actualBar = hasStarted
-        ? `<span class="volume-chart-actual" style="height:${actualHeightPx}px"></span>`
-        : '';
+      let bar;
+      if (hasStarted) {
+        // doneHeightPx alone (not targetHeightPx) drives the bar's outer
+        // height once it exceeds the target — an overshoot week is just
+        // taller than a normal one, no remainder zone left to show.
+        const doneHeightPx = Math.round((actualKm / maxKm) * trackHeight);
+        const outerHeightPx = Math.max(targetHeightPx, doneHeightPx);
+        const remainderHeightPx = outerHeightPx - doneHeightPx;
+        const doneClass = remainderHeightPx > 0 ? 'volume-chart-done' : 'volume-chart-done is-full';
+        bar = `
+          ${remainderHeightPx > 0 ? `<span class="volume-chart-remainder" style="height:${remainderHeightPx}px;bottom:${doneHeightPx}px;background:${color}"></span>` : ''}
+          ${doneHeightPx > 0 ? `<span class="${doneClass}" style="height:${doneHeightPx}px"></span>` : ''}
+        `;
+      } else {
+        bar = `<span class="volume-chart-fill" style="height:${targetHeightPx}px;background:${color}"></span>`;
+      }
 
       // "Actual/Rencana" once a week has something to report, otherwise
       // just the plan number as before — matches the title text below,
@@ -2653,10 +2669,7 @@
       return `
         <div class="volume-chart-col${isCurrent ? ' is-current' : ''}" title="${title}">
           <span class="volume-chart-value">${valueLabel}</span>
-          <div class="volume-chart-track">
-            <span class="volume-chart-fill${hasStarted ? ' is-target' : ''}" style="height:${heightPx}px;background:${color};color:${color}"></span>
-            ${actualBar}
-          </div>
+          <div class="volume-chart-track">${bar}</div>
           <span class="volume-chart-week-no">${week.weekNumber}</span>
         </div>
       `;

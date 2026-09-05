@@ -16,8 +16,8 @@
   --color-accent: #4fd6b5;
   --color-accent-light: rgba(79, 214, 181, 0.14);
   /* Reserved for exactly one thing: real km actually logged on Strava
-     against a plan target, in the "Volume Mingguan" chart's bullet-graph
-     overlay (see renderVolumeChart in js/app.js and .volume-chart-actual
+     against a plan target, in the "Volume Mingguan" chart's stacked-bar
+     "done" zone (see renderVolumeChart in js/app.js and .volume-chart-done
      below). Deliberately its own hue rather than --color-accent above —
      PHASE_COLORS already paints the Build phase's own bar in that same
      teal, so an "actual" overlay in the same color would vanish into a
@@ -1054,7 +1054,7 @@ textarea.has-error:focus {
   white-space: nowrap;
 }
 /* The logged-so-far half of an "actual/plan" label — see
-   .volume-chart-value-actual's counterpart, .volume-chart-actual, below.
+   .volume-chart-value-actual's counterpart, .volume-chart-done, below.
    Bright and a touch heavier than the plan figure beside it: this is the
    number that changes as the week goes on, so it's the one worth the
    runner's eye landing on first. */
@@ -1064,10 +1064,17 @@ textarea.has-error:focus {
    here (set inline per bar in JS) instead of a percentage of some scaled
    viewBox is what keeps the value/week-number text above and below it
    crisp, unlike the SVG version this replaced. Positioned now (rather
-   than a plain flex row) so a started week's target and actual bars can
-   stack as layers sharing the same baseline instead of sitting side by
-   side — see .volume-chart-actual. */
+   than a plain flex row) so a started week's "done" and "left to run"
+   zones can stack sharing the same baseline instead of sitting side by
+   side — see .volume-chart-done/.volume-chart-remainder below. */
 .volume-chart-track { position: relative; height: 90px; width: 100%; }
+/* A week that hasn't started yet — plan only, nothing to compare against.
+   Dimmed rather than the solid full-opacity look this used to always
+   have: full brightness is now reserved for "already happened" (a
+   completed week's .volume-chart-done zone below, or today's own km), so
+   a week that's still just a future plan visibly recedes next to it
+   instead of every bar competing for the same attention regardless of
+   whether it's real yet. */
 .volume-chart-fill {
   position: absolute;
   left: 0;
@@ -1075,42 +1082,45 @@ textarea.has-error:focus {
   bottom: 0;
   min-width: 16px;
   border-radius: 4px 4px 0 0;
-  opacity: 0.82;
+  opacity: 0.4;
   transition: opacity 0.15s, height 0.2s ease;
 }
-/* Once a week has an actual bar layered in front of it (see
-   .volume-chart-actual), the phase color behind it is reframed as a
-   TARGET marker rather than the main event — dimmed and outlined instead
-   of solid, so the two bars read as "here's the goal, here's where you
-   actually are" instead of one bar occluding the other. A future week
-   (no .is-target) keeps the original solid full-opacity look untouched. */
-.volume-chart-fill.is-target {
-  opacity: 0.24;
-  border: 1.5px dashed color-mix(in srgb, currentColor 70%, transparent);
-  border-bottom: none;
-  box-sizing: border-box;
-}
-.volume-chart-col:hover .volume-chart-fill:not(.is-target) { opacity: 1; }
-.volume-chart-col:hover .volume-chart-fill.is-target { opacity: 0.4; }
-/* The actual-km-run bar (see weekActualKm/renderVolumeChart) — narrower
-   than the target behind it and centered over it, the classic bullet-graph
-   shape, in the one color this chart reserves for "really happened" (see
-   --color-progress's own comment). The glow is what makes it read as LIVE
-   data rather than a third static phase color: a plain flat fill in the
-   same hue looked like just another muted bar sitting next to the others,
-   which is exactly what this element has to not be mistaken for. */
-.volume-chart-actual {
+.volume-chart-col:hover .volume-chart-fill { opacity: 0.7; }
+/* The "still to run" zone of a started week that hasn't hit its target
+   yet — same dimness as a future week's whole bar (see .volume-chart-fill
+   above), for the same reason: this km hasn't actually happened either.
+   Sits on TOP of .volume-chart-done (offset up by `bottom`, set inline in
+   JS to the done zone's own height), so together the two form one
+   continuous bar reaching the week's planned total. */
+.volume-chart-remainder {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  border-radius: 4px 4px 0 0;
+  opacity: 0.4;
+  background-clip: padding-box;
+}
+.volume-chart-col:hover .volume-chart-remainder { opacity: 0.65; }
+/* The actually-logged-km zone (see weekActualKm/renderVolumeChart) — full
+   width, same as every bar in this chart, stacked at the bar's own base.
+   A first version centered a narrower bright bar over a wide dim one
+   (a bullet graph); next to a row of bold full-width bars that read as
+   "this one's too small" rather than "here's a comparison", on exactly
+   the week most worth looking at. Full width fixes that, and the glow is
+   what still makes it read as LIVE data rather than a third static phase
+   color — a flat fill in the same hue looked like just another bar. Its
+   own rounded top corners only apply via .is-full below, when there's no
+   dim remainder sitting on top of it to own that corner instead. */
+.volume-chart-done {
+  position: absolute;
+  left: 0;
+  right: 0;
   bottom: 0;
-  width: 48%;
-  min-width: 10px;
-  border-radius: 3px 3px 0 0;
   background: var(--color-progress);
   box-shadow: 0 0 9px 1px var(--color-progress-glow), 0 0 2px var(--color-progress-glow);
   transition: height 0.2s ease;
 }
+.volume-chart-done.is-full { border-radius: 4px 4px 0 0; }
 .volume-chart-week-no { font-size: 0.68rem; color: var(--color-text-muted); }
 /* The current week needs to be unmistakable, not just a slightly brighter
    bar in a row of a dozen similar ones — a visible ring on the whole
@@ -1482,7 +1492,7 @@ summary.week-header:hover { background: var(--color-surface); }
   /* A glow is a screen effect sized for a dark background; on white paper
      it just blurs the bar's edge. The bar itself still prints in the
      darkened --color-progress above. */
-  .volume-chart-actual, .volume-chart-legend-dot-actual { box-shadow: none; }
+  .volume-chart-done, .volume-chart-legend-dot-actual { box-shadow: none; }
   .card { box-shadow: none; padding: 0; border: none; }
   .week-block { break-inside: avoid; }
   /* The accordion (see .week-block[open] above) is a screen-only reading
