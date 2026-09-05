@@ -2599,11 +2599,17 @@
   //  - future: a single plain bar, dimmed — there's nothing run yet to
   //    compare it against, and dim reads as "not real yet".
   //  - current/past: splits into two stacked zones instead of one solid
-  //    fill — a bottom zone in a single vivid color for km actually
-  //    logged on Strava so far this week (weekActualKm), and, if the
-  //    target isn't fully met, a zone above it for what's still left to
-  //    run. That remainder is dim for the CURRENT week (there's still
-  //    time left to close the gap, so it's as undecided as a future
+  //    fill — a bottom zone for km actually logged on Strava so far this
+  //    week (weekActualKm), and, if the target isn't fully met, a zone
+  //    above it for what's still left to run. Both zones are drawn in
+  //    THIS WEEK'S OWN phase color (not a separate "actual" hue) — an
+  //    earlier version gave the done zone a fixed vivid cyan of its own,
+  //    but that made a week's progress look like a foreign, unrelated
+  //    measurement instead of more of the same Base/Build/Peak/... the
+  //    legend already names; brightness alone (full for done, dim for not
+  //    yet) carries the distinction without introducing a second color
+  //    language. That remainder is dim for the CURRENT week (there's
+  //    still time left to close the gap, so it's as undecided as a future
   //    week's plan) but full brightness for a PAST week (that gap already
   //    happened, a real missed session, not a hypothetical one softened
   //    into looking unreal). Both zones stay full width, same as every
@@ -2611,11 +2617,7 @@
   //    centered over a wide one: tried that first, and next to a row of
   //    bold full-width bars a thin centered one read as "this bar is too
   //    small" rather than "here's a comparison", on exactly the week that
-  //    matters most. The "done" zone's color is deliberately its own hue
-  //    (--color-progress) rather than reusing --color-accent, which
-  //    Build's own phase bar already sits in — a same-colored overlay
-  //    would vanish into a Build week exactly when checking progress on
-  //    it matters most.
+  //    matters most.
   //
   // Plain flex/CSS bars, not SVG: an SVG viewBox stretched to the
   // container's width with preserveAspectRatio="none" (the first version
@@ -2673,9 +2675,13 @@
         // being softened into looking like "not real yet".
         const remainderClass = status === 'past' ? 'volume-chart-remainder is-past' : 'volume-chart-remainder';
         const doneClass = remainderHeightPx > 0 ? 'volume-chart-done' : 'volume-chart-done is-full';
+        // The done zone's own glow tints to this SAME phase color (not a
+        // fixed hue) — color-mix works on any color it's handed, phase
+        // color included, so this needs no extra per-phase glow palette.
+        const doneGlow = `color-mix(in srgb, ${color} 55%, transparent)`;
         innerHtml = `
           ${remainderHeightPx > 0 ? `<span class="${remainderClass}" style="height:${remainderHeightPx}px;bottom:${doneHeightPx}px;background:${color}"></span>` : ''}
-          ${doneHeightPx > 0 ? `<span class="${doneClass}" style="height:${doneHeightPx}px"></span>` : ''}
+          ${doneHeightPx > 0 ? `<span class="${doneClass}" style="height:${doneHeightPx}px;background:${color};box-shadow:0 0 9px 1px ${doneGlow}, 0 0 2px ${doneGlow}"></span>` : ''}
         `;
       }
       const bar = `<div class="volume-chart-bar" style="height:${outerHeightPx}px">${innerHtml}</div>`;
@@ -2683,16 +2689,19 @@
       // "Actual/Rencana" once a week has something to report, otherwise
       // just the plan number as before — matches the title text below,
       // which spells the same pair out in full for anyone who hovers. The
-      // actual figure gets its own class so it can carry the same vivid
-      // color as its bar; the plan figure next to it stays the chart's
-      // ordinary muted tone, same as a future week's lone number. Rounded
-      // to a whole km same as the plan figure always has been — a dozen+
-      // of these columns already have to share the width .table-scroll
-      // gives them, and the exact decimal is one hover away in `title`.
+      // actual figure gets its own class so it can carry the same bold
+      // weight and this week's own phase color — same hue as its bar and
+      // as the phase legend below, so the figure reads as "this phase's
+      // number", not a foreign color unrelated to the rest of the chart.
+      // The plan figure next to it stays the chart's ordinary muted tone,
+      // same as a future week's lone number. Rounded to a whole km same
+      // as the plan figure always has been — a dozen+ of these columns
+      // already have to share the width .table-scroll gives them, and the
+      // exact decimal is one hover away in `title`.
       const hasStarted = status !== 'future';
       const roundedActual = Math.round(actualKm);
       const valueLabel = hasStarted
-        ? `<span class="volume-chart-value-actual">${roundedActual}</span><span class="volume-chart-value-sep">/</span>${Math.round(week.totalKm)}`
+        ? `<span class="volume-chart-value-actual" style="color:${color}">${roundedActual}</span><span class="volume-chart-value-sep">/</span>${Math.round(week.totalKm)}`
         : `${Math.round(week.totalKm)}`;
       const title = hasStarted
         ? `Minggu ${week.weekNumber} • ${week.phase} • ${Math.round(actualKm * 10) / 10} dari ${week.totalKm} km sudah dijalani`
@@ -2722,19 +2731,20 @@
         <span class="volume-chart-legend-dot" style="background:${PHASE_COLORS[phase] || 'var(--color-text-muted)'}"></span>${phase}
       </span>
     `).join('');
-    // Only appears once at least one week has actually started — otherwise
-    // the legend would explain a color nowhere in the chart yet.
-    const actualLegend = rows.some(r => r.status !== 'future')
-      ? `<span class="volume-chart-legend-item"><span class="volume-chart-legend-dot volume-chart-legend-dot-actual"></span>Sudah dijalani (Strava)</span>`
-      : '';
-
+    // No separate legend entry for the done/remainder brightness split —
+    // "done" already borrows whichever phase color the week it's in uses
+    // (see the comment above the bar-building block), so the phase
+    // legend above already names its hue; the bright-vs-dim distinction
+    // itself is legible enough on the bars directly (and spelled out in
+    // words in each bar's own `title`) without a third pair of dots
+    // competing for space here too.
     volumeChart.innerHTML = `
       <div class="pace-zone-header">
         <span class="pace-zone-title">${icon('trend')} Volume Mingguan (km)</span>
         <span class="pace-zone-source">Peak ${peakWeek.totalKm} km di minggu ${peakWeek.weekNumber}${currentNote}</span>
       </div>
       <div class="table-scroll"><div class="volume-chart-bars">${cols}</div></div>
-      <div class="volume-chart-legend">${legend}${actualLegend}</div>
+      <div class="volume-chart-legend">${legend}</div>
     `;
   }
 

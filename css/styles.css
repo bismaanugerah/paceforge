@@ -15,22 +15,6 @@
      meaning "the app did this for you" at a glance. */
   --color-accent: #4fd6b5;
   --color-accent-light: rgba(79, 214, 181, 0.14);
-  /* Reserved for exactly one thing: real km actually logged on Strava
-     against a plan target, in the "Volume Mingguan" chart's stacked-bar
-     "done" zone (see renderVolumeChart in js/app.js and .volume-chart-done
-     below). Deliberately its own hue rather than --color-accent above —
-     PHASE_COLORS already paints the Build phase's own bar in that same
-     teal, so an "actual" overlay in the same color would vanish into a
-     Build week exactly when checking progress on it matters most. A
-     saturated electric blue reads as "measured/real" against this app's
-     otherwise warm exertion palette (greens, ambers, oranges, reds) and
-     is bright enough on --color-bg to carry the glow in the rule below —
-     the "lebih nyala" a flat, unlit bar of the same hue would not give.
-     Print/light-mode media queries redeclare its blue too dark to see on
-     white without redeclaring the glow shadow (kept dark-only — a glow is
-     a screen effect, not something print media benefits from). */
-  --color-progress: #2dd4ff;
-  --color-progress-glow: rgba(45, 212, 255, 0.55);
   /* Formerly one-off hex values inlined into .form-error/.form-warning —
      pulled up here so they sit alongside the rest of the palette instead
      of being the only colors in the file that don't go through a token. */
@@ -1055,10 +1039,11 @@ textarea.has-error:focus {
 }
 /* The logged-so-far half of an "actual/plan" label — see
    .volume-chart-value-actual's counterpart, .volume-chart-done, below.
-   Bright and a touch heavier than the plan figure beside it: this is the
-   number that changes as the week goes on, so it's the one worth the
-   runner's eye landing on first. */
-.volume-chart-value-actual { color: var(--color-progress); font-weight: 700; }
+   Heavier than the plan figure beside it: this is the number that changes
+   as the week goes on, so it's the one worth the runner's eye landing on
+   first. Color is set inline per instance (that week's own phase color,
+   matching its bar and the phase legend), not fixed here. */
+.volume-chart-value-actual { font-weight: 700; }
 .volume-chart-value-sep { opacity: 0.5; padding: 0 1px; }
 /* Fixed-height track the bar sits at the bottom of — a real pixel height
    here (set inline per bar in JS) instead of a percentage of some scaled
@@ -1126,13 +1111,21 @@ textarea.has-error:focus {
    color — a flat fill in the same hue looked like just another bar. Its
    own rounded top corners only apply via .is-full below, when there's no
    dim remainder sitting on top of it to own that corner instead. */
+/* background and box-shadow are set inline per instance in JS — this
+   week's own phase color plus a glow tinted to match it via color-mix(),
+   not a fixed hue here (see renderVolumeChart's own comment on why: the
+   done zone borrows whichever phase color the week is already in, rather
+   than a separate "actual" color, so it reads as more of the same phase
+   instead of an unrelated measurement). Opacity is the one thing that IS
+   fixed — full brightness, the same weight a past week's own remainder
+   carries (see .is-past below), so "really happened" always reads at
+   this one consistent brightness regardless of which phase it's in. */
 .volume-chart-done {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  background: var(--color-progress);
-  box-shadow: 0 0 9px 1px var(--color-progress-glow), 0 0 2px var(--color-progress-glow);
+  opacity: 0.82;
   transition: height 0.2s ease;
 }
 .volume-chart-done.is-full { border-radius: 4px 4px 0 0; }
@@ -1152,10 +1145,9 @@ textarea.has-error:focus {
   color: var(--color-primary-dark);
   font-weight: 700;
 }
-/* Keeps the actual figure's own color legible against the current-week
-   highlight above, which would otherwise repaint it the same indigo as
-   every other label on that column. */
-.volume-chart-col.is-current .volume-chart-value-actual { color: var(--color-progress); }
+/* .volume-chart-value-actual carries its own inline color (that week's
+   phase color) regardless of the rule above — inline style already wins
+   over it, no override needed to keep it legible against the ring. */
 .volume-chart-legend {
   display: flex;
   flex-wrap: wrap;
@@ -1166,10 +1158,6 @@ textarea.has-error:focus {
 }
 .volume-chart-legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .volume-chart-legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
-.volume-chart-legend-dot-actual {
-  background: var(--color-progress);
-  box-shadow: 0 0 4px 1px var(--color-progress-glow);
-}
 
 /* #blockHistoryChart itself already gets the boxed "reference card" look
    for free by reusing the .volume-chart/.volume-chart-bars/.volume-chart-col
@@ -1496,18 +1484,16 @@ summary.week-header:hover { background: var(--color-surface); }
     --color-primary-light: #e8eef8;
     --color-accent: #1f6f5c;
     --color-accent-light: #e4f2ee;
-    /* The screen value is a light, glowing cyan meant to pop off a near-
-       black background — unreadable at that lightness on the white page
-       printing switches to, so it gets the same darkening every other
-       token above gets for the same reason. */
-    --color-progress: #0e7fa8;
   }
   .site-header, .site-footer, #formSection, .no-print { display: none !important; }
   body { background: #fff; color: #1c2230; }
   /* A glow is a screen effect sized for a dark background; on white paper
-     it just blurs the bar's edge. The bar itself still prints in the
-     darkened --color-progress above. */
-  .volume-chart-done, .volume-chart-legend-dot-actual { box-shadow: none; }
+     it just blurs the bar's edge. .volume-chart-done's glow is set inline
+     (color-mixed from that week's own phase color — see renderVolumeChart)
+     so a plain class rule can't reach it; !important is the one place in
+     this file that's the right tool, specifically to beat an inline style
+     rather than to fight this stylesheet's own cascade. */
+  .volume-chart-done { box-shadow: none !important; }
   .card { box-shadow: none; padding: 0; border: none; }
   .week-block { break-inside: avoid; }
   /* The accordion (see .week-block[open] above) is a screen-only reading
